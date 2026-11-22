@@ -13,8 +13,7 @@ fun userVisibleToast(message: String?): String? {
 
 fun userVisibleFailure(error: Throwable, fallback: String): String? {
     if (isCancellation(error)) return null
-    val text = error.message?.takeIf { it.isNotBlank() && !isCancellationText(it) } ?: fallback
-    return userVisibleToast(text)
+    return userVisibleToast(friendlyFileError(error, fallback))
 }
 
 private fun isCancellation(error: Throwable?): Boolean {
@@ -35,3 +34,18 @@ internal fun isCancellationText(text: String?): Boolean {
         lower.contains("cancellationexception") ||
         lower.contains("standalonecoroutine")
 }
+
+/** A toast with an undo action stays long enough to reach it. */
+private const val TOAST_UNDO_MS = 8_000L
+
+/**
+ * How long a toast stays: 4 s plus 40 ms per character (so longer errors can be read), at most 12 s.
+ * The ViewModel clears the message flow after this, so a toast never outlives its screen.
+ */
+fun toastLifetimeMs(message: String, hasAction: Boolean = false): Long {
+    if (hasAction) return TOAST_UNDO_MS
+    return (4_000L + message.length * 40L).coerceAtMost(12_000L)
+}
+
+/** A leftover toast is dropped when the user switches screens, unless it was raised just now. */
+fun toastSurvivesNavigation(ageMs: Long): Boolean = ageMs < 1_500L

@@ -61,6 +61,9 @@ interface VaultIo {
     fun walkFiles(): List<VaultEntry>
     fun mkdir(path: String)
 
+    /** An existing file that is flagged read-only (chmod 444): a save must not replace it silently. */
+    fun isReadOnly(path: String): Boolean = false
+
     /**
      * The children of a directory entry that [list] returned. A provider that addresses documents by
      * id (SAF) uses the entry's [VaultEntry.handle] and skips the path lookup; the default reads the path.
@@ -239,6 +242,10 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         }
         val famdPath = if (note.path.endsWith(FAMD_EXTENSION)) note.path else companionPath(note.path, FAMD_EXTENSION)
         val historyPath = if (note.kind == NoteKind.PDF || note.path.endsWith(FAMD_EXTENSION)) famdPath else note.path
+        // Desktop parity: the temp-file replace would bypass a read-only flag, so refuse instead.
+        if (io.isReadOnly(famdPath) || (note.kind == NoteKind.MARKDOWN && io.isReadOnly(note.path))) {
+            throw java.nio.file.ReadOnlyFileSystemException()
+        }
         val previous = io.read(historyPath)?.decodeToString()
         val historyCompanion = if (historyPath == famdPath) null else io.read(famdPath)?.decodeToString()
         if (previous != null || !historyCompanion.isNullOrBlank()) {
@@ -853,6 +860,11 @@ class DirectoryVault(val root: Path) : VaultIo {
         } catch (_: AtomicMoveNotSupportedException) {
             Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING)
         }
+    }
+
+    override fun isReadOnly(path: String): Boolean {
+        val target = resolve(path)
+        return Files.isRegularFile(target) && !Files.isWritable(target)
     }
 
     override fun delete(path: String) {

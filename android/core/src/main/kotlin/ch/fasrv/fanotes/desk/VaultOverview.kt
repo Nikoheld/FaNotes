@@ -140,9 +140,13 @@ private fun collectFolderRows(
     }
 }
 
-/** Files in the sidebar tree, including notes inside folders. PDFs count too. */
+/** Notes in the sidebar tree, including notes inside folders. PDFs and story folders are not notes. */
 fun sidebarFileCount(nodes: List<VaultNode>): Int = nodes.sumOf { node ->
-    if (node.kind == NoteKind.FOLDER) sidebarFileCount(node.children) else 1
+    when (node.kind) {
+        NoteKind.FOLDER -> sidebarFileCount(node.children)
+        NoteKind.MARKDOWN -> 1
+        else -> 0
+    }
 }
 
 /** Desktop sidebar footer: „1 Notiz“ or „N Notizen“. */

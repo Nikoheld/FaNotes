@@ -35,7 +35,7 @@ class VaultOverviewTest {
         )
         val picture = vaultOverview(tree, mapOf("Mathe" to "#2a6f97"))
         assertEquals(4, picture.noteCount)
-        assertEquals(5, sidebarFileCount(tree))
+        assertEquals(4, sidebarFileCount(tree)) // the PDF is not a note
         assertEquals("5 Notizen", sidebarFileLabel(5))
         assertEquals("1 Notiz", sidebarFileLabel(1))
         assertEquals("0 Notizen", sidebarFileLabel(0))

@@ -178,8 +178,9 @@ private data class Secrets(
  * refused (guard) body is never sent again, a tombstone is recreated once, and a
  * newer live entry is applied like a pulled change.
  *
- * File-table updates run on one engine thread. Downloads and uploads inside a
- * cycle are sequential so a revision cursor cannot move past a deferred note.
+ * File-table updates run on one engine thread. Downloads inside a cycle are
+ * sequential so a revision cursor cannot move past a deferred note. Uploads run
+ * in parallel (see `runLimited`): each touches only its own file entry.
  */
 class SyncEngine(
     private val api: SyncApi,
@@ -838,7 +839,8 @@ class SyncEngine(
         var conflicts = 0
         var done = 0
         val total = changed.size + deleted.size
-        for (entry in changed) {
+        // Uploads run in parallel (bounded count and byte budget) like desktop; the progress is live.
+        runLimited(changed, PUSH_CONCURRENCY, PUSH_BYTE_BUDGET, { it.size }) { entry ->
             try {
                 when (uploadPath(entry, table, syncKeys, active, currentHost)) {
                     "uploaded" -> uploads += 1
@@ -851,7 +853,7 @@ class SyncEngine(
                 diagnostic("sync upload skipped depth=${error.depth} nodes=${error.nodes} deepCopyDepth=0")
             } finally {
                 done += 1
-                publish(state.value.copy(progress = SyncProgress("push", done, total)))
+                publish(state.value.copy(pendingLocal = (total - done).coerceAtLeast(0), progress = SyncProgress("push", done, total)))
             }
         }
         for (path in deleted) {
