@@ -71,6 +71,8 @@ function createVaultWatcher(options) {
   let healthy = false
   let active = true
   let armedMs = 0
+  // Bumped whenever the caller reports the tree it handed out; a scan that started before is stale.
+  let epoch = 0
 
   // 20 s only while fs.watch is missing or failing; healthy watchers are only a hint, so back off.
   const wantedInterval = () => (healthy ? Math.max(healthyIntervalMs, intervalMs) : intervalMs)
@@ -124,7 +126,10 @@ function createVaultWatcher(options) {
     try {
       syncWatchers()
       armInterval()
+      const startedAt = epoch
       const next = flattenTree(await scan())
+      // The renderer was given a newer tree while this walk ran: compare against that one on the next pass.
+      if (epoch !== startedAt) { again = true; return null }
       if (signature === null) { signature = next; return null }
       const diff = diffSignatures(signature, next)
       signature = next
@@ -166,6 +171,17 @@ function createVaultWatcher(options) {
       schedule()
     },
     currentIntervalMs: () => (interval ? armedMs : 0),
+    /**
+     * The tree the renderer now shows (a full getTree after an own change such as trash, rename or import).
+     * The next scan reports whatever differs from it, so a change that undoes or follows an own change
+     * (a file restored from the trash, moved back) is never swallowed as "unchanged since the last walk".
+     */
+    adopt(entries) {
+      if (stopped) return
+      signature = flattenTree(entries)
+      epoch += 1
+      schedule()
+    },
     /** Window focus or another cue: look soon. */
     nudge: schedule,
     rescan,

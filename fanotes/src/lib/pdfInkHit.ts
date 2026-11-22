@@ -2,6 +2,8 @@
 export const PDF_INKING_CLASS = 'is-inking'
 /** Top editor-bar slot for PDF page/zoom/search chrome (not an overlay on the page). */
 export const PDF_TOOLBAR_SLOT_ID = 'fanotes-pdf-toolbar-slot'
+/** The second pane of a split view carries its own PDF bar: the main toolbar slot exists only for the main pane. */
+export const SPLIT_PDF_TOOLBAR_SLOT_ID = 'fanotes-split-pdf-toolbar-slot'
 /** Top editor-bar slot for docked ink tools, including Piktogramme on PDF+Stift. */
 export const INK_TOOLBAR_SLOT_ID = 'fanotes-ink-toolbar-slot'
 

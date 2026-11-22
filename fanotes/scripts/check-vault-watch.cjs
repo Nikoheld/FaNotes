@@ -84,6 +84,14 @@ async function main() {
     fs.unlinkSync(path.join(dir, 'one.md'))
     await watcher.rescan()
     assert.deepEqual(events.at(-1).removed, ['one.md'])
+    // The renderer was handed a tree without a file that has not yet been seen leaving (own trash): when the file
+    // comes back before the next walk, it is reported as added instead of vanishing as "unchanged".
+    fs.writeFileSync(path.join(dir, 'back.md'), 'restore me')
+    await watcher.rescan()
+    const before = events.length
+    watcher.adopt(await scan().then((entries) => entries.filter((entry) => entry.name !== 'back.md')))
+    await watcher.rescan()
+    assert.deepEqual(events.slice(before).at(-1), { added: ['back.md'], removed: [], changed: [] }, 'a file the renderer does not show is reported even though the last walk saw it')
     watcher.stop()
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })

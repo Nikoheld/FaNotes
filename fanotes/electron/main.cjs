@@ -4256,6 +4256,8 @@ function registerIpcHandlers() {
     // NAS/disk traversal. Refreshing it must never delay the live tree result.
     setImmediate(() => { void writeTreeCache(root, entries) })
     ensureVaultWatch(root)
+    // What the renderer shows is the watcher's baseline: a later change back to the earlier state is then a change.
+    if (vaultWatcherRoot === root) vaultWatcher?.adopt(entries)
     return entries
   })
 
