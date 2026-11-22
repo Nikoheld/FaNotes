@@ -34,9 +34,11 @@ export const connectCdp = async (port, { timeoutMs = 60_000, alive = () => true 
   if (!socket) throw new Error('Electron did not open a debugging endpoint in time')
   let sequence = 0
   const pending = new Map()
+  const listeners = new Set()
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data)
-    const callback = message.id && pending.get(message.id)
+    if (!message.id) { for (const listener of listeners) listener(message); return }
+    const callback = pending.get(message.id)
     if (!callback) return
     pending.delete(message.id)
     if (message.error) callback.reject(new Error(message.error.message))
@@ -49,6 +51,8 @@ export const connectCdp = async (port, { timeoutMs = 60_000, alive = () => true 
   })
   return {
     kind: 'cdp',
+    send,
+    onMessage: (listener) => listeners.add(listener),
     async evaluate(expression) {
       const result = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
       if (result.exceptionDetails) throw new Error(`page: ${result.exceptionDetails.exception?.description || result.exceptionDetails.text}`)

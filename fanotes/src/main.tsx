@@ -57,6 +57,17 @@ const desktopBootstrap = window.fanotes?.bootstrap()
 // the localized fatal screen, while the browser never reports a transient
 // unhandled rejection.
 void desktopBootstrap?.catch(() => undefined)
+// The editor chunk (CodeMirror and the editor's helpers) sits on the critical path of
+// nearly every start, and App only asks for it after its first render. The config
+// answer names the note that is about to open, so the download, parse and evaluation
+// of the chunk overlap with the English catalog, the first React render and the tree
+// IPC instead of following them. PDFs, stories and the first-run setup skip it.
+void desktopBootstrap?.then((data) => {
+  if (data.onboardingRequired) return
+  const last = data.settings?.lastOpenNotePath ?? ''
+  if (/\.(?:pdf|story)$/iu.test(last)) return
+  void import('./components/MarkdownEditor').catch(() => undefined)
+}).catch(() => undefined)
 
 void initializeUiLocalization().then(() => {
   if (window.fanotes) {
