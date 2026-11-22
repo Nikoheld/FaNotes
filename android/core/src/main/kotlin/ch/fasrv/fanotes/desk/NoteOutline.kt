@@ -166,9 +166,11 @@ fun foldMarkerGlyphs(source: String, foldedLines: Set<Int>): List<String> {
     val headings = parseNoteOutline(text)
     val byLine = HashMap<Int, Int>(headings.size * 2)
     headings.forEachIndexed { index, heading -> byLine[heading.line] = index }
-    val lineStarts = ArrayList<Int>()
-    lineStarts += 0
-    for (index in text.indices) if (text[index] == '\n') lineStarts += index + 1
+    var lineCount = 1
+    for (index in text.indices) if (text[index] == '\n') lineCount += 1
+    val lineStarts = IntArray(lineCount)
+    var lineSlot = 1
+    for (index in text.indices) if (text[index] == '\n') lineStarts[lineSlot++] = index + 1
     fun hasBody(heading: NoteOutlineHeading, position: Int): Boolean {
         val lineStart = lineStarts[heading.line - 1]
         val lineEnd = if (heading.line < lineStarts.size) lineStarts[heading.line] - 1 else text.length
@@ -401,4 +403,5 @@ private fun hiddenMask(text: String, foldedLines: Set<Int>): BooleanArray {
     return hidden
 }
 
-private fun normalizeNewlines(markdown: String) = markdown.replace("\r\n", "\n").replace('\r', '\n')
+private fun normalizeNewlines(markdown: String) =
+    if (markdown.indexOf('\r') < 0) markdown else markdown.replace("\r\n", "\n").replace('\r', '\n')

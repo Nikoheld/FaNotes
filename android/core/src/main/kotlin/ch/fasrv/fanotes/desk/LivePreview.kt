@@ -639,7 +639,7 @@ fun toggleTaskMarker(text: String, offset: Int): String? {
 
 fun findDetailsBlocks(text: String): List<DetailsBlock> {
     // Cheap pre-check: most notes have no details block, and the line scan below is a regex per line.
-    if (!text.contains("<details", ignoreCase = true)) return emptyList()
+    if (!text.contains("<details") && !text.contains("<Details") && !text.contains("<DETAILS")) return emptyList()
     val lines = documentLines(text)
     val blocks = ArrayList<DetailsBlock>()
     var index = 0
