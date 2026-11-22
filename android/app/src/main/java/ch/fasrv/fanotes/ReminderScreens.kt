@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import android.Manifest
 import android.app.Activity
 import android.content.Context
@@ -23,7 +24,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -119,7 +119,7 @@ fun ReminderSettingsCard(model: FaNotesViewModel, modifier: Modifier = Modifier)
                         FilterChip(
                             selected = settings.calendarLeadMinutes == minutes,
                             onClick = { scheduler.update { it.copy(calendarLeadMinutes = minutes) } },
-                            label = { Text(if (minutes == 60) "1 h" else "$minutes min", fontSize = 14.sp) },
+                            label = { Text(ui(if (minutes == 60) "1 h" else "$minutes min"), fontSize = 14.sp) },
                             modifier = Modifier.heightIn(min = Target),
                         )
                     }

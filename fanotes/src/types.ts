@@ -182,6 +182,8 @@ export type AppSettings = {
   /** Desktop: a Scheduled Task / systemd user timer installs updates while FaNotes is closed. */
   backgroundUpdates: boolean
   updateChannel: 'stable' | 'beta' | 'nightly'
+  /** Version that ran the one-time Beta-to-Stable channel migration; empty until then. Never edited by the UI. */
+  channelAutoStableDoneAt: string
   /** 0 keeps Chromium/V8's normal renderer heap budget. */
   memoryBudgetMb: number
   /** 0 selects a conservative hardware-adaptive TrOCR thread count. */
@@ -304,6 +306,12 @@ export type UpdateState = {
   justUpdated?: { from: string | null; to: string; at: string | null } | null
   /** A version whose install was rolled back; it is not installed automatically again. */
   failedInstallVersion?: string | null
+  /** Set once after an install failed and the previous version was restored. */
+  rolledBack?: { version: string; reason: string; message: string; at: string | null } | null
+  /** Which step failed while status is 'error'. */
+  failedPhase?: 'check' | 'download' | null
+  /** The user chose "install when FaNotes closes" for this session. */
+  installOnQuitRequested?: boolean
   background?: BackgroundUpdateInfo | null
 }
 
@@ -850,6 +858,8 @@ export type FaNotesApi = {
   checkForUpdates: () => Promise<UpdateState>
   downloadUpdate: () => Promise<UpdateState>
   installUpdate: () => Promise<UpdateState>
+  /** Desktop only: install the verified update when FaNotes closes, even with automatic installs off. */
+  installUpdateOnQuit?: (requested?: boolean) => Promise<UpdateState>
   onUpdateState: (callback: (state: UpdateState) => void) => () => void
   revealInFolder: (relativePath: string) => Promise<void>
   openExternal: (url: string) => Promise<void>

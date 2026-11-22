@@ -174,6 +174,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -1400,13 +1402,70 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     /** [typed] false for writes the app makes itself (the task timer): they are no keystroke in the page statistics. */
     fun updateMarkdown(value: String, typed: Boolean = true) {
         val now = System.currentTimeMillis()
+        val large = ch.fasrv.fanotes.desk.isLargeNote(value.length)
         if (typed) {
-            rememberActivity { ch.fasrv.fanotes.desk.recordKeystroke(it, now, lastTypedAtMs) }
+            if (large) {
+                // Large note: keystroke statistics are folded into the page payload after a typing pause.
+                pendingKeystrokes.add(now to lastTypedAtMs)
+                schedulePendingKeystrokes()
+            } else {
+                flushPendingKeystrokes()
+                rememberActivity { ch.fasrv.fanotes.desk.recordKeystroke(it, now, lastTypedAtMs) }
+            }
             lastTypedAtMs = now
         }
         markdown.value = value
-        open.value?.path?.let { rememberTags(it, value) }
+        // Tags of a large note follow the typing pause (settledMarkdown collector below).
+        if (!large) open.value?.path?.let { rememberTags(it, value) }
         noteChanged()
+    }
+
+    private val pendingKeystrokes = ArrayList<Pair<Long, Long?>>()
+    private var keystrokeJob: Job? = null
+
+    private fun schedulePendingKeystrokes() {
+        keystrokeJob?.cancel()
+        keystrokeJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(ch.fasrv.fanotes.desk.LARGE_NOTE_SETTLE_MS)
+            flushPendingKeystrokes()
+        }
+    }
+
+    /** Applies keystrokes counted while a large note was being typed in; one payload copy for the whole burst. */
+    private fun flushPendingKeystrokes() {
+        keystrokeJob?.cancel()
+        if (pendingKeystrokes.isEmpty()) return
+        val batch = pendingKeystrokes.toList()
+        pendingKeystrokes.clear()
+        rememberActivity { first ->
+            batch.fold(first) { stats, (at, last) -> ch.fasrv.fanotes.desk.recordKeystroke(stats, at, last) }
+        }
+    }
+
+    /**
+     * The note text for work that needs the whole text (word count, language, tag list, PDF marks): follows
+     * [markdown] at once for normal notes and after a typing pause for large ones.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val settledMarkdown: StateFlow<String> = markdown
+        .transformLatest { text ->
+            if (ch.fasrv.fanotes.desk.isLargeNote(text.length)) kotlinx.coroutines.delay(ch.fasrv.fanotes.desk.LARGE_NOTE_SETTLE_MS)
+            emit(text)
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    init {
+        viewModelScope.launch {
+            settledMarkdown.collect { text ->
+                if (!ch.fasrv.fanotes.desk.isLargeNote(text.length)) return@collect
+                val path = open.value?.path ?: return@collect
+                val tags = withContext(Dispatchers.Default) { parseNoteTags(text) }
+                if (open.value?.path == path && markdown.value === text) {
+                    tagIndex.value = if (tags.isEmpty()) tagIndex.value - path else tagIndex.value + (path to tags)
+                }
+                flushPendingKeystrokes()
+            }
+        }
     }
 
     fun recordFinishedStroke(stroke: ch.fasrv.fanotes.ink.InkStroke) {
@@ -1529,6 +1588,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun saveNow() {
         saveMutex.withLock {
             if (!dirty) return
+            flushPendingKeystrokes()
             while (true) {
                 val note = open.value?.let(::withDwell) ?: return
                 savePhase.value = "saving"
@@ -3439,6 +3499,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val clearLinkRequest = MutableStateFlow(0)
     val placeLinkRequest = MutableStateFlow(0)
     val installedVersion: String = installedAppVersion(getApplication())
+
+    init {
+        ch.fasrv.fanotes.desk.migrateBetaToStable(deskSettings.value, installedVersion)?.let { migrated ->
+            deskSettings.value = migrated
+            graph.writeDesk(migrated)
+        }
+    }
     val updateLabel = MutableStateFlow("")
     val updateOffer = MutableStateFlow<ch.fasrv.fanotes.desk.AndroidUpdate?>(null)
     val updateBusy = MutableStateFlow(false)
@@ -5402,7 +5469,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun wordCountNow() = ch.fasrv.fanotes.desk.statusWordCount(markdown.value)
+    fun wordCountNow() = ch.fasrv.fanotes.desk.statusWordCount(settledMarkdown.value)
     fun linksNow() = wikiTargets(markdown.value)
 
     fun applyProfile(profile: String, names: Set<String>? = null) {

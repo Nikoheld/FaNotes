@@ -10925,7 +10925,6 @@ const drawingBoardStyles = `
 .lw-drafting-layer.is-translucent .lw-drafting-body{fill:rgba(226,233,244,.62)}
 .lw-drafting-tool.is-pinned .lw-drafting-body{cursor:default}
 .lw-drafting-window{fill:#f7f9fc;stroke:#5b6578;stroke-width:.8;pointer-events:none}
-.lw-drafting-arm{fill:#cfd6e2;stroke:#2a3348;stroke-width:calc(1.1px * var(--lw-draft-chrome));cursor:grab;pointer-events:auto}
 .lw-drafting-edge{stroke:#1e6fd6;stroke-width:calc(2.2px * var(--lw-draft-chrome));stroke-linecap:round;pointer-events:none}
 .lw-drafting-tick{stroke:#2a3348;stroke-width:calc(.8px * var(--lw-draft-chrome));pointer-events:none}
 .lw-drafting-tick.is-major{stroke:#151a24;stroke-width:calc(1.2px * var(--lw-draft-chrome))}
@@ -10949,11 +10948,36 @@ const drawingBoardStyles = `
 .lw-drafting-compass-ghost{fill:none;stroke:#1e6fd6;stroke-width:calc(1.35px * var(--lw-draft-chrome));stroke-dasharray:5 4;opacity:.5;pointer-events:none}
 .lw-drafting-centre-mark{fill:none;stroke:#1e6fd6;stroke-width:calc(1.2px * var(--lw-draft-chrome));opacity:.7;pointer-events:none}
 .lw-drafting-compass-arc{fill:none;stroke:#1ea86a;stroke-width:calc(2.6px * var(--lw-draft-chrome));stroke-linecap:round;pointer-events:none}
-.lw-drafting-span{stroke:rgba(30,111,214,.35);stroke-width:calc(1.1px * var(--lw-draft-chrome));stroke-dasharray:3 3;pointer-events:none}
-.lw-drafting-needle{fill:none;stroke:#1a1f2a;stroke-width:1.6;cursor:grab;pointer-events:auto}
-.lw-drafting-needle-dot{fill:#111;pointer-events:none}
-.lw-drafting-radius{fill:#f3c14e;stroke:#fff;stroke-width:1.5;cursor:ew-resize;pointer-events:auto}
-.lw-drafting-draw{fill:#1ea86a;stroke:#fff;stroke-width:1.6;cursor:alias;pointer-events:auto}
+.lw-drafting-compass-arc.is-halo{stroke:#fff;stroke-width:calc(6px * var(--lw-draft-chrome));opacity:.85}
+.lw-drafting-compass-ray{stroke:#1ea86a;stroke-width:calc(1px * var(--lw-draft-chrome));stroke-dasharray:2 3;opacity:.7;pointer-events:none}
+.lw-drafting-compass-start{fill:#fff;stroke:#1ea86a;stroke-width:1.6;pointer-events:none}
+.lw-compass-body{--c-edge:#2a3348;--c-steel:#d4dbe7;--c-steel-dark:#7c879b;--c-sheen:rgba(255,255,255,.75)}
+.lw-compass-body path,.lw-compass-body circle.lw-compass-hinge{stroke:var(--c-edge);stroke-linejoin:round;pointer-events:none}
+.lw-compass-steel{fill:var(--c-steel)}
+.lw-compass-steel-dark{fill:var(--c-steel-dark)}
+.lw-compass-clamp{fill:#aab4c6}
+.lw-compass-wood{fill:#e6c394}
+.lw-compass-lead{fill:#1a1f2a}
+.lw-compass-sheen{stroke:var(--c-sheen);stroke-linecap:round;pointer-events:none}
+.lw-compass-span{stroke:rgba(30,111,214,.4);stroke-width:calc(1.1px * var(--lw-draft-chrome));stroke-dasharray:3 3;pointer-events:none}
+.lw-compass-span-tick{stroke:rgba(30,111,214,.55);stroke-width:calc(.9px * var(--lw-draft-chrome));pointer-events:none}
+.lw-compass-stem{stroke:var(--c-edge);stroke-linecap:round;pointer-events:none}
+.lw-compass-hinge{fill:#e8edf4;stroke-width:1.2}
+.lw-compass-hinge-dot{fill:var(--c-edge);pointer-events:none}
+.lw-compass-turn-icon{fill:none!important;stroke:#fff!important;stroke-width:1.5;stroke-linecap:round}
+.lw-compass-needle-ring{fill:rgba(255,255,255,.55);stroke:#1a1f2a;stroke-width:1.4;pointer-events:none}
+.lw-compass-needle-dot{fill:#1a1f2a;pointer-events:none}
+.lw-compass-lead-ring{fill:rgba(30,168,106,.18);stroke:#1ea86a;stroke-width:2;pointer-events:none}
+.lw-compass-lead-dot{fill:#1a1f2a;pointer-events:none}
+.lw-compass-grab{stroke:transparent;stroke-linecap:round;cursor:grab;pointer-events:stroke}
+.lw-drafting-tool.is-pinned .lw-compass-grab{cursor:default}
+.lw-compass-hit{fill:transparent;stroke:none;pointer-events:all;cursor:grab}
+.lw-compass-body .lw-drafting-rotate~.lw-compass-hit{cursor:alias}
+.lw-compass-readout{cursor:ew-resize;pointer-events:auto}
+.lw-compass-readout .lw-compass-hit{cursor:ew-resize}
+.lw-compass-chip{fill:#f3c14e;stroke:#fff;stroke-width:1.5;filter:drop-shadow(0 1px 1.5px rgba(21,32,58,.35))}
+.lw-compass-chip-text{fill:#1a1f2a;font:700 12px/1 var(--ui-font,system-ui);text-anchor:middle;font-variant-numeric:tabular-nums;pointer-events:none}
+.lw-drafting-action .lw-compass-hit{cursor:pointer}
 .lw-drafting-action{cursor:pointer;pointer-events:auto}
 .lw-drafting-action-bg{fill:#3a6ee8;stroke:#fff;stroke-width:1.2}
 .lw-drafting-action.is-locked .lw-drafting-action-bg{fill:#c45b2d}

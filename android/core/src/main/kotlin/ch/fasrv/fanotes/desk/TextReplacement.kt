@@ -10,15 +10,10 @@ data class TextReplacement(val from: Int, val to: Int, val insert: String)
 
 fun minimalReplacement(current: String, next: String): TextReplacement {
     val limit = minOf(current.length, next.length)
-    var prefix = 0
-    while (prefix < limit && current[prefix] == next[prefix]) prefix += 1
+    var prefix = commonPrefixLength(current, next, limit)
     if (prefix > 0 && prefix < limit && current[prefix].isLowSurrogate()) prefix -= 1
-    var suffix = 0
     val suffixLimit = limit - prefix
-    while (
-        suffix < suffixLimit &&
-        current[current.length - 1 - suffix] == next[next.length - 1 - suffix]
-    ) suffix += 1
+    var suffix = commonSuffixLength(current, next, suffixLimit)
     if (suffix > 0 && suffix < suffixLimit && current[current.length - suffix].isHighSurrogate()) suffix -= 1
     return TextReplacement(prefix, current.length - suffix, next.substring(prefix, next.length - suffix))
 }

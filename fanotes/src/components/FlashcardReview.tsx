@@ -1,3 +1,4 @@
+import { useModalFocus } from '../lib/useModalFocus'
 import { X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { bindHandGestures } from '../../../src/lib/handGestures'
@@ -56,6 +57,7 @@ export function FlashcardReview({
   const [revealed, setRevealed] = useState(false)
   const [later, setLater] = useState<string[]>([])
   const dialogRef = useRef<HTMLElement>(null)
+  useModalFocus(dialogRef)
   const cards = useMemo(() => cardsFromMarkdown(source), [source])
   const due = useMemo(() => dueCards(cards), [cards])
   const queue = useMemo(() => reviewQueue(due, later), [due, later])

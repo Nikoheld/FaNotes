@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -18,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -571,7 +571,7 @@ private fun ModTool(data: ModData, onChange: (CryptoData) -> Unit) {
         SyncField("mb", data.b, if (data.op == ModOp.POWER) "b (Exponent)" else "b", Modifier.weight(1f), numeric = true) { onChange(data.copy(b = digitsOnly(it))) }
         SyncField("mm", data.m, "m (Modulus)", Modifier.weight(1f), numeric = true) { onChange(data.copy(m = digitsOnly(it))) }
     }
-    MOD_RULES.forEach { Text(it, fontFamily = FontFamily.Monospace, fontSize = 13.sp, modifier = Modifier.padding(vertical = 2.dp)) }
+    MOD_RULES.forEach { Text(ui(it), fontFamily = FontFamily.Monospace, fontSize = 13.sp, modifier = Modifier.padding(vertical = 2.dp)) }
     if (data.a.isNotEmpty() && data.b.isNotEmpty() && data.m.isNotEmpty()) {
         val head = if (data.op == ModOp.POWER) "${data.a} hoch ${data.b}" else "${data.a} ${if (data.op == ModOp.TIMES) "·" else "+"} ${data.b}"
         Text("$head mod ${data.m}", fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.padding(vertical = 8.dp))

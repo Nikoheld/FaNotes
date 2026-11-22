@@ -1,3 +1,5 @@
+import { scrubText } from './diagnostics.mjs'
+
 export const SEND_DATA_MIN_INTERVAL_MS = 5 * 60 * 1000
 export const SEND_DATA_MAX_BYTES = 48 * 1024
 export const SEND_DATA_HOST = 'fanotes.fasrv.ch'
@@ -117,6 +119,22 @@ export const collectSendDataNutzerdaten = (input: {
   hasOpenNote: input.hasOpenNote === true,
 })
 
+/**
+ * Log entries leave the device scrubbed: the note id (a vault path) becomes a stable short hash so one
+ * note's events still group, and a message loses paths, quoted note titles, addresses and the IPC
+ * channel prefix. Received logs showed raw vault paths in both places.
+ */
+export const scrubSendDataLog = (raw: unknown): unknown => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
+  const entry = { ...(raw as Record<string, unknown>) }
+  if (typeof entry.noteId === 'string' && entry.noteId) entry.noteId = `n-${sendDataBodyHash(entry.noteId)}`
+  if (typeof entry.message === 'string') {
+    entry.message = scrubText(entry.message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/u, ''), {}, 160)
+  }
+  if (typeof entry.where === 'string') entry.where = entry.where.replace(/[^A-Za-z0-9_.:-]/gu, '').slice(0, 80)
+  return entry
+}
+
 export const buildSendDataPayload = (input: {
   enabled: unknown
   logs?: unknown
@@ -125,7 +143,7 @@ export const buildSendDataPayload = (input: {
   now?: number
 }): { send: false } | { send: true; payload: SendDataPayload } => {
   if (input.enabled !== true) return { send: false }
-  const logs = Array.isArray(input.logs) ? input.logs : []
+  const logs = Array.isArray(input.logs) ? input.logs.map(scrubSendDataLog) : []
   const nutzerdaten = collectSendDataNutzerdaten(
     input.nutzerdaten && typeof input.nutzerdaten === 'object' ? input.nutzerdaten as object : {},
   )

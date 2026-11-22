@@ -94,6 +94,7 @@ const INSTALL_RESULT_FILE = 'install-result.json'
 const MAX_INSTALL_LOG_BYTES = 256 * 1024
 /** Short first poll so a staged update can be adopted before the user settles in. */
 const INITIAL_CHECK_DELAY_MS = 2_500
+const RETRY_DELAYS_MS = [2 * 60_000, 10 * 60_000, 30 * 60_000]
 const DOWNLOAD_TIMEOUT_MS = 45 * 60 * 1000
 const DOWNLOAD_IDLE_MS = 12_000
 const MAX_DOWNLOAD_ATTEMPTS = 200
@@ -159,7 +160,8 @@ function Get-RelaunchArguments {
     } catch { }
   }
   $list += "--fanotes-updated-from=$FromVersion"
-  return @($list | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' })
+  # CommandLineToArgvW rules: backslashes before a quote (or before the closing quote) are doubled.
+  return @($list | ForEach-Object { '"' + (($_ -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"' })
 }
 
 function Write-Log([string]$Message) {
@@ -960,6 +962,17 @@ const desktopEscape = (value) => {
   return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('`', '\\`').replaceAll('$', '\\$')
 }
 
+/** Plain-language reason for a rolled-back install (the helper writes a short code). */
+const describeInstallFailure = (reason) => {
+  switch (reason) {
+    case 'self-test-failed': return 'Die neue Version ließ sich nicht starten.'
+    case 'checksum': case 'staged-missing': return 'Die heruntergeladene Datei war beschädigt oder fehlte.'
+    case 'replace-failed': case 'symlink': return 'Die Programmdatei konnte nicht ersetzt werden.'
+    case 'installer-failed': case 'helper-failed': return 'Der Installationshelfer ist fehlgeschlagen.'
+    default: return 'Die Installation ist fehlgeschlagen.'
+  }
+}
+
 function createUpdateManager({
   app,
   getWindow,
@@ -1021,6 +1034,10 @@ function createUpdateManager({
   let applyingLaunchInstall = false
   /** The version whose last install failed and was rolled back; never retried automatically. */
   let failedInstall = null
+  /** The user asked for "install when FaNotes closes" for this session although the setting is off. */
+  let installOnQuitRequested = false
+  let retryTimer = null
+  let retryCount = 0
   let releaseCache = null
   let state = {
     status: 'idle',
@@ -1038,6 +1055,10 @@ function createUpdateManager({
     installationKind: fullInstallationKind,
     /** Set once after an update was installed (by quit, launch or the background task). */
     justUpdated: null,
+    /** The last install that failed and was rolled back; shown once so the user knows why the old version is back. */
+    rolledBack: null,
+    /** Which step failed when status is 'error', so the UI can offer the right retry. */
+    failedPhase: null,
     background: null,
   }
 
@@ -1054,10 +1075,20 @@ function createUpdateManager({
     }
   }
 
-  const snapshot = () => ({ ...state, releaseNotes: [...state.releaseNotes], failedInstallVersion: failedInstall?.version ?? null, ...settings() })
+  const snapshot = () => ({
+    ...state,
+    releaseNotes: [...state.releaseNotes],
+    failedInstallVersion: failedInstall?.version ?? null,
+    installOnQuitRequested,
+    ...settings(),
+  })
 
   const emit = (patch) => {
     state = { ...state, ...patch }
+    if (state.status !== 'error') {
+      state.failedPhase = null
+      if (state.status === 'up-to-date' || state.status === 'downloaded') retryCount = 0
+    }
     const window = getWindow()
     if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
       window.webContents.send(UPDATE_EVENT, snapshot())
@@ -1205,6 +1236,7 @@ function createUpdateManager({
       await persistState().catch(() => {})
     } else if (result.ok === false && result.version !== currentVersion) {
       failedInstall = { version: result.version, reason: String(result.reason || 'unknown').slice(0, 40), at }
+      if (consume) state = { ...state, rolledBack: { version: result.version, reason: failedInstall.reason, message: describeInstallFailure(failedInstall.reason), at } }
       if (pendingInstall?.version === result.version) pendingInstall = null
       await fsp.rm(path.join(updaterRoot, result.version), { recursive: true, force: true }).catch(() => {})
       await persistState().catch(() => {})
@@ -1490,6 +1522,23 @@ function createUpdateManager({
     }
   }
 
+  /**
+   * A quiet check or download that failed (offline at start, Wi-Fi dropped, a
+   * server hiccup) is tried again soon instead of waiting for the next
+   * six-hour check: after 2, 10 and 30 minutes, then the normal schedule.
+   */
+  const scheduleRetry = (phase) => {
+    if (!started || !supported || !settings().autoCheckUpdates || retryTimer || retryCount >= RETRY_DELAYS_MS.length) return
+    const delay = RETRY_DELAYS_MS[retryCount]
+    retryCount += 1
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      if (!started || state.status !== 'error') return
+      void (phase === 'download' ? download() : check()).catch(() => {})
+    }, delay)
+    retryTimer.unref?.()
+  }
+
   const check = ({ manual = false } = {}) => {
     if (checkPromise) return checkPromise
     checkPromise = (async () => {
@@ -1602,8 +1651,10 @@ function createUpdateManager({
         return next
       } catch (error) {
         const diagnosis = await failUpdate('check', platformConfig?.api, error)
+        if (!manual) scheduleRetry('check')
         return emit({
           status: 'error',
+          failedPhase: 'check',
           error: diagnosis.message,
           block: publicUpdateBlock(diagnosis),
           checkedAt: new Date().toISOString(),
@@ -1615,7 +1666,7 @@ function createUpdateManager({
     return checkPromise
   }
 
-  const downloadTransfer = async (transferInfo, releaseDirectory, accept) => {
+  const downloadTransfer = async (transferInfo, releaseDirectory, accept, allowFreshRetry = true) => {
     const finalPath = path.join(releaseDirectory, transferInfo.fileName)
     const partPath = `${finalPath}.part`
     const existing = await fsp.lstat(finalPath).catch(() => null)
@@ -1632,6 +1683,7 @@ function createUpdateManager({
     let stalls = 0
     let lastError = null
     let finished = false
+    let resumedAny = false
     try {
       while (attempts < MAX_DOWNLOAD_ATTEMPTS && !finished) {
         if (downloadCancelled) {
@@ -1650,7 +1702,10 @@ function createUpdateManager({
             finished = true
             break
           }
-          if (partial.size > 0 && partial.size < transferInfo.sizeBytes) offset = partial.size
+          if (partial.size > 0 && partial.size < transferInfo.sizeBytes) {
+            offset = partial.size
+            resumedAny = true
+          }
           else await fsp.rm(partPath, { force: true })
         } else if (partial) {
           await fsp.rm(partPath, { force: true })
@@ -1770,6 +1825,9 @@ function createUpdateManager({
     if (!info.isFile() || info.size !== transferInfo.sizeBytes) throw new Error('Das Update wurde nicht vollständig heruntergeladen.')
     if (await sha256File(partPath) !== transferInfo.sha256) {
       await fsp.rm(partPath, { force: true })
+      // A resumed partial file may itself have been damaged (earlier crash, full disk):
+      // start over once before giving up, so the user does not have to press retry.
+      if (resumedAny && allowFreshRetry && !downloadCancelled && !downloadTimedOut) return downloadTransfer(transferInfo, releaseDirectory, accept, false)
       throw new Error('Die SHA-256-Prüfung des Downloads ist fehlgeschlagen. Die Datei wurde verworfen.')
     }
     await fsp.rename(partPath, finalPath)
@@ -1879,7 +1937,8 @@ function createUpdateManager({
         } catch (error) {
           downloadedDelta = null
           const diagnosis = await failUpdate('download', packageInfo?.url, error)
-          return emit({ status: 'error', error: diagnosis.message, block: publicUpdateBlock(diagnosis) })
+          if (!downloadCancelled && settings().autoDownloadUpdates) scheduleRetry('download')
+          return emit({ status: 'error', failedPhase: 'download', error: diagnosis.message, block: publicUpdateBlock(diagnosis) })
         }
       } finally {
         locks.releaseWork()
@@ -2101,13 +2160,25 @@ function createUpdateManager({
       throw new Error('Es ist noch kein vollständig geprüftes Update bereit.')
     }
     const installInfo = downloadedDelta?.target ?? manifest.packages[primaryPackage]
-    return installPlan({
-      version: manifest.latestVersion,
-      path: downloadedPath,
-      sha256: installInfo.sha256,
-      sizeBytes: installInfo.sizeBytes,
-      usedDelta: Boolean(downloadedDelta),
-    }, mode)
+    try {
+      return await installPlan({
+        version: manifest.latestVersion,
+        path: downloadedPath,
+        sha256: installInfo.sha256,
+        sizeBytes: installInfo.sizeBytes,
+        usedDelta: Boolean(downloadedDelta),
+      }, mode)
+    } catch (error) {
+      // The old version keeps running; say why the restart did not happen.
+      emit({ error: safeErrorMessage(error) })
+      throw error
+    }
+  }
+
+  /** "Install when FaNotes closes" for this session, even if automatic installs are switched off. */
+  const requestInstallOnQuit = (requested = true) => {
+    installOnQuitRequested = Boolean(requested) && state.status === 'downloaded'
+    return emit({})
   }
 
   /**
@@ -2130,7 +2201,7 @@ function createUpdateManager({
 
   /** Quit path: install what this app or the background run has verified, without a window. */
   const installOnQuit = async () => {
-    if (!supported || installPrepared || !settings().installUpdatesOnQuit) return false
+    if (!supported || installPrepared || !(settings().installUpdatesOnQuit || installOnQuitRequested)) return false
     if (state.status === 'downloaded' && downloadedPath) {
       const next = await prepareInstall({ mode: 'quiet' })
       return next.status === 'installing'
@@ -2157,9 +2228,9 @@ function createUpdateManager({
    * package (or finish a quiet check/download), then hand off to the install
    * helper before the user keeps working on the old binary.
    */
-  const applyPendingInstallOnLaunch = async () => {
+  const applyPendingInstallOnLaunch = async ({ prepare = true } = {}) => {
     if (!supported || !settings().installUpdatesOnQuit || applyingLaunchInstall || installPrepared) {
-      return { installStarted: false, state: snapshot() }
+      return { installStarted: false, ready: false, state: snapshot() }
     }
     applyingLaunchInstall = true
     try {
@@ -2167,17 +2238,19 @@ function createUpdateManager({
       if (next.status !== 'downloaded') {
         next = await check({ manual: false })
       }
-      if (next.status === 'available' && settings().autoDownloadUpdates && next.latestVersion !== failedInstall?.version) {
-        next = await download()
-      }
+      // Only a package that was already verified when this check finished
+      // restarts the app. A download that has just begun (or any retry) never
+      // does: it would interrupt the user minutes into their work, so it is
+      // installed when FaNotes closes instead.
       if (next.status !== 'downloaded' || !downloadedPath) {
-        return { installStarted: false, state: snapshot() }
+        return { installStarted: false, ready: false, state: snapshot() }
       }
+      if (!prepare) return { installStarted: false, ready: true, state: next }
       next = await prepareInstall({ mode: 'relaunch' })
-      return { installStarted: next.status === 'installing', state: next }
+      return { installStarted: next.status === 'installing', ready: true, state: next }
     } catch (error) {
       logger.warn('Automatische Installation beim Start fehlgeschlagen:', error?.message ?? error)
-      return { installStarted: false, state: emit({ status: 'error', error: safeErrorMessage(error) }) }
+      return { installStarted: false, ready: false, state: emit({ status: 'error', error: safeErrorMessage(error) }) }
     } finally {
       applyingLaunchInstall = false
     }
@@ -2255,6 +2328,8 @@ function createUpdateManager({
     if (intervalTimer) clearInterval(intervalTimer)
     initialTimer = null
     intervalTimer = null
+    if (retryTimer) clearTimeout(retryTimer)
+    retryTimer = null
     if (abortDownload) {
       downloadCancelled = true
       activeDownloadController?.abort()
@@ -2268,6 +2343,7 @@ function createUpdateManager({
     check,
     download,
     prepareInstall,
+    requestInstallOnQuit,
     applyPendingInstallOnLaunch,
     installOnQuit,
     shouldInstallOnQuit,

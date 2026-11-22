@@ -1055,6 +1055,17 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         if (firstTick) onInterceptWheel(event)
         return
       }
+      // A pan after a zoom: settle the camera now, before this wheel scrolls.
+      // Left to the settle timer, the commit (a reflow, an ink re-slice and a
+      // scroll remap) landed in the middle of the pan, and until then the page
+      // scrolled as a stretched compositor scale of the old raster.
+      if (zoomGestureRef.current || pendingFactor !== 1) {
+        if (zoomFrame) {
+          window.cancelAnimationFrame(zoomFrame)
+          flushZoom()
+        }
+        commitZoomGestureRef.current()
+      }
       lastPanWheelAtRef.current = performance.now()
       scheduleRelease()
     }
@@ -1279,7 +1290,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
             <button
               type="button"
               className="paper-view-hud-reset"
-              aria-label="Ansicht zurücksetzen"
+              aria-label={`${Math.round(view.zoom * 100)}%${view.rotation ? ` · ${view.rotation}°` : ''}, Ansicht zurücksetzen`}
               title="Zoom und Drehung zurücksetzen (Strg+0)"
               onClick={resetView}
               disabled={!active}

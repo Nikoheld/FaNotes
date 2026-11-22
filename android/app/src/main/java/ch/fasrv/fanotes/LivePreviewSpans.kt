@@ -10,6 +10,7 @@ import android.graphics.Typeface
 import android.text.Editable
 import android.text.Layout
 import android.text.Spanned
+import android.view.inputmethod.BaseInputConnection
 import android.text.style.BackgroundColorSpan
 import android.text.style.CharacterStyle
 import android.text.style.LeadingMarginSpan
@@ -68,12 +69,22 @@ import ch.fasrv.fanotes.desk.paperAccentReadableArgb
 import ch.fasrv.fanotes.desk.quoteMargins
 import ch.fasrv.fanotes.desk.selectionMatchRanges
 
+/**
+ * The editor's line spacing multiplier. The layout stretches every line, including a line a block span sized to its
+ * picture, by this factor; the block spans ask for the height divided by it so the block is not followed by blank space.
+ */
+internal const val EDITOR_LINE_SPACING_MULT = 1.72f
+
 /** A span the live preview owns, so the next pass can remove only its own marks. */
 interface LivePreviewSpan
 
 /**
  * Paints desktop live-preview marks onto the editor text without changing
  * the characters. The cursor line still shows its Markdown markers.
+ *
+ * With [windows] (character ranges) only spans that touch a window are removed and rebuilt, so a long note
+ * is not restyled from top to bottom on every caret move; text outside the windows keeps the spans it had.
+ * Null styles the whole text.
  */
 fun applyLivePreview(
     editable: Editable,
@@ -84,51 +95,82 @@ fun applyLivePreview(
     focused: Boolean = true,
     images: Map<String, Bitmap> = emptyMap(),
     imageColumnPx: Float = 0f,
+    windows: List<IntRange>? = null,
+    blockMarkers: Boolean? = null,
+    lineSpacing: Float = EDITOR_LINE_SPACING_MULT,
 ) {
-    if (hasComposingSpan(editable)) return
-    for (span in editable.getSpans(0, editable.length, LivePreviewSpan::class.java)) editable.removeSpan(span)
+    if (BaseInputConnection.getComposingSpanStart(editable) >= 0) return
     val length = editable.length
+    fun touches(from: Int, to: Int): Boolean = windows == null || windows.any { from <= it.last && to >= it.first }
+    if (windows == null) {
+        removeSpans(editable, editable.getSpans(0, length, LivePreviewSpan::class.java))
+    } else {
+        for (window in windows) {
+            removeSpans(editable, editable.getSpans(window.first.coerceIn(0, length), (window.last + 1).coerceIn(0, length), LivePreviewSpan::class.java))
+        }
+    }
     val readable = paperAccentReadableArgb(accent)
-    for (mark in livePreviewMarks(editable.toString(), selectionStart, selectionEnd)) {
+    val source = editable.toString()
+    for (mark in livePreviewMarks(source, selectionStart, selectionEnd, windows, blockMarkers)) {
         val start = mark.start.coerceIn(0, length)
         val end = mark.end.coerceIn(start, length)
-        if (start == end) continue
+        if (start == end || !touches(start, end)) continue
         editable.setSpan(
-            spanFor(mark, readable, accent, textSizePx, images, imageColumnPx),
+            spanFor(mark, readable, accent, textSizePx, images, imageColumnPx, lineSpacing),
             start,
             end,
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
         )
     }
-    for (mark in sourceSyntaxMarks(editable.toString(), selectionStart, selectionEnd)) {
+    for (mark in syntaxMarksNear(source, selectionStart, selectionEnd, windows != null)) {
         val start = mark.start.coerceIn(0, length)
         val end = mark.end.coerceIn(start, length)
-        if (start == end) continue
+        if (start == end || !touches(start, end)) continue
         editable.setSpan(syntaxSpan(mark.style), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
     if (focused && selectionStart == selectionEnd) {
-        val highlight = bracketHighlight(editable.toString(), selectionStart)
+        val highlight = bracketHighlight(source, selectionStart)
         if (highlight != null) {
             val color = if (highlight.matched) MATCHING_BRACKET_ARGB else NONMATCHING_BRACKET_ARGB
-            paintBracket(editable, highlight.start, color, length)
+            if (touches(highlight.start, highlight.start + 1)) paintBracket(editable, highlight.start, color, length)
             val partner = highlight.partner
-            if (partner != null) paintBracket(editable, partner, color, length)
+            if (partner != null && touches(partner, partner + 1)) paintBracket(editable, partner, color, length)
         }
     }
-    for (mark in specialCharMarks(editable.toString())) {
+    for (mark in specialCharMarks(source, windows)) {
         val from = mark.index
         val to = from + 1
-        if (to > length) continue
+        if (to > length || !touches(from, to)) continue
         if (editable.getSpans(from, to, HideSpan::class.java).isNotEmpty()) continue
         editable.setSpan(SpecialCharSpan(mark.placeholder), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
-    val matches = selectionMatchRanges(editable.toString(), selectionStart, selectionEnd) ?: return
+    val matches = selectionMatchRanges(source, selectionStart, selectionEnd) ?: return
     for ((start, end) in matches) {
         val from = start.coerceIn(0, length)
         val to = end.coerceIn(from, length)
-        if (from == to) continue
+        if (from == to || !touches(from, to)) continue
         editable.setSpan(SelectionMatchSpan(), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
+}
+
+private fun removeSpans(editable: Editable, spans: Array<LivePreviewSpan>) {
+    if (spans.isEmpty()) return
+    for (span in spans) editable.removeSpan(span)
+}
+
+/**
+ * Source-syntax marks only ever land on the caret lines (and fenced code). In a long note without fences they are
+ * computed on the text around the caret instead of the whole note.
+ */
+private fun syntaxMarksNear(source: String, selectionStart: Int, selectionEnd: Int, windowed: Boolean): List<ch.fasrv.fanotes.desk.SyntaxMark> {
+    if (!windowed || source.contains("```") || source.contains("~~~")) return sourceSyntaxMarks(source, selectionStart, selectionEnd)
+    val low = minOf(selectionStart, selectionEnd).coerceIn(0, source.length)
+    val high = maxOf(selectionStart, selectionEnd).coerceIn(0, source.length)
+    val from = source.lastIndexOf('\n', (low - 400).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+    val to = source.indexOf('\n', (high + 400).coerceAtMost(source.length)).let { if (it < 0) source.length else it }
+    val part = source.substring(from, to)
+    return sourceSyntaxMarks(part, selectionStart - from, selectionEnd - from)
+        .map { it.copy(start = it.start + from, end = it.end + from) }
 }
 
 private fun syntaxSpan(style: SourceSyntax): Any = when (style) {
@@ -155,13 +197,6 @@ private fun paintBracket(editable: Editable, index: Int, color: Int, length: Int
     editable.setSpan(BracketMatchSpan(color), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
 }
 
-private fun hasComposingSpan(editable: Editable): Boolean {
-    for (span in editable.getSpans(0, editable.length, Any::class.java)) {
-        if (editable.getSpanFlags(span) and Spanned.SPAN_COMPOSING != 0) return true
-    }
-    return false
-}
-
 private fun spanFor(
     mark: LiveMark,
     readable: Int,
@@ -169,6 +204,7 @@ private fun spanFor(
     textSizePx: Float,
     images: Map<String, Bitmap>,
     imageColumnPx: Float,
+    lineSpacing: Float,
 ): Any = when (mark.kind) {
     LiveKind.HIDE -> HideSpan()
     LiveKind.COLLAPSE -> CollapseSpan()
@@ -212,6 +248,8 @@ private fun spanFor(
     LiveKind.DETAILS_END -> DetailsBodySpan(paperDetailsFillArgb(), textSizePx, true)
     LiveKind.TABLE_ROW -> TableRowSpan(paperTableFillArgb(accent), textSizePx)
     LiveKind.TABLE_RULE -> TableRuleSpan(textSizePx)
+    LiveKind.IMAGE -> ImageBlockSpan(mark.label, images[mark.body], imageColumnPx, textSizePx, lineSpacing)
+    LiveKind.TABLE_BLOCK -> TableBlockSpan(mark.body, mark.label, paperTableFillArgb(accent), textSizePx, lineSpacing)
     LiveKind.RULE -> PaperThematicRuleSpan(textSizePx)
 }
 
@@ -1108,6 +1146,179 @@ internal class TableRowSpan(private val fill: Int, private val textSizePx: Float
         canvas.drawRect(left.toFloat(), top.toFloat(), left + hairline, bottom.toFloat(), paint)
         canvas.drawRect(right - hairline, top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
         paint.color = previous
+    }
+}
+
+/** A whole-line image drawn in place of its Markdown until the caret enters the line (the page view draws the same picture). */
+internal class ImageBlockSpan(
+    private val caption: String,
+    private val bitmap: Bitmap?,
+    private val columnPx: Float,
+    private val textSizePx: Float,
+    private val lineSpacing: Float = EDITOR_LINE_SPACING_MULT,
+) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
+    private val margin = textSizePx * 0.5f
+    private val column = if (columnPx > 0f) columnPx else textSizePx * 24f
+    private val frame: Pair<Float, Float> = bitmap?.let { detailsImageFrame(it.width, it.height, column) } ?: (column to textSizePx * 3f)
+
+    override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
+        if (fm != null) {
+            val half = ((frame.second + margin * 2f) / lineSpacing.coerceAtLeast(1f) / 2f).toInt().coerceAtLeast(1)
+            fm.ascent = -half
+            fm.descent = half
+            fm.top = fm.ascent
+            fm.bottom = fm.descent
+        }
+        return 1
+    }
+
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) = Unit
+
+    override fun drawBackground(
+        canvas: Canvas, paint: Paint, left: Int, right: Int, top: Int, baseline: Int, bottom: Int,
+        text: CharSequence, start: Int, end: Int, lineNumber: Int,
+    ) {
+        if (right <= left) return
+        val available = (right - left).toFloat()
+        val drawnW = frame.first.coerceAtMost(available)
+        val drawnH = if (frame.first > 0f) frame.second * drawnW / frame.first else frame.second
+        val dest = RectF(left.toFloat(), top + margin, left + drawnW, top + margin + drawnH)
+        val radius = detailsImageRadius(textSizePx)
+        val previousColor = paint.color
+        val previousStyle = paint.style
+        val previousStroke = paint.strokeWidth
+        val previousSize = paint.textSize
+        val previousFlags = paint.flags
+        val border = (textSizePx / 16f).coerceAtLeast(1f)
+        if (bitmap != null && !bitmap.isRecycled) {
+            paint.style = Paint.Style.FILL
+            paint.color = Color.WHITE
+            canvas.drawRoundRect(dest, radius, radius, paint)
+            canvas.save()
+            canvas.clipPath(Path().apply { addRoundRect(dest, radius, radius, Path.Direction.CW) })
+            paint.flags = previousFlags or Paint.FILTER_BITMAP_FLAG
+            canvas.drawBitmap(bitmap, null, dest, paint)
+            canvas.restore()
+            paint.flags = previousFlags
+        } else {
+            paint.style = Paint.Style.FILL
+            paint.color = PAPER_CODE_BACKGROUND
+            canvas.drawRoundRect(dest, radius, radius, paint)
+            paint.color = PAPER_QUOTE_INK
+            paint.textSize = textSizePx * 0.9f
+            val label = caption.ifBlank { "Bild" }
+            canvas.drawText(label, dest.left + textSizePx, dest.centerY() + paint.textSize / 3f, paint)
+        }
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = border
+        paint.color = PAPER_RULE_ARGB
+        canvas.drawRoundRect(dest, radius, radius, paint)
+        paint.style = previousStyle
+        paint.strokeWidth = previousStroke
+        paint.textSize = previousSize
+        paint.color = previousColor
+    }
+}
+
+/**
+ * A Markdown table drawn as a grid with aligned columns until the caret enters it. [rows] are split by a newline
+ * and cells by a unit separator; the first row is the header.
+ */
+internal class TableBlockSpan(
+    rows: String,
+    private val alignWire: String,
+    private val headerFill: Int,
+    private val textSizePx: Float,
+    private val lineSpacing: Float = EDITOR_LINE_SPACING_MULT,
+) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
+    private val cells: List<List<String>> = rows.split('\n').map { it.split('\u001f') }
+    private val columns = cells.maxOfOrNull { it.size } ?: 0
+    private val pad = tablePadPx(textSizePx)
+    private val rowHeight = textSizePx * 1.7f
+    private val hairline = (textSizePx / 16f).coerceAtLeast(1f)
+
+    override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
+        if (fm != null) {
+            val half = ((rowHeight * cells.size + hairline * 2f) / lineSpacing.coerceAtLeast(1f) / 2f).toInt().coerceAtLeast(1)
+            fm.ascent = -half
+            fm.descent = half
+            fm.top = fm.ascent
+            fm.bottom = fm.descent
+        }
+        return 1
+    }
+
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) = Unit
+
+    override fun drawBackground(
+        canvas: Canvas, paint: Paint, left: Int, right: Int, top: Int, baseline: Int, bottom: Int,
+        text: CharSequence, start: Int, end: Int, lineNumber: Int,
+    ) {
+        if (right <= left || columns == 0) return
+        val previousColor = paint.color
+        val previousStyle = paint.style
+        val previousStroke = paint.strokeWidth
+        val previousFace = paint.typeface
+        val bold = Typeface.create(previousFace, Typeface.BOLD)
+        val available = (right - left).toFloat()
+        val natural = FloatArray(columns) { column ->
+            var widest = pad * 4f
+            cells.forEachIndexed { rowIndex, row ->
+                paint.typeface = if (rowIndex == 0) bold else previousFace
+                widest = maxOf(widest, paint.measureText(row.getOrElse(column) { "" }) + pad * 2f)
+            }
+            widest
+        }
+        val total = natural.sum()
+        val factor = if (total > available) available / total else 1f
+        val widths = FloatArray(columns) { natural[it] * factor }
+        val tableTop = top + ((bottom - top) - rowHeight * cells.size) / 2f
+        val gridRight = left + widths.sum()
+        paint.style = Paint.Style.FILL
+        paint.color = headerFill
+        canvas.drawRect(left.toFloat(), tableTop, gridRight, tableTop + rowHeight, paint)
+        paint.color = PAPER_MATH_INK
+        cells.forEachIndexed { rowIndex, row ->
+            paint.typeface = if (rowIndex == 0) bold else previousFace
+            val baselineY = tableTop + rowHeight * rowIndex + rowHeight / 2f + (paint.textSize * 0.35f)
+            var columnLeft = left.toFloat()
+            for (column in 0 until columns) {
+                val value = row.getOrElse(column) { "" }
+                val width = widths[column]
+                canvas.save()
+                canvas.clipRect(columnLeft, tableTop + rowHeight * rowIndex, columnLeft + width, tableTop + rowHeight * (rowIndex + 1))
+                val origin = ch.fasrv.fanotes.text.tableCellOrigin(
+                    ch.fasrv.fanotes.text.tableAlignAt(alignWire, column),
+                    columnLeft,
+                    width,
+                    paint.measureText(value),
+                    pad.toFloat(),
+                )
+                canvas.drawText(value, origin, baselineY, paint)
+                canvas.restore()
+                columnLeft += width
+            }
+        }
+        paint.typeface = previousFace
+        paint.color = PAPER_RULE_STRONG_ARGB
+        paint.strokeWidth = hairline
+        paint.style = Paint.Style.STROKE
+        val tableBottom = tableTop + rowHeight * cells.size
+        canvas.drawRect(left + hairline / 2f, tableTop, gridRight - hairline / 2f, tableBottom, paint)
+        for (row in 1 until cells.size) {
+            val lineY = tableTop + rowHeight * row
+            paint.color = if (row == 1) PAPER_RULE_STRONG_ARGB else PAPER_RULE_ARGB
+            canvas.drawLine(left.toFloat(), lineY, gridRight, lineY, paint)
+        }
+        var edge = left.toFloat()
+        paint.color = PAPER_RULE_ARGB
+        for (column in 0 until columns - 1) {
+            edge += widths[column]
+            canvas.drawLine(edge, tableTop, edge, tableBottom, paint)
+        }
+        paint.style = previousStyle
+        paint.strokeWidth = previousStroke
+        paint.color = previousColor
     }
 }
 

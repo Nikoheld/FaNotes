@@ -360,6 +360,13 @@ try {
   const guidesSource = readFileSync(new URL('../src/components/DraftingGuides.tsx', import.meta.url), 'utf8')
   assert.match(guidesSource, /if \(mode === 'move' && pose && penWantsEdge\(kind, pose, event\)\) return/u, 'a pen near an edge draws instead of dragging the body')
   assert.match(guidesSource, /beginDrag\('ruler', 'width'/u, 'the ruler has a grip that changes its width')
+  // Compass: grips keep a 44 px (22 px radius) touch/pen target, the static print is memoised and
+  // dragging only moves/turns it, and the three grips (needle, rotation, lead) and the radius pill exist.
+  assert.match(guidesSource, /const COMPASS_HIT_PX = 22\b/u, 'compass grips have a 44 px hit area')
+  assert.match(guidesSource, /const CompassBody = memo\(/u, 'the compass print is not re-rendered per drag frame')
+  for (const mode of ['rotateCompass', 'drawCompass', 'radiusCompass', 'grabCompass']) assert.ok(guidesSource.includes(mode), `compass handler ${mode}`)
+  assert.match(guidesSource, /beginDrag\('compass', 'radius'/u, 'the radius pill still measures and transfers the radius')
+  assert.match(guidesSource, /beginDrag\('compass', 'draw'/u, 'the lead still draws arcs')
   const panelSource = readFileSync(new URL('../src/components/DraftingPanel.tsx', import.meta.url), 'utf8')
   assert.match(panelSource, /rulerWidthMm/u, 'the options panel stores the ruler width')
 

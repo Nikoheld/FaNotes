@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -34,7 +35,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -210,7 +210,7 @@ private fun VaultCards(data: VaultStats, anchorY: MutableMap<String, Int>) {
                     Box(Modifier.size(9.dp).clip(CircleShape).background(color))
                     Text(subject.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Text(
-                        "${count(subject.count)} · ${ch.fasrv.fanotes.sync.syncByteLabel(subject.bytes)}" + if (subject.words > 0) " · ${count(subject.words)} " + t("Wörter") else "",
+                        ui("${count(subject.count)} · ${ch.fasrv.fanotes.sync.syncByteLabel(subject.bytes)}" + if (subject.words > 0) " · ${count(subject.words)} " + t("Wörter") else ""),
                         fontSize = 11.sp, color = LocalStatusInk.current.muted,
                     )
                 }
@@ -257,7 +257,7 @@ private fun ActivityCard(data: VaultStats, anchorY: MutableMap<String, Int>) {
                 Modifier
                     .fillMaxWidth()
                     .height(cell * 7 + gap * 6)
-                    .semantics { contentDescription = description },
+                    .semantics { contentDescription = ui(description) },
             ) {
                 val size = cell.toPx()
                 val step = (cell + gap).toPx()
@@ -318,7 +318,7 @@ private fun TimeCard(data: VaultStats) {
                         Box(Modifier.height(50.dp).fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
                             Box(Modifier.fillMaxWidth().height((3 + 46f * time.byWeekday.getOrElse(index) { 0 } / peak).dp).clip(RoundedCornerShape(3.dp)).background(accent.copy(alpha = 0.8f)))
                         }
-                        Text(label, fontSize = 10.sp, color = LocalStatusInk.current.muted)
+                        Text(ui(label), fontSize = 10.sp, color = LocalStatusInk.current.muted)
                     }
                 }
             }

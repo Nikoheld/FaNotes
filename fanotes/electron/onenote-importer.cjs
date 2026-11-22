@@ -6,6 +6,7 @@ const fsp = require('node:fs/promises')
 const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
+const { renameWithRetry } = require('./fs-retry.cjs')
 
 const MAX_SOURCE_BYTES = 4 * 1024 * 1024 * 1024
 const MAX_ARCHIVE_ENTRIES = 20_000
@@ -61,7 +62,7 @@ const safeSegment = (value, fallback = 'Unbenannt') => {
 const atomicWrite = async (target, data) => {
   const temporary = `${target}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`
   await fsp.writeFile(temporary, data, { mode: 0o600 })
-  await fsp.rename(temporary, target)
+  await renameWithRetry(temporary, target)
 }
 
 const hashFile = (target) => new Promise((resolve, reject) => {

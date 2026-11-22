@@ -341,7 +341,7 @@ internal class PenCards(private val context: Context, private val host: PenCardH
             name.gravity = Gravity.CENTER
             name.maxLines = 1
             tile.addView(name)
-            tile.contentDescription = "${brush.label}: ${brush.description}"
+            tile.contentDescription = "${ChromeText.ui(brush.label)}: ${ChromeText.ui(brush.description)}"
             tile.setOnClickListener {
                 host.chooseBrush(brush.id)
                 refresh("studio")
@@ -396,7 +396,7 @@ internal class PenCards(private val context: Context, private val host: PenCardH
             val name = kit.label(effect.label, 12f, if (on) kit.colors.ink else kit.colors.muted, bold = on)
             name.gravity = Gravity.CENTER
             tile.addView(name)
-            tile.contentDescription = "${effect.label} Spezialtinte"
+            tile.contentDescription = "${ChromeText.ui(effect.label)} ${ChromeText.ui("Spezialtinte")}"
             tile.setOnClickListener {
                 host.changeStyle(host.currentStyle.copy(colorEffect = effect.id))
                 refresh("studio")
@@ -430,7 +430,7 @@ internal class PenCards(private val context: Context, private val host: PenCardH
             name.maxLines = 1
             name.gravity = Gravity.CENTER
             tile.addView(name)
-            tile.contentDescription = "${symbol.label} einfügen"
+            tile.contentDescription = "${ChromeText.ui(symbol.label)} ${ChromeText.ui("einfügen")}"
             tile.setOnClickListener {
                 host.armSymbol(if (on) null else symbol.id)
                 refresh("studio")
@@ -491,7 +491,7 @@ internal class PenCards(private val context: Context, private val host: PenCardH
             name.maxLines = 1
             name.gravity = Gravity.CENTER
             tile.addView(name)
-            tile.contentDescription = figure.label
+            tile.contentDescription = ChromeText.ui(figure.label)
             tile.setOnClickListener {
                 host.figureSpec = host.figureSpec.copy(figureId = figure.id, params = ch.fasrv.fanotes.ink.defaultFigureParams(figure.id))
                 host.armFigure(host.figureSpec)

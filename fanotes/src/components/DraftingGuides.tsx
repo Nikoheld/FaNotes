@@ -264,6 +264,128 @@ const SetSquareBody = memo(function SetSquareBody({ sizeMm, pxPerMm, unit, flipp
   )
 })
 
+type CompassBodyProps = {
+  radiusPx: number
+  /** Chrome scale of the page (thickness of legs, strokes). */
+  scale: number
+  unit: DraftingUnit
+  radiusMm: number
+  locked: boolean
+  /** Layer px per screen px. */
+  unit1: number
+  onMove: BodyPointerHandler
+  onRotate: BodyPointerHandler
+  onDraw: BodyPointerHandler
+}
+
+/** Smallest touch/pen target the compass hands out, in screen px (radius). */
+const COMPASS_HIT_PX = 22
+
+/**
+ * Static print of the compass: two legs, hinge, needle point, pencil lead and the three grips.
+ * Lives in a frame where the needle is at (0,0) and the lead at (radiusPx,0); the parent
+ * moves and turns it, so dragging never re-renders these paths.
+ */
+const CompassBody = memo(function CompassBody({ radiusPx, scale, unit, radiusMm, locked, unit1, onMove, onRotate, onDraw }: CompassBodyProps) {
+  const s = scale
+  const hitPx = COMPASS_HIT_PX * unit1
+  const R = Math.max(radiusPx, 1)
+  const height = Math.min(Math.max(R * 0.62, 56 * s), 230 * s)
+  const hx = R / 2
+  const hy = -height
+  const along = (from: [number, number], to: [number, number], t: number): [number, number] => [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]
+  const normalOf = (from: [number, number], to: [number, number]): [number, number] => {
+    const dx = to[0] - from[0]
+    const dy = to[1] - from[1]
+    const len = Math.hypot(dx, dy) || 1
+    return [-dy / len, dx / len]
+  }
+  const hinge: [number, number] = [hx, hy]
+  const needleTip: [number, number] = [0, 0]
+  const leadTip: [number, number] = [R, 0]
+  const strip = (from: [number, number], to: [number, number], t0: number, t1: number, w0: number, w1: number) => {
+    const n = normalOf(from, to)
+    const a = along(from, to, t0)
+    const b = along(from, to, t1)
+    const pts = [
+      [a[0] + n[0] * w0 / 2, a[1] + n[1] * w0 / 2],
+      [b[0] + n[0] * w1 / 2, b[1] + n[1] * w1 / 2],
+      [b[0] - n[0] * w1 / 2, b[1] - n[1] * w1 / 2],
+      [a[0] - n[0] * w0 / 2, a[1] - n[1] * w0 / 2],
+    ]
+    return `M ${pts.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join(' L ')} Z`
+  }
+  const hs = Math.max(0.8, s)
+  const hitCap = Math.max(12 * unit1, Math.min(hitPx, R * 0.36))
+  const ticks = scaleTicks(radiusMm, unit).filter((tick) => tick.level === 2 && tick.mm > 0)
+  const needleTitle = 'Nadel: Zirkel verschieben (rastet an Lineal und Geodreieck)'
+  const knob: [number, number] = [hx, hy - 30 * hs]
+  return (
+    <g className="lw-compass-body">
+      <line className="lw-compass-span" x1="0" y1="0" x2={R} y2="0" />
+      {ticks.map((tick) => {
+        const x = tick.mm * (R / Math.max(radiusMm, 1e-6))
+        if (x < 10 * hs || x > R - 10 * hs) return null
+        return <line key={tick.mm} className="lw-compass-span-tick" x1={x} y1={-3 * s} x2={x} y2={3 * s} />
+      })}
+      {/* Needle leg: steel, tapering to the point. */}
+      <g className="lw-compass-needle-leg" style={{ strokeWidth: Math.max(0.8, 1.1 * s) }}>
+        <path className="lw-compass-steel" d={strip(hinge, needleTip, 0, 0.8, 9 * s, 5 * s)} />
+        <path className="lw-compass-steel-dark" d={strip(hinge, needleTip, 0.8, 0.985, 3.2 * s, 1.3 * s)} />
+        <line className="lw-compass-sheen" {...lineProps(along(hinge, needleTip, 0.03), along(hinge, needleTip, 0.78), normalOf(hinge, needleTip), 1.6 * s)} />
+      </g>
+      {/* Pencil leg: body, clamp, wooden cone, lead. */}
+      <g className="lw-compass-pencil-leg" style={{ strokeWidth: Math.max(0.8, 1.1 * s) }}>
+        <path className="lw-compass-steel" d={strip(hinge, leadTip, 0, 0.64, 11 * s, 9.5 * s)} />
+        <path className="lw-compass-clamp" d={strip(hinge, leadTip, 0.64, 0.72, 12.5 * s, 12.5 * s)} />
+        <path className="lw-compass-wood" d={strip(hinge, leadTip, 0.72, 0.93, 8 * s, 2.4 * s)} />
+        <path className="lw-compass-lead" d={strip(hinge, leadTip, 0.93, 0.995, 2.4 * s, 0.9 * s)} />
+        <line className="lw-compass-sheen" {...lineProps(along(hinge, leadTip, 0.03), along(hinge, leadTip, 0.62), normalOf(hinge, leadTip), 1.8 * s)} />
+      </g>
+      {/* Legs carry the whole compass: grab anywhere along them. */}
+      <line className="lw-compass-grab" x1={hx} y1={hy} x2="0" y2="0" style={{ strokeWidth: 2 * hitPx }} onPointerDown={onMove} />
+      <line className="lw-compass-grab" x1={hx} y1={hy} x2={R} y2="0" style={{ strokeWidth: 2 * hitPx }} onPointerDown={onMove} />
+      {/* Hinge with stem and the rotation grip. */}
+      <line className="lw-compass-stem" x1={hx} y1={hy} x2={knob[0]} y2={knob[1]} style={{ strokeWidth: 6 * s }} />
+      <circle className="lw-compass-hinge" cx={hx} cy={hy} r={8 * s} />
+      <circle className="lw-compass-hinge-dot" cx={hx} cy={hy} r={2.6 * s} />
+      <g onPointerDown={onRotate}>
+        <circle className="lw-drafting-rotate" cx={knob[0]} cy={knob[1]} r={8.5 * hs} />
+        <path className="lw-compass-turn-icon" d={`M ${knob[0] - 3.6 * hs} ${knob[1] + 0.8 * hs} a ${3.8 * hs} ${3.8 * hs} 0 1 1 ${1.2 * hs} ${2.6 * hs}`} />
+        <circle className="lw-compass-hit" cx={knob[0]} cy={knob[1]} r={hitPx}>
+          <title>Zirkel drehen (ohne zu zeichnen)</title>
+        </circle>
+      </g>
+      {/* Needle grip. */}
+      <g onPointerDown={onMove}>
+        <circle className="lw-compass-needle-ring" cx="0" cy="0" r={7 * hs} />
+        <circle className="lw-compass-needle-dot" cx="0" cy="0" r={2.2 * hs} />
+        <circle className="lw-compass-hit" cx="0" cy="0" r={hitCap}>
+          <title>{needleTitle}</title>
+        </circle>
+      </g>
+      {/* Pencil grip: starts an arc. */}
+      <g onPointerDown={onDraw}>
+        <circle className="lw-compass-lead-ring" cx={R} cy="0" r={8 * hs} />
+        <circle className="lw-compass-lead-dot" cx={R} cy="0" r={2.4 * hs} />
+        <circle className="lw-compass-hit" cx={R} cy="0" r={hitCap}>
+          <title>Mine drehen: Bogen oder Kreis zeichnen</title>
+        </circle>
+      </g>
+      <title>{locked ? 'Zirkel (Radius gesperrt)' : 'Zirkel'}</title>
+    </g>
+  )
+})
+
+/** Highlight stripe along a leg, offset to one side. */
+const lineProps = (a: [number, number], b: [number, number], n: [number, number], offset: number) => ({
+  x1: a[0] + n[0] * offset,
+  y1: a[1] + n[1] * offset,
+  x2: b[0] + n[0] * offset,
+  y2: b[1] + n[1] * offset,
+})
+
+
 const PinGlyph = ({ x, y }: { x: number; y: number }) => (
   <g className="lw-drafting-pin" transform={`translate(${x} ${y})`}>
     <circle className="lw-drafting-pin-bg" r="8" />
@@ -288,6 +410,14 @@ export function DraftingGuides({
   const dragRef = useRef<DragState | null>(null)
   const [drawPreview, setDrawPreview] = useState<{ from: number; to: number } | null>(null)
   const [viewport, setViewport] = useState({ width: sourceWidth, height: sourceHeight })
+  // Screen px per layer px (the sheet is zoomed by a CSS transform): keeps grips >= 44 px on screen.
+  const [screenScale, setScreenScale] = useState(1)
+  useLayoutEffect(() => {
+    if (!compass || dragRef.current) return
+    const matrix = svgRef.current?.getScreenCTM()
+    const next = matrix ? Math.hypot(matrix.a, matrix.b) : 1
+    if (Number.isFinite(next) && next > 0.05) setScreenScale((current) => (Math.abs(current - next) / current < 0.01 ? current : next))
+  })
   const latestRef = useRef({ sourceWidth, sourceHeight, viewport, ruler, setSquare, compass, settings, onMove, onCompassDraw, onActivate })
   latestRef.current = { sourceWidth, sourceHeight, viewport, ruler, setSquare, compass, settings, onMove, onCompassDraw, onActivate }
 
@@ -505,6 +635,10 @@ export function DraftingGuides({
   }
 
   const grabRuler = useCallback((event: ReactPointerEvent<SVGElement>) => beginDrag('ruler', 'move', event), [])
+  const grabCompass = useCallback((event: ReactPointerEvent<SVGElement>) => beginDrag('compass', 'move', event), [])
+  const rotateCompass = useCallback((event: ReactPointerEvent<SVGElement>) => beginDrag('compass', 'rotate', event), [])
+  const drawCompass = useCallback((event: ReactPointerEvent<SVGElement>) => beginDrag('compass', 'draw', event), [])
+  const radiusCompass = useCallback((event: ReactPointerEvent<SVGElement>) => beginDrag('compass', 'radius', event), [])
   const grabSetSquare = useCallback((event: ReactPointerEvent<SVGElement>) => beginDrag('setSquare', 'move', event), [])
 
   const tapAction = (event: ReactPointerEvent<SVGElement>, action: () => void) => {
@@ -528,6 +662,13 @@ export function DraftingGuides({
   const squarePx = mm(squareSizeMm)
   const squareChrome = draftingChrome(pxPerMm, squarePx * 0.5 || 1)
   const compassChrome = draftingChrome(pxPerMm, compassGeometry?.radiusPx ?? 1)
+  const unit1 = 1 / Math.min(4, Math.max(0.25, screenScale))
+  const chipText = compass
+    ? `r ${formatLength(compass.radiusMm, settings.unit)}${drawPreview ? ` · ${formatArcDegrees(drawPreview.to - drawPreview.from)}` : ''}`
+    : ''
+  // Fixed-width pill (monospaced digits): no layout jump while the reading changes.
+  const chipWidth = Math.max(60, chipText.length * 7 + 22)
+  const chipHitWidth = Math.max(26, Math.min(chipWidth, ((compassGeometry?.radiusPx ?? 0) / unit1) - 2 * COMPASS_HIT_PX * 0.8))
   const captionSize = (chromeScale: number) => Math.max(7 * chromeScale, mm(2.5))
   // Keep the width grip inside the body, clear of the pen's edge zone, so a
   // stroke along the drawing edge still reaches the ink layer.
@@ -674,16 +815,29 @@ export function DraftingGuides({
               />
             )}
             {drawPreview && Math.abs(drawPreview.to - drawPreview.from) > 0.02 && (
-              <path
-                className="lw-drafting-compass-arc"
-                d={describePaperArc(
-                  nx(compass.x),
-                  ny(compass.y),
-                  compassGeometry.radiusPx,
-                  drawPreview.from,
-                  drawPreview.to,
-                )}
-              />
+              <>
+                <line
+                  className="lw-drafting-compass-ray"
+                  x1={nx(compass.x)}
+                  y1={ny(compass.y)}
+                  x2={nx(compass.x) + Math.cos(drawPreview.from) * compassGeometry.radiusPx}
+                  y2={ny(compass.y) + Math.sin(drawPreview.from) * compassGeometry.radiusPx}
+                />
+                <path
+                  className="lw-drafting-compass-arc is-halo"
+                  d={describePaperArc(nx(compass.x), ny(compass.y), compassGeometry.radiusPx, drawPreview.from, drawPreview.to)}
+                />
+                <path
+                  className="lw-drafting-compass-arc"
+                  d={describePaperArc(nx(compass.x), ny(compass.y), compassGeometry.radiusPx, drawPreview.from, drawPreview.to)}
+                />
+                <circle
+                  className="lw-drafting-compass-start"
+                  cx={nx(compass.x) + Math.cos(drawPreview.from) * compassGeometry.radiusPx}
+                  cy={ny(compass.y) + Math.sin(drawPreview.from) * compassGeometry.radiusPx}
+                  r="3.2"
+                />
+              </>
             )}
           </g>
           <g
@@ -691,86 +845,73 @@ export function DraftingGuides({
             transform={`translate(${nx(compass.x)} ${ny(compass.y)})`}
           >
             <g transform={`rotate(${degrees(compass.rotation)})`}>
-              <g style={chromeVars(compassChrome.scale)}>
-                <line className="lw-drafting-span" x1="0" y1="0" x2={compassGeometry.radiusPx} y2="0" />
+              <CompassBody
+                radiusPx={compassGeometry.radiusPx}
+                scale={compassChrome.scale}
+                unit={settings.unit}
+                radiusMm={compass.radiusMm}
+                locked={Boolean(compass.locked)}
+                unit1={unit1}
+                onMove={grabCompass}
+                onRotate={rotateCompass}
+                onDraw={drawCompass}
+              />
+              <g
+                className="lw-compass-readout"
+                transform={`translate(${compassGeometry.radiusPx / 2} 0) rotate(${-degrees(compass.rotation)}) scale(${unit1})`}
+                onPointerDown={radiusCompass}
+              >
                 <rect
-                  className="lw-drafting-arm"
-                  x="0"
-                  y={-compassChrome.arm / 2}
-                  width={compassGeometry.radiusPx}
-                  height={compassChrome.arm}
-                  rx={Math.min(1, compassChrome.arm / 4)}
-                  onPointerDown={(event) => beginDrag('compass', 'move', event)}
+                  className="lw-compass-chip"
+                  x={-chipWidth / 2}
+                  y="-12"
+                  width={chipWidth}
+                  height="24"
+                  rx="12"
                 />
-                {scaleTicks(compass.radiusMm, settings.unit).filter((tick) => tick.level === 2 && tick.mm > 0).map((tick) => {
-                  const x = mm(tick.mm)
-                  if (x <= compassChrome.handle || x >= compassGeometry.radiusPx - compassChrome.handle) return null
-                  return (
-                    <g key={`c${tick.mm}`}>
-                      <line className="lw-drafting-tick is-major" x1={x} y1={-compassChrome.tick} x2={x} y2={compassChrome.tick} />
-                      <text className="lw-drafting-label" x={x} y={compassChrome.tick + captionSize(compassChrome.scale)} style={{ fontSize: Math.max(compassChrome.fontFloor, mm(2.4)) }}>{tick.label}</text>
-                    </g>
-                  )
-                })}
-              </g>
-              <g
-                transform={`scale(${compassChrome.scale})`}
-                onPointerDown={(event) => beginDrag('compass', 'move', event)}
-              >
-                <circle className="lw-drafting-needle-dot" r="4" />
-                <circle className="lw-drafting-needle" r="7">
-                  <title>Nadel: Zirkel verschieben (rastet an Lineal und Geodreieck)</title>
-                </circle>
-              </g>
-              <g
-                transform={`translate(${compassGeometry.radiusPx} 0) scale(${compassChrome.scale})`}
-                onPointerDown={(event) => beginDrag('compass', 'draw', event)}
-              >
-                <circle className="lw-drafting-draw" r="10">
-                  <title>Mine drehen: Bogen oder Kreis zeichnen</title>
-                </circle>
-              </g>
-              <g
-                transform={`translate(${compassGeometry.radiusPx * 0.55} 0) scale(${compassChrome.scale})`}
-                onPointerDown={(event) => beginDrag('compass', 'radius', event)}
-              >
-                <circle className="lw-drafting-radius" r="8">
+                <text className="lw-compass-chip-text" x="0" y="4.2">{chipText}</text>
+                <rect
+                  className="lw-compass-hit"
+                  x={-chipHitWidth / 2}
+                  y={-COMPASS_HIT_PX}
+                  width={chipHitWidth}
+                  height={2 * COMPASS_HIT_PX}
+                >
                   <title>{compass.locked ? 'Radius gesperrt · drehen zum Übertragen' : 'Radius einstellen / abmessen'}</title>
-                </circle>
+                </rect>
               </g>
             </g>
             <g
               className={`lw-drafting-action ${compass.locked ? 'is-locked' : ''}`}
-              transform={`translate(${-18 * compassChrome.scale} ${-28 * compassChrome.scale}) scale(${compassChrome.scale})`}
+              transform={`translate(${-27 * unit1} ${40 * unit1}) scale(${unit1})`}
               onPointerDown={(event) => tapAction(event, () => onMove('compass', { ...compass, locked: !compass.locked }))}
             >
-              <circle className="lw-drafting-action-bg" r="9" />
+              <circle className="lw-drafting-action-bg" r="12" />
               <path
                 className="lw-drafting-action-icon"
+                transform="scale(1.15)"
                 d={compass.locked
                   ? 'M -3 0 v -3 a 3 3 0 0 1 6 0 v 3 h 3.5 v 7 h -13 v -7 z'
                   : 'M -3 0 v -3 a 3 3 0 0 1 6 0 h -2 a 1 1 0 0 0 -2 0 v 3 h 6.5 v 7 h -13 v -7 z'}
               />
+              <circle className="lw-compass-hit" r={COMPASS_HIT_PX} />
               <title>{compass.locked ? 'Radius entsperren' : 'Radius sperren (Maß übertragen)'}</title>
             </g>
             <g
               className="lw-drafting-action is-circle"
-              transform={`translate(${18 * compassChrome.scale} ${-28 * compassChrome.scale}) scale(${compassChrome.scale})`}
+              transform={`translate(${27 * unit1} ${40 * unit1}) scale(${unit1})`}
               onPointerDown={(event) => tapAction(event, () => onCompassDraw?.({ type: 'circle', pose: compass }))}
             >
-              <circle className="lw-drafting-action-bg" r="9" />
-              <circle className="lw-drafting-action-icon-ring" r="4.2" />
+              <circle className="lw-drafting-action-bg" r="12" />
+              <circle className="lw-drafting-action-icon-ring" r="5.2" />
+              <circle className="lw-compass-hit" r={COMPASS_HIT_PX} />
               <title>Ganzen Kreis zeichnen</title>
             </g>
             {compass.pinned && (
-              <g transform={`translate(0 ${-50 * compassChrome.scale}) scale(${compassChrome.scale})`}>
+              <g transform={`translate(0 ${40 * unit1}) scale(${unit1})`}>
                 <PinGlyph x={0} y={0} />
               </g>
             )}
-            <text className="lw-drafting-caption" x="0" y={-44 * compassChrome.scale} style={{ fontSize: captionSize(compassChrome.scale) }}>
-              {`Zirkel · r ${formatLength(compass.radiusMm, settings.unit)}`}
-              {drawPreview ? ` · ${formatArcDegrees(drawPreview.to - drawPreview.from)}` : compass.locked ? ' · gesperrt' : ''}
-            </text>
           </g>
         </>
       )}

@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
@@ -31,7 +32,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -153,7 +153,7 @@ private fun ConflictListHeader(count: Int, onClear: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(ui("Sync-Konflikte"), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
-            Text(if (count == 1) "1 Datei" else "$count Dateien", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text(ui(if (count == 1) "1 Datei" else "$count Dateien"), fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         }
         TextButton(onClick = onClear, modifier = Modifier.heightIn(min = Target)) { Text(ui("Liste leeren")) }
     }
@@ -245,13 +245,13 @@ private fun ConflictDetail(
 @Composable
 private fun ChoiceButton(id: String, label: String, modifier: Modifier, onClick: () -> Unit) {
     if (id == "both") {
-        OutlinedButton(onClick = onClick, modifier = modifier.heightIn(min = 52.dp)) { Text(label, fontSize = 15.sp) }
+        OutlinedButton(onClick = onClick, modifier = modifier.heightIn(min = 52.dp)) { Text(ui(label), fontSize = 15.sp) }
     } else {
         Button(
             onClick = onClick,
             modifier = modifier.heightIn(min = 52.dp),
             colors = if (id == "remote") ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
-        ) { Text(label, fontSize = 15.sp) }
+        ) { Text(ui(label), fontSize = 15.sp) }
     }
 }
 

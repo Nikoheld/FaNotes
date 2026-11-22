@@ -49,7 +49,20 @@ private fun swissLookup(catalog: Map<String, String>, source: String): String? {
  */
 fun translateChrome(source: String, language: String, catalog: Map<String, String>): String {
     if (language != "en") return swissSpelling(source)
-    return catalog[source] ?: swissLookup(catalog, source) ?: swissSpelling(source)
+    return catalog[source] ?: swissLookup(catalog, source) ?: translateFallback(source, catalog) ?: swissSpelling(source)
+}
+
+private val SENTENCE_BREAK = Regex("(?<=[^+][.!?]) ")
+
+/** A sentence with variable parts, or a message that joins several catalog or pattern sentences. */
+private fun translateFallback(source: String, catalog: Map<String, String>): String? {
+    val swiss = swissSpelling(source)
+    translateChromePattern(swiss)?.let { return it }
+    val parts = swiss.split(SENTENCE_BREAK)
+    if (parts.size < 2) return null
+    val out = ArrayList<String>(parts.size)
+    for (part in parts) out += catalog[part] ?: swissLookup(catalog, part) ?: translateChromePattern(part) ?: return null
+    return out.joinToString(" ")
 }
 
 /** Note bodies, file names, and other user text stay as written. */

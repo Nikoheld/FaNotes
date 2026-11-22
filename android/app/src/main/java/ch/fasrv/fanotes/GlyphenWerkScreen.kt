@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import android.view.MotionEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
@@ -26,7 +27,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -150,7 +150,7 @@ fun GlyphenWerkScreen(model: FaNotesViewModel, onDismiss: () -> Unit) {
                                 }
                             }
                         }
-                        error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
+                        error?.let { Text(ui(it), color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             TextButton(onClick = { if (strokes.isNotEmpty()) strokes.removeAt(strokes.lastIndex) }, enabled = strokes.isNotEmpty()) { Text(recognitionUi("Rückgängig")) }
                             TextButton(onClick = { strokes.clear() }, enabled = strokes.isNotEmpty()) { Text(recognitionUi("Leeren")) }

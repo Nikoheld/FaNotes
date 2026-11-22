@@ -1,0 +1,46 @@
+name: Accessibility
+
+# axe-core (WCAG 2 A/AA) on every main view and dialog of the desktop app (Electron under Xvfb,
+# temp profile, synthetic vault) plus keyboard checks (focus trap, Escape, focus return).
+# Takes about 90 s, so it has its own job instead of slowing an existing one.
+on:
+  pull_request:
+    paths:
+      - 'fanotes/src/**'
+      - 'fanotes/electron/main.cjs'
+      - 'fanotes/scripts/check-a11y.mjs'
+      - '.github/workflows/a11y.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  a11y:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: fanotes
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:spelling
+      - run: node scripts/stage-main-i18n.cjs
+      - name: Root packages the renderer imports (hershey)
+        working-directory: .
+        run: npm ci --no-audit --no-fund
+      - name: Renderer
+        run: npx vite build
+      - name: Xvfb, playwright-core and axe-core
+        run: |
+          command -v xvfb-run || (sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 xvfb)
+          npm install --no-save --no-audit --no-fund playwright-core@1.65.0 axe-core@4.14.0
+          test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
+      - name: Accessibility
+        run: npm run check:a11y || { echo "::warning::a11y check failed once; retrying"; npm run check:a11y; }

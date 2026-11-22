@@ -117,6 +117,7 @@ internal class PenToolbarKit(private val context: Context) {
         }
         box.background = rounded(if (active) colors.active else android.graphics.Color.TRANSPARENT, 10)
         box.contentDescription = ChromeText.ui(description)
+        if (!showLabel) box.tooltipText = ChromeText.ui(description)
         box.isSelected = active
         box.isEnabled = enabled
         box.alpha = if (enabled) 1f else ch.fasrv.fanotes.desk.FORMAT_DISABLED_ALPHA
@@ -147,7 +148,7 @@ internal class PenToolbarKit(private val context: Context) {
     }
 
     /** Round colour swatch, [TOUCH_SWATCH_DP] drawn in a 48 dp target. [effect] paints a special ink. */
-    fun swatch(color: String, selected: Boolean, description: String = "Farbe $color", effect: String? = null, click: () -> Unit): View {
+    fun swatch(color: String, selected: Boolean, description: String = ChromeText.ui("Farbe") + " " + color, effect: String? = null, click: () -> Unit): View {
         val view = SwatchView(context, color, effect, selected, colors, dpf(TOUCH_SWATCH_DP.toFloat()))
         view.contentDescription = ChromeText.ui(description)
         view.setOnClickListener { click() }

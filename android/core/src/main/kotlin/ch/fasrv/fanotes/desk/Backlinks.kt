@@ -17,6 +17,8 @@ private val GERMAN = Locale.forLanguageTag("de-DE")
  */
 fun maskMarkdownCode(markdown: String): String {
     val chars = markdown.toCharArray()
+    // No fence opener anywhere: skip the regex-per-line scan (it runs on every edit of a long note).
+    if (!markdown.contains("```") && !markdown.contains("~~~")) return maskInlineCode(chars)
     var offset = 0
     var fenceMarker = ""
     var fenceLength = 0

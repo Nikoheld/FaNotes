@@ -402,6 +402,8 @@ const createDiagnosticsService = (options) => {
     },
     recordProcessGone(type, details) {
       if (!policy.crashes || !['render-process-gone', 'child-process-gone'].includes(type)) return
+      // Chromium kills its helpers (SIGTERM) while the app quits; received logs showed this as a "crash" in every batch.
+      if (options.isQuitting?.()) return
       const reason = GONE_REASONS.includes(details?.reason) ? details.reason : 'abnormal-exit'
       if (reason === 'clean-exit') return
       const childType = CHILD_TYPES.includes(details?.type) ? details.type : 'Unknown'

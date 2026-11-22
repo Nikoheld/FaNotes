@@ -1,6 +1,7 @@
+import { useModalFocus } from '../lib/useModalFocus'
 import { Eye, LoaderCircle, Pencil, Share2, TriangleAlert, X } from 'lucide-react'
 import { uiText } from '../i18n'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore, useRef } from 'react'
 import { usernameProblem } from '../lib/sync/crypto'
 import type { SharePermission } from '../lib/sync/api'
 import { userShares } from '../lib/sync/userShares'
@@ -23,6 +24,8 @@ type Found = { username: string; fingerprint: string }
  */
 export function ShareWithUserDialog({ target, signedIn, onClose, onOpenAccountSettings, toast }: Props) {
   const state = useSyncExternalStore(userShares.subscribe, userShares.getState, userShares.getState)
+  const dialogRef = useRef<HTMLElement>(null)
+  useModalFocus(dialogRef)
   const [name, setName] = useState('')
   const [permission, setPermission] = useState<SharePermission>('read')
   const [found, setFound] = useState<Found | null>(null)
@@ -79,7 +82,7 @@ export function ShareWithUserDialog({ target, signedIn, onClose, onOpenAccountSe
   const ready = signedIn && state.ready
   return (
     <div className="modal-backdrop confirm-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section className="confirm-dialog share-user-dialog" role="dialog" aria-modal="true" aria-labelledby="fanotes-share-user-title" onPointerDown={(event) => event.stopPropagation()}>
+      <section ref={dialogRef} className="confirm-dialog share-user-dialog" role="dialog" aria-modal="true" aria-labelledby="fanotes-share-user-title" onPointerDown={(event) => event.stopPropagation()}>
         <header className="confirm-dialog-header">
           <span className="confirm-dialog-icon"><Share2 size={16} /></span>
           <div><h3 id="fanotes-share-user-title" data-i18n-ignore>{uiText(`„${target.name}“ mit einem Benutzer teilen`, `Share “${target.name}” with a user`)}</h3></div>

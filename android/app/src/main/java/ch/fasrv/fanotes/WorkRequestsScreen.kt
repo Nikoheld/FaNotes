@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
@@ -30,7 +31,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -139,7 +139,7 @@ private fun StatusChip(request: WorkRequest) {
 private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
     val ink = MaterialTheme.colorScheme.onSurface
     Text(
-        label, fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, color = ink,
+        ui(label), fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, color = ink,
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
             .background(if (selected) ink.copy(alpha = 0.1f) else Color.Transparent)
@@ -265,7 +265,7 @@ fun WorkRequestsDialog(model: FaNotesViewModel) {
                             Checkbox(withLogs, { withLogs = it })
                             Text(t("Protokoll der letzten fünf Minuten anhängen"), fontSize = 13.sp)
                         }
-                        error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
+                        error?.let { Text(ui(it), color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             TextButton(enabled = !busy && title.isNotBlank() && description.isNotBlank(), onClick = { send() }) {
                                 Text(t(if (busy) "Wird gesendet …" else "Anfrage senden"))
@@ -274,7 +274,7 @@ fun WorkRequestsDialog(model: FaNotesViewModel) {
                     } else if (selected != null) {
                         WorkRequestDetailView(model, selected!!) { selected = null }
                     } else {
-                        error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
+                        error?.let { Text(ui(it), color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
                         val list = requests
                         when {
                             list == null -> Text(t("Wird geladen …"), color = LocalStatusInk.current.muted)
@@ -341,11 +341,11 @@ private fun WorkRequestDetailView(model: FaNotesViewModel, id: String, onBack: (
     if (request.approved && request.status == ch.fasrv.fanotes.desk.WorkRequestStatus.WaitingForYou) {
         Text(t("Freigegeben. Claude übernimmt die Änderung, sobald die Prüfung bestanden ist."), fontSize = 13.sp)
     }
-    request.reason?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
+    request.reason?.let { Text(ui(it), color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
     request.pr?.let { pr ->
         val ci = workRequestCiLabel(pr.ci)?.let { " · ${t("Prüfung")}: ${t(it)}" }.orEmpty()
         Text(
-            "${t("Änderung")} #${pr.number}$ci", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp,
+            ui("${t("Änderung")} #${pr.number}$ci"), color = MaterialTheme.colorScheme.primary, fontSize = 13.sp,
             modifier = Modifier.clickable { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(pr.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } },
         )
     }
@@ -364,7 +364,7 @@ private fun WorkRequestDetailView(model: FaNotesViewModel, id: String, onBack: (
             event.percent?.let { Text("$it %", fontSize = 11.sp, color = LocalStatusInk.current.muted) }
         }
     }
-    error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
+    error?.let { Text(ui(it), color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
     if (messageOpen && canMessageWorkRequest(request.status)) {
         OutlinedTextField(
             note, { note = it.take(WORK_REQUEST_MESSAGE_MAX) }, Modifier.fillMaxWidth(), minLines = 2,

@@ -54,6 +54,29 @@ import ch.fasrv.fanotes.study.liveSeconds
  */
 data class StudyTimerChip(val label: String, val baseSec: Int, val run: ch.fasrv.fanotes.study.StudyTimerRun)
 
+/** A gutter column whose size [NotePageView.placeEditor] decides; the parent's measure pass does not re-wrap it. */
+private class GutterText(context: Context) : TextView(context) {
+    var fixedWidth = 0
+    var fixedHeight = 0
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        if (fixedWidth > 0 && fixedHeight > 0) {
+            super.onMeasure(
+                MeasureSpec.makeMeasureSpec(fixedWidth, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(fixedHeight, MeasureSpec.EXACTLY),
+            )
+        } else {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        }
+    }
+}
+
+private const val PREVIEW_WINDOW_MIN_CHARS = 30_000
+private const val PREVIEW_FIRST_CHARS = 12_000
+private const val PREVIEW_CARET_CHARS = 1_500
+private const val PREVIEW_TYPING_CHARS = 500
+private const val BLOCK_MARKER_CHARS = "`~\$|<-\n"
+
 /**
  * The page and its chrome live in one clipped frame. The toolbar is a later
  * sibling of the canvas, so a zoomed sheet cannot paint over it, and hiding
@@ -63,6 +86,17 @@ class NotePageView(context: Context) : FrameLayout(context) {
     val ink = InkSurfaceView(context)
     private var previewReady = false
     private var paintingPreview = false
+    /** True while [apply] loads text: one paint at the end instead of one per text or selection change. */
+    private var batchingPreview = false
+    private val previewRunnable = Runnable { paintLivePreview() }
+    /** Layout pixel range the last windowed paint covered; null when the whole text was styled. */
+    private var paintedTop = 0
+    private var paintedBottom = 0
+    private var paintedWindowed = false
+    /** Set by a keystroke in a long note: the next paint restyles only the lines around the caret. */
+    private var typingPaint = false
+    /** Whether the long note has block markers (fences, tables, ...), kept across typing so a keystroke does not rescan it. */
+    private var blockMarkersKnown: Boolean? = null
     private val editor = object : EditText(context) {
         // EditText.setText runs from the constructor and reports a selection
         // before the fields below exist. Stay quiet until init finishes.
@@ -146,7 +180,32 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
         override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
             super.onSizeChanged(w, h, oldw, oldh)
-            if (w != oldw && previewReady && !paintingPreview) paintLivePreview()
+            if ((w != oldw || h != oldh) && previewReady && !paintingPreview) schedulePreview()
+        }
+
+        /** The size [placeEditor] decided on. The parent's own measure pass must not give the text another width. */
+        var fixedWidth = 0
+        var fixedHeight = 0
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            if (fixedWidth > 0 && fixedHeight > 0) {
+                super.onMeasure(
+                    MeasureSpec.makeMeasureSpec(fixedWidth, MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(fixedHeight, MeasureSpec.EXACTLY),
+                )
+            } else {
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            }
+        }
+
+        override fun onScrollChanged(horiz: Int, vert: Int, oldHoriz: Int, oldVert: Int) {
+            super.onScrollChanged(horiz, vert, oldHoriz, oldVert)
+            if (previewReady && !paintingPreview && paintedWindowed) {
+                val margin = height / 2
+                val needsTop = paintedTop > 0 && vert < paintedTop + margin
+                val needsBottom = paintedBottom < (layout?.height ?: 0) && vert + height > paintedBottom - margin
+                if (needsTop || needsBottom) schedulePreview(40)
+            }
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -175,7 +234,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             trackSelection(selStart, selEnd)
             spelling.schedule(220)
             invalidate()
-            if (previewReady && !paintingPreview) paintLivePreview()
+            if (previewReady && !paintingPreview && !writing) schedulePreview()
             tags?.onCaretMoved()
         }
 
@@ -698,8 +757,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
             return true
         }
     }
-    private val lineNumbers = TextView(context)
-    private val foldMarks = TextView(context)
+    private val lineNumbers = GutterText(context)
+    private val foldMarks = GutterText(context)
     private val boxField = object : EditText(context) {
         override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
             if (keyCode == KeyEvent.KEYCODE_ESCAPE && !event.isCtrlPressed && !event.isAltPressed &&
@@ -1043,9 +1102,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.setTextColor(0xFF252630.toInt())
         editor.highlightColor = selectionWashArgb(ink.accentColor)
         editor.setHintTextColor(0xFF8A8D98.toInt())
-        editor.hint = "Text auf dem Papier"
+        editor.hint = ch.fasrv.fanotes.desk.ChromeText.ui("Text auf dem Papier")
         editor.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-        editor.setLineSpacing(0f, 1.72f)
+        editor.setLineSpacing(0f, EDITOR_LINE_SPACING_MULT)
         editor.gravity = Gravity.TOP or Gravity.START
         editor.setPadding(0, 0, 0, 0)
         lineNumbers.setTextColor(0xFF8A8D98.toInt())
@@ -1102,8 +1161,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
                         editor.rememberChange(origin, bracket.text)
                         onVisibleMarkdown(origin, bracket.text)
                     } else {
-                        val replacement = ch.fasrv.fanotes.desk.markdownEnterReplacement(editBefore, next)
-                            ?: ch.fasrv.fanotes.desk.markdownBackspaceReplacement(editBefore, next)
+                        val replacement = (if (next.length == editBefore.length + 1 && next.getOrNull(changeStart) == '\n') {
+                            ch.fasrv.fanotes.desk.markdownEnterReplacement(editBefore, next)
+                        } else null)
+                            ?: (if (next.length == editBefore.length - 1) ch.fasrv.fanotes.desk.markdownBackspaceReplacement(editBefore, next) else null)
                         if (replacement != null) {
                             writing = true
                             editor.setText(replacement.text)
@@ -1149,7 +1210,19 @@ class NotePageView(context: Context) : FrameLayout(context) {
                         }
                     }
                 }
-                if (previewReady) paintLivePreview()
+                val next0Large = !writing && (editor.text?.length ?: 0) > PREVIEW_WINDOW_MIN_CHARS
+                // Large note: the caret move that follows this edit schedules the (single) repaint; painting here
+                // as well would restyle the window twice per keystroke.
+                if (previewReady) {
+                    if (next0Large) {
+                        val live: CharSequence = editor.text ?: ""
+                        val insertedLen = live.length - editBefore.length + changeDeleted
+                        val inserted = if (insertedLen in 1..40 && changeStart + insertedLen <= live.length) live.subSequence(changeStart, changeStart + insertedLen).toString() else ""
+                        if (changeDeleted > 0 || insertedLen > 40 || inserted.any { it in BLOCK_MARKER_CHARS }) blockMarkersKnown = null
+                        typingPaint = true
+                        schedulePreview()
+                    } else paintLivePreview()
+                }
                 if (!writing) tags?.onUserEdit()
             }
         })
@@ -1326,7 +1399,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 topMargin = dp(ch.fasrv.fanotes.desk.TOUCH_TOOLBAR_DP) - dp(1).coerceAtLeast(1)
             },
         )
-        handle.text = "Werkzeuge"
+        handle.text = ch.fasrv.fanotes.desk.ChromeText.ui("Werkzeuge")
         handle.gravity = Gravity.CENTER
         handle.textSize = 13f
         handle.visibility = GONE
@@ -1463,15 +1536,66 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
 
     /** Styles every line except the one being edited, matching the desktop live preview. */
+    private fun schedulePreview(delayMs: Long = 0) {
+        editor.removeCallbacks(previewRunnable)
+        editor.postDelayed(previewRunnable, delayMs)
+    }
+
+    /**
+     * Character ranges to restyle. A short note is styled whole (null). A long one gets the screen and a couple of
+     * screens around it plus the lines around the caret, so a caret move costs the same in a 5,000-line note.
+     */
+    private fun previewWindows(editable: android.text.Editable): List<IntRange>? {
+        val length = editable.length
+        if (length <= PREVIEW_WINDOW_MIN_CHARS) {
+            paintedWindowed = false
+            return null
+        }
+        val windows = ArrayList<IntRange>(2)
+        val layout = editor.layout
+        if (typingPaint && paintedWindowed && editor.visibility == VISIBLE) {
+            // Typing: the screen was styled already and moves with the text; only the caret lines change.
+            val from = (editor.selectionStart.coerceAtLeast(0) - PREVIEW_TYPING_CHARS).coerceAtLeast(0)
+            val to = (editor.selectionEnd.coerceAtLeast(0) + PREVIEW_TYPING_CHARS).coerceAtMost(length)
+            return listOf(from until to.coerceAtLeast(from + 1))
+        }
+        if (layout != null && layout.lineCount > 0 && editor.height > 0 && editor.visibility == VISIBLE) {
+            val top = (editor.scrollY - editor.height * 2).coerceAtLeast(0)
+            val bottom = (editor.scrollY + editor.height * 3).coerceAtMost(layout.height)
+            val first = layout.getLineForVertical(top)
+            val last = layout.getLineForVertical(bottom).coerceAtLeast(first)
+            paintedTop = layout.getLineTop(first)
+            paintedBottom = layout.getLineBottom(last)
+            windows += layout.getLineStart(first) until layout.getLineEnd(last).coerceAtLeast(layout.getLineStart(first) + 1)
+        } else {
+            // Hidden or not laid out yet: style the top of the note; the next layout or scroll paints the rest.
+            paintedTop = 0
+            paintedBottom = 0
+            windows += 0 until PREVIEW_FIRST_CHARS.coerceAtMost(length)
+        }
+        paintedWindowed = true
+        val caretFrom = (editor.selectionStart.coerceAtLeast(0) - PREVIEW_CARET_CHARS).coerceAtLeast(0)
+        val caretTo = (editor.selectionEnd.coerceAtLeast(0) + PREVIEW_CARET_CHARS).coerceAtMost(length)
+        if (caretTo > caretFrom && windows.none { caretFrom >= it.first && caretTo <= it.last + 1 }) windows += caretFrom until caretTo
+        return windows
+    }
+
     private fun paintLivePreview() {
-        if (!previewReady || paintingPreview) return
+        if (!previewReady || paintingPreview || batchingPreview) return
         val editable = editor.text ?: return
+        editor.removeCallbacks(previewRunnable)
         paintingPreview = true
         try {
             val box = ch.fasrv.fanotes.desk.paperDetailsBox(editor.textSize)
             val textWidth = editor.layout?.width?.toFloat()
                 ?: (editor.width - editor.paddingLeft - editor.paddingRight).toFloat()
             val imageColumn = (textWidth - box.border * 2f - box.padX * 2f).coerceAtLeast(0f)
+            val windows = previewWindows(editable)
+            val markers = when {
+                windows == null -> null
+                typingPaint && blockMarkersKnown != null -> blockMarkersKnown
+                else -> ch.fasrv.fanotes.desk.textHasBlockMarkers(editable.toString()).also { blockMarkersKnown = it }
+            }
             applyLivePreview(
                 editable,
                 editor.selectionStart,
@@ -1481,9 +1605,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 editor.isFocused,
                 ink.paperImages,
                 imageColumn,
+                windows,
+                markers,
+                editor.lineSpacingMultiplier,
             )
             editor.bindLinkPointer()
         } finally {
+            typingPaint = false
             paintingPreview = false
         }
     }
@@ -1723,9 +1851,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
             if (path != boundPath || shown != visible) editor.resetHistory()
             boundPath = path
             writing = true
-            replaceEditorText(shown, visible)
-            editor.setSelection(selection.first, selection.second)
-            writing = false
+            batchingPreview = true
+            try {
+                replaceEditorText(shown, visible)
+                editor.setSelection(selection.first, selection.second)
+            } finally {
+                batchingPreview = false
+                writing = false
+            }
             paintLivePreview()
         }
         if (ink.markdown != visible) {
@@ -1803,6 +1936,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             val imm = context.getSystemService(InputMethodManager::class.java)
             imm.showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT)
             placeEditor()
+            schedulePreview()
         } else {
             editor.clearFocus()
             val imm = context.getSystemService(InputMethodManager::class.java)
@@ -1957,7 +2091,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             tools.gravity = Gravity.CENTER_VERTICAL
             tools.setPadding(0, 0, dp(8), 0)
             toolbar.addView(tools, LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.TOUCH_TOOLBAR_DP)))
-            handle.text = "Werkzeuge"
+            handle.text = ch.fasrv.fanotes.desk.ChromeText.ui("Werkzeuge")
             handle.textSize = 13f
             handle.layoutParams = LayoutParams(dp(120), dp(40), Gravity.TOP or Gravity.END)
         }
@@ -2236,11 +2370,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         for (slot in ch.fasrv.fanotes.desk.toolbarEndSlots(textMode, pdfNote)) {
             when (slot) {
                 "paper" -> tools.addView(paperChip(paper))
-                "tags" -> tools.addView(chip("Tag hinzufügen") { onToolbarAction("tags") })
-                "search" -> tools.addView(chip("Im Text suchen …") { onToolbarAction("search") })
-                "backup" -> tools.addView(chip("Sichern") { onToolbarAction("backup") })
+                "tags" -> tools.addView(endIcon("tag", "Tag hinzufügen") { onToolbarAction("tags") })
+                "search" -> tools.addView(endIcon("search", "Im Text suchen") { onToolbarAction("search") })
+                "backup" -> tools.addView(endIcon("history", "Notiz sichern") { onToolbarAction("backup") })
                 "links" -> addLinkTools()
-                "more" -> tools.addView(chip("Mehr") { onToolbarAction("more") })
+                "more" -> tools.addView(endIcon("ellipsis", "Mehr") { onToolbarAction("more") })
             }
         }
     }
@@ -2344,23 +2478,29 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
     }
 
+    /** Icon buttons in groups (text, structure, blocks, history); every one stays a 48 dp target. */
     private fun addTextTools(canUndo: Boolean, canRedo: Boolean) {
-        listOf(
-            "bold" to "Fett",
-            "italic" to "Kursiv",
-            "strike" to "Durchgestrichen",
-            "inlineCode" to "Code",
-            "link" to "Link",
-            "heading1" to "H1",
-            "heading2" to "H2",
-            "bulletList" to "Liste",
-            "checklist" to "Aufgabe",
-            "quote" to "Zitat",
-            "table" to "Tabelle",
-        ).forEach { (action, label) -> tools.addView(chip(label) { format(action) }) }
-        tools.addView(chip("Lernblock", description = "Lernblock einfügen") { onToolbarAction("study-insert") })
-        tools.addView(chip("↶", enabled = canUndo) { onUndo() })
-        tools.addView(chip("↷", enabled = canRedo) { onRedo() })
+        fun icon(name: String, label: String, enabled: Boolean = true, click: () -> Unit) {
+            tools.addView(penKit.toolButton(name, label, enabled = enabled, showLabel = false, click = click))
+        }
+        fun fmt(name: String, label: String, action: String) = icon(name, label) { format(action) }
+        fmt("bold", "Fett", "bold")
+        fmt("italic", "Kursiv", "italic")
+        fmt("strikethrough", "Durchgestrichen", "strike")
+        fmt("code", "Code", "inlineCode")
+        tools.addView(penKit.divider())
+        fmt("link", "Link", "link")
+        fmt("heading-1", "Überschrift 1", "heading1")
+        fmt("heading-2", "Überschrift 2", "heading2")
+        tools.addView(penKit.divider())
+        fmt("list", "Liste", "bulletList")
+        fmt("list-checks", "Aufgabe", "checklist")
+        fmt("quote", "Zitat", "quote")
+        fmt("table", "Tabelle", "table")
+        icon("graduation-cap", "Lernblock einfügen") { onToolbarAction("study-insert") }
+        tools.addView(penKit.divider())
+        icon("undo-2", "Rückgängig", canUndo) { onUndo() }
+        icon("redo-2", "Wiederholen", canRedo) { onRedo() }
     }
 
     private fun addPdfTools() {
@@ -2547,7 +2687,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val terms = ch.fasrv.fanotes.study.termsOf(ink.study.items)
         textDialog(
             title = "Begriffe",
-            hint = "Begriffe, mit Komma getrennt",
+            hint = ch.fasrv.fanotes.desk.ChromeText.ui("Begriffe, mit Komma getrennt"),
             initial = draft ?: terms.joinToString(", "),
             max = 4000,
             multiline = true,
@@ -2685,14 +2825,17 @@ class NotePageView(context: Context) : FrameLayout(context) {
         studyOpen = state.tool != null
     }
 
+    private fun endIcon(icon: String, label: String, click: () -> Unit): View =
+        penKit.toolButton(icon, label, showLabel = false, click = click)
+
     private fun addLinkTools() {
-        tools.addView(chip("Verlinkung") {
+        tools.addView(endIcon("link-2", "Verlinkung") {
             ink.placingLink = true
             ink.publishLinkChrome()
             onDeskShortcut("note-link")
         })
-        tools.addView(chip("Entfernen") {
-            val id = ink.selectedLinkId ?: ink.linkMarks.lastOrNull()?.id ?: return@chip
+        tools.addView(endIcon("unlink", "Verlinkung entfernen") {
+            val id = ink.selectedLinkId ?: ink.linkMarks.lastOrNull()?.id ?: return@endIcon
             ink.onRemoveLink(id)
             ink.selectedLinkId = null
             ink.publishLinkChrome()
@@ -3153,6 +3296,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
         suppressBoxClose = false
     }
 
+    private var foldGlyphText: String? = null
+    private var editorPlaceKey = ""
+    private var lineNumberCount = -1
+
     private fun placeEditor() {
         if (editor.visibility != VISIBLE) {
             lineNumbers.visibility = GONE
@@ -3160,26 +3307,41 @@ class NotePageView(context: Context) : FrameLayout(context) {
             return
         }
         val scale = ink.cameraScale().coerceAtLeast(0.2f)
-        editor.setTextSize(TypedValue.COMPLEX_UNIT_PX, ink.editorFontPx * scale)
-        editor.setLineSpacing(0f, ink.editorLineHeight)
-        applyPaperCaret(editor, ink.accentColor, ink.editorFontPx * scale)
-        editor.highlightColor = selectionWashArgb(ink.accentColor)
         val x = (ink.cameraLeft() + 72f * scale).toInt()
         val y = (ink.cameraTop() + 78f * scale).toInt()
         val width = (ink.textColumnPx() * scale).toInt().coerceAtLeast(dp(80))
         val height = (ink.height - y).coerceAtLeast(dp(40))
-        editor.measure(
-            MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-            MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
-        )
+        // Typing and caret moves call this too; the editor only needs touching when its geometry or look changed.
+        val placeKey = "$x|$y|$width|$height|${ink.editorFontPx * scale}|${ink.editorLineHeight}|${ink.accentColor}"
+        if (placeKey != editorPlaceKey) {
+            editorPlaceKey = placeKey
+            editor.setTextSize(TypedValue.COMPLEX_UNIT_PX, ink.editorFontPx * scale)
+            editor.setLineSpacing(0f, ink.editorLineHeight)
+            applyPaperCaret(editor, ink.accentColor, ink.editorFontPx * scale)
+            editor.highlightColor = selectionWashArgb(ink.accentColor)
+            editor.fixedWidth = width
+            editor.fixedHeight = height
+            editor.measure(
+                MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
+            )
+        }
+        // The frame layout moves its children in onLayout; put the editor back where it belongs.
         editor.layout(x, y, x + width, y + height)
         val foldWidth = dp(18)
         val glyphs = ch.fasrv.fanotes.desk.foldMarkerGlyphs(sourceMarkdown, foldedLines)
-        foldMarks.text = glyphs.joinToString("\n")
-        foldMarks.typeface = ink.editorTypeface
+        // A five-thousand-line gutter is re-laid out whenever its text is set, even to the same string.
+        val glyphText = glyphs.joinToString("\n")
+        if (glyphText != foldGlyphText) {
+            foldGlyphText = glyphText
+            foldMarks.text = glyphText
+        }
+        if (foldMarks.typeface !== ink.editorTypeface) foldMarks.typeface = ink.editorTypeface
         foldMarks.setTextSize(TypedValue.COMPLEX_UNIT_PX, ink.editorFontPx * scale)
         foldMarks.setLineSpacing(0f, ink.editorLineHeight)
         foldMarks.visibility = if (glyphs.any { it.isNotEmpty() }) VISIBLE else GONE
+        foldMarks.fixedWidth = foldWidth
+        foldMarks.fixedHeight = height
         foldMarks.measure(
             MeasureSpec.makeMeasureSpec(foldWidth, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
@@ -3188,12 +3350,17 @@ class NotePageView(context: Context) : FrameLayout(context) {
         foldMarks.scrollTo(0, editor.scrollY)
         if (ink.showLineNumbers) {
             val labels = ch.fasrv.fanotes.desk.editorLineNumberLabels(editor.text?.toString().orEmpty())
-            lineNumbers.text = labels.joinToString("\n")
+            if (labels.size != lineNumberCount) {
+                lineNumberCount = labels.size
+                lineNumbers.text = labels.joinToString("\n")
+            }
             lineNumbers.typeface = ink.editorTypeface
             lineNumbers.setTextSize(TypedValue.COMPLEX_UNIT_PX, ink.editorFontPx * scale * 0.82f)
             lineNumbers.setLineSpacing(0f, ink.editorLineHeight)
             lineNumbers.visibility = VISIBLE
             val gutter = ch.fasrv.fanotes.desk.lineNumberColumnPx(editor.text?.toString().orEmpty(), ink.editorFontPx * scale, dp(18))
+            lineNumbers.fixedWidth = gutter
+            lineNumbers.fixedHeight = height
             lineNumbers.measure(
                 MeasureSpec.makeMeasureSpec(gutter, MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),

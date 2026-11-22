@@ -15,7 +15,7 @@ data class DisplayMathBlock(
 )
 
 fun displayMathBlocks(text: String): List<DisplayMathBlock> {
-    if (text.isEmpty()) return emptyList()
+    if (text.isEmpty() || !text.contains("$$")) return emptyList()
     val lines = mathDocumentLines(text)
     val blocks = ArrayList<DisplayMathBlock>()
     var open: MathDocLine? = null

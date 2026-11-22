@@ -41,18 +41,28 @@ const fsp = require('node:fs/promises')
 const os = require('node:os')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
+// V8 bytecode of main.cjs and the modules it loads is cached on disk, so the next start skips
+// compiling roughly 700 KB of main-process JavaScript before the window can be created.
+// Everything below this line is loaded through the cache; any failure just means no cache.
+try {
+  const userDataSwitch = app.commandLine.getSwitchValue('user-data-dir')
+  const cacheBase = userDataSwitch && path.isAbsolute(userDataSwitch) ? userDataSwitch : path.join(app.getPath('appData'), 'FaNotes')
+  require('node:module').enableCompileCache?.(path.join(cacheBase, 'node-compile-cache'))
+} catch { /* a read-only profile or an old runtime starts without the cache */ }
 const folderLocations = require('./folder-locations.cjs')
 const { createTreeScanCache, mergeTreeEntries } = require('./tree-scan.cjs')
 const vaultWatch = require('./vault-watch.cjs')
 const { coerceWorksheetBytes } = require('./worksheet-bytes.cjs')
 const { encodeWindowCapture } = require('./window-capture.cjs')
 const { publishNewFile } = require('./exclusive-publish.cjs')
-const { safeEntryName } = require('./entry-names.cjs')
+const { openWithRetry, renameWithRetry } = require('./fs-retry.cjs')
+const { isWindowsUnsafePath, safeEntryName, samePhysicalPath } = require('./entry-names.cjs')
 const { defaultPenOnlyForPlatform } = require('./ink-defaults.cjs')
 const { DEFAULT_TABLET_BUTTON_ACTIONS } = require('./tablet-buttons.cjs')
 const { sanitizeSettings: sanitizeStoredSettings } = require('./settings-sanitize.cjs')
 const diagnostics = require('./diagnostics.cjs')
 const { channelForPackagedVersion } = require('./releaseVersion.cjs')
+const { migrateBetaToStable, keepChannelMarker } = require('./channel-migration.cjs')
 const { localizeDialogOptions, localizeText, resolveLanguage } = require('./i18n.cjs')
 const { installSecurityHeaders } = require('./content-security-policy.cjs')
 const {
@@ -91,7 +101,7 @@ const {
 } = require('./famd.cjs')
 const { createLocalPageStats } = require('./page-stats-local.cjs')
 const { createExcerpt } = require('./search-ink.cjs')
-const { detectLineEnding, toLf, applyLineEnding } = require('./line-endings.cjs')
+const { detectLineEnding, toLf, applyLineEnding, hasBom, stripBom } = require('./line-endings.cjs')
 const { companionInkNeedsRecord, isUnexplainedEmptyPage, recordDocumentForEmptyCompanion, refusesEmptyInkSave } = require('./ink-save-guard.cjs')
 const { applyNoteTextFieldOps } = require('./noteTextFieldMerge.mjs')
 const { isLocalAiHostname } = require('./localAiHost.mjs')
@@ -233,6 +243,7 @@ process.on('uncaughtException', (error) => {
   console.error('FaNotes: unbehandelte Ausnahme:', error?.stack ?? error)
   diagnosticsService()?.recordMainException('uncaughtException', error)
 })
+let appQuitting = false
 app.on('child-process-gone', (_event, details) => {
   diagnosticsService()?.recordProcessGone('child-process-gone', details)
   if (!details || details.type === 'Utility') return
@@ -250,6 +261,8 @@ function diagnosticsService() {
       getSettings: () => currentSettings,
       appInfo: () => ({ version: app.getVersion(), platform: process.platform === 'win32' ? 'windows' : process.platform, arch: process.arch, language: String(currentSettings.uiLanguage === 'system' ? app.getLocale() : currentSettings.uiLanguage).slice(0, 2) }),
       appRoots: [app.getAppPath(), __dirname],
+      // Helpers are killed (SIGTERM, exit 15) on every quit; that is not a crash.
+      isQuitting: () => appQuitting,
       isOnline: () => net.isOnline(),
       isIdle: () => {
         try {
@@ -260,7 +273,14 @@ function diagnosticsService() {
       memory: () => {
         const metrics = app.getAppMetrics()
         const mb = (kb) => Math.round(kb / 1024 / 10) * 10
+        // Per process kind, so a 1.6 GB total can be traced to the renderer, the GPU or a helper.
+        const byType = { main: 0, renderer: 0, gpu: 0, utility: 0, other: 0 }
+        for (const item of metrics) {
+          const kind = item.type === 'Browser' ? 'main' : item.type === 'Tab' ? 'renderer' : item.type === 'GPU' ? 'gpu' : item.type === 'Utility' ? 'utility' : 'other'
+          byType[kind] += item.memory?.workingSetSize ?? 0
+        }
         return {
+          byType: Object.fromEntries(Object.entries(byType).map(([kind, kb]) => [kind, mb(kb)])),
           processes: metrics.length,
           totalMb: mb(metrics.reduce((sum, item) => sum + (item.memory?.workingSetSize ?? 0), 0)),
           mainRssMb: mb(process.memoryUsage().rss / 1024),
@@ -379,6 +399,7 @@ const IPC = Object.freeze({
   updateCheck: 'fanotes:update-check',
   updateDownload: 'fanotes:update-download',
   updateInstall: 'fanotes:update-install',
+  updateInstallLater: 'fanotes:update-install-later',
   revealInFolder: 'fanotes:reveal-in-folder',
   openExternal: 'fanotes:open-external',
   beforeClose: 'fanotes:before-close',
@@ -466,6 +487,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   installUpdatesOnQuit: true,
   backgroundUpdates: true,
   updateChannel: channelForPackagedVersion(app.getVersion()),
+  channelAutoStableDoneAt: '',
   memoryBudgetMb: 0,
   ocrThreadLimit: 0,
   desktopOcrModel: 'extended',
@@ -722,6 +744,14 @@ let startupPreparationPromise = Promise.resolve()
 let configWriteQueue = Promise.resolve()
 let configMutationQueue = Promise.resolve()
 let updateManager = null
+/**
+ * Set when the app itself asks to close in order to restart into a staged
+ * update. The close goes through the normal renderer flush (notes, ink,
+ * settings); only after the renderer confirmed it is the install helper
+ * started. A request older than a minute is stale (the flush failed and the
+ * user kept working), so a later manual quit does not relaunch by surprise.
+ */
+let updateRestartRequestedAt = 0
 let updateManagerPromise = null
 let updateLocks = null
 let backgroundSchedulerSync = null
@@ -917,6 +947,7 @@ async function recognizeInkLine(request) {
   return { logits: result.logits, dims: result.dims, engine: result.engine }
 }
 
+const OCR_INDEX_HOST_KEEP_ALIVE_SECONDS = 30
 let ocrIndexHost = null
 function getOcrIndexHost() {
   if (ocrIndexHost) return ocrIndexHost
@@ -929,9 +960,12 @@ function getOcrIndexHost() {
     preload: path.join(__dirname, 'ocr-host-preload.cjs'),
     configuredWorkers: () => Number(currentSettings.ocrThreadLimit),
     onBattery: () => { try { return powerMonitor.isOnBatteryPower() } catch { return false } },
+    // Background indexing comes in bursts a few seconds apart: the model does not need to stay loaded for the
+    // interactive keep-alive (up to 10 minutes) after the last line. Never longer than the user's setting.
     keepAliveMs: () => {
       const configured = Number(currentSettings.ocrModelKeepAliveSeconds)
-      return Number.isSafeInteger(configured) && configured >= 0 && configured <= 600 ? Math.max(1, configured * 1_000) : 120_000
+      const seconds = Number.isSafeInteger(configured) && configured >= 0 && configured <= 600 ? configured : 120
+      return Math.max(1, Math.min(seconds, OCR_INDEX_HOST_KEEP_ALIVE_SECONDS) * 1_000)
     },
   })
   return ocrIndexHost
@@ -1233,7 +1267,7 @@ async function atomicWrite(targetPath, data, options = {}) {
     await handle.close()
     handle = null
     if (options.exclusive) await publishNewFile(temporaryPath, targetPath)
-    else await fsp.rename(temporaryPath, targetPath)
+    else await renameWithRetry(temporaryPath, targetPath)
 
     try {
       const directoryHandle = await fsp.open(directory, fs.constants.O_RDONLY)
@@ -1499,7 +1533,10 @@ function readConfig() {
             ? decodedSettings
             : { ...decodedSettings, recognitionMode: 'auto', lastRecognitionMode: previousMode }
           const sanitized = sanitizeSettings(settingsCandidate)
-          currentSettings = diagnostics.migrateDiagnosticsSettings(applyExperimentalHandwritingGate(sanitized))
+          currentSettings = migrateBetaToStable(
+            diagnostics.migrateDiagnosticsSettings(applyExperimentalHandwritingGate(sanitized)),
+            app.getVersion(),
+          )
           applyThemeToShell(currentSettings.theme)
           if (plaintextSecretsNeedScrub) {
             plaintextSecretsNeedScrub = false
@@ -1509,6 +1546,7 @@ function readConfig() {
             currentSettings.experimentalHandwritingToTextSeenVersion
             !== sanitized.experimentalHandwritingToTextSeenVersion
             || currentSettings.diagnosticsSettingsVersion !== sanitized.diagnosticsSettingsVersion
+            || currentSettings.channelAutoStableDoneAt !== sanitized.channelAutoStableDoneAt
           ) {
             void persistConfig()
           }
@@ -1532,7 +1570,7 @@ function readConfig() {
         }
       }
       // A fresh install has no config yet: the same one-time migration gives it the "on" default.
-      currentSettings = diagnostics.migrateDiagnosticsSettings(currentSettings)
+      currentSettings = migrateBetaToStable(diagnostics.migrateDiagnosticsSettings(currentSettings), app.getVersion())
       diagnosticsService()?.applySettings(currentSettings)
     })()
   }
@@ -1786,6 +1824,7 @@ function normalizeRelativePath(value, { allowRoot = false, allowInternal = false
   if (segments.some((segment) => !segment || segment === '.' || segment === '..')) {
     throw new Error('Pfad-Traversal ist nicht erlaubt.')
   }
+  if (process.platform === 'win32' && isWindowsUnsafePath(trimmed)) throw new Error('Dieser Name ist unter Windows nicht erlaubt.')
   if (!allowInternal && PROTECTED_INTERNAL_VAULT_DIRECTORIES.has(segments[0].toLocaleLowerCase('en-US'))) {
     throw new Error('Interne FaNotes-Dateien sind geschützt.')
   }
@@ -2330,7 +2369,7 @@ async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, tar
 }
 
 async function readRegularFileNoFollow(target, maxBytes) {
-  const handle = await fsp.open(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+  const handle = await openWithRetry(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
   try {
     const info = await handle.stat()
     if (!info.isFile()) throw new Error('Die Datei ist keine reguläre Datei.')
@@ -2518,7 +2557,7 @@ function physicalAllowed(root, absolutePath) {
 
 async function relocatePath(source, destination) {
   try {
-    await fsp.rename(source, destination)
+    await renameWithRetry(source, destination)
     return
   } catch (error) {
     if (error?.code !== 'EXDEV') throw error
@@ -2585,9 +2624,11 @@ function entryFromStat(root, absolutePath, info, children, color) {
   }
 }
 
+// One collator for the whole sort: String#localeCompare with options builds a new collator on every call.
+const TREE_NAME_COLLATOR = new Intl.Collator('de', { numeric: true, sensitivity: 'base' })
 function compareEntries(left, right) {
   if (left.kind !== right.kind) return left.kind === 'folder' ? -1 : 1
-  return left.name.localeCompare(right.name, 'de', { numeric: true, sensitivity: 'base' })
+  return TREE_NAME_COLLATOR.compare(left.name, right.name)
 }
 
 // containRoot: the real directory subfolders must stay inside (the vault, or the linked location the walk is in).
@@ -2608,19 +2649,27 @@ async function readTreeDirectory(root, directory, depth = 0, folderColors = new 
     }
     const scanReal = mapped ? await withTreeIoSlot(() => fsp.realpath(scan)).catch(() => null) : containRoot
     if (mapped && !scanReal) continue
+    // Every lstat of this directory starts at once (the shared I/O limiter keeps the real parallelism
+    // bounded) instead of one await per entry, which dominated the scan on NAS and network vaults.
+    // Files the tree never lists (the Dirent already says "file" and the extension is not shown) are not stat'ed.
+    const statJobs = new Map()
+    for (const directoryEntry of directoryEntries) {
+      if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink()) continue
+      if (seen.has(directoryEntry.name) && !directoryEntry.isDirectory()) continue
+      if (directoryEntry.isFile() && !TREE_EXTENSIONS.has(path.extname(directoryEntry.name).toLocaleLowerCase('en-US'))) continue
+      const entryPath = path.join(scan, directoryEntry.name)
+      statJobs.set(directoryEntry.name, withTreeIoSlot(() => fsp.lstat(entryPath)).catch(() => null))
+    }
     for (const directoryEntry of directoryEntries) {
       if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink()) continue
       const duplicate = seen.has(directoryEntry.name)
       // Only folders can repeat across linked locations (merged below); a repeated file keeps the first.
       if (duplicate && !directoryEntry.isDirectory()) continue
+      const statJob = statJobs.get(directoryEntry.name)
+      if (!statJob) continue
       const absolutePath = path.join(scan, directoryEntry.name)
-      let info
-      try {
-        info = await withTreeIoSlot(() => fsp.lstat(absolutePath))
-      } catch {
-        continue
-      }
-      if (info.isSymbolicLink()) continue
+      const info = await statJob
+      if (!info || info.isSymbolicLink()) continue
       const logicalChild = logicalDir ? `${logicalDir}/${directoryEntry.name}` : directoryEntry.name
       if (duplicate && !info.isDirectory()) continue
       if (info.isDirectory() && STORY_FOLDER.test(directoryEntry.name)) {
@@ -3875,6 +3924,14 @@ async function transformWithLmStudio(rawPayload) {
   return { markdown: unwrapLmStudioMarkdown(markdown), model: request.model, stats }
 }
 
+/** Closes the window through the normal save-everything path, then restarts into the staged update. */
+function requestUpdateRestart() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  updateRestartRequestedAt = Date.now()
+  allowWindowClose = false
+  mainWindow.close()
+}
+
 function ensureUpdateManager() {
   if (updateManager) return Promise.resolve(updateManager)
   if (!updateManagerPromise) {
@@ -4049,18 +4106,11 @@ function schedulePostStartupWork() {
         await manager.start()
         void syncBackgroundUpdates(manager)
         if (!currentSettings.installUpdatesOnQuit || !currentSettings.autoCheckUpdates) return
-        const launch = await manager.applyPendingInstallOnLaunch()
-        if (!launch?.installStarted) return
-        // The install helper waits for this process to exit, then swaps the
-        // binary and relaunches. Close without another save prompt.
-        allowWindowClose = true
-        invalidateCloseWarningState()
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          try { mainWindow.close() } catch { /* ignore */ }
-        }
-        setTimeout(() => {
-          try { app.quit() } catch { /* ignore */ }
-        }, 180).unref?.()
+        // Only a package that was already staged and verified restarts the app
+        // here; a fresh download waits for the next quit. The restart saves
+        // open work first, like every other close.
+        const launch = await manager.applyPendingInstallOnLaunch({ prepare: false })
+        if (launch?.ready) requestUpdateRestart()
       })
       .catch((error) => console.warn('FaNotes-Auto-Updater konnte nicht gestartet werden:', error?.message ?? error))
   }, 5_000)
@@ -4246,7 +4296,7 @@ function registerIpcHandlers() {
       const { target } = await resolveVaultPath(relativePath, { expected: 'file' })
       const buffer = await readRegularFileNoFollow(target, noteByteLimit(relativePath))
       // The app works on LF; writeFile restores the file's own ending.
-      return toLf(stripFamdPayload(buffer.toString('utf8')))
+      return toLf(stripFamdPayload(stripBom(buffer.toString('utf8'))))
     } catch (error) {
       // A PDF without handwriting has no .famd sidecar yet; that is normal and not an error.
       // A missing .famd of a real handwriting note must still throw, so a save cannot recreate it as empty.
@@ -4360,6 +4410,8 @@ function registerIpcHandlers() {
               const lfText = lfBody.endsWith('\n') || lfBody.length === 0 ? lfBody : `${lfBody}\n`
               // Keep the ending the file already has (CRLF notes stay CRLF).
               written = applyLineEnding(lfText, existingMd ? detectLineEnding(existingMd) : 'lf')
+              // A note that began with a byte order mark keeps it.
+              if (hasBom(existingMd)) written = `\uFEFF${written}`
             }
           }
           await atomicWrite(target, written, { encoding: 'utf8', mode: 0o600 })
@@ -4782,7 +4834,7 @@ function registerIpcHandlers() {
       if (info.isDirectory() && (destRelative === oldRelativePath || destRelative.startsWith(`${oldRelativePath}/`))) {
         throw new Error('Ein Ordner kann nicht in sich selbst verschoben werden.')
       }
-      if (path.resolve(path.dirname(target)) === path.resolve(destDir)) return oldRelativePath
+      if (samePhysicalPath(path.dirname(target), destDir)) return oldRelativePath
 
       const currentName = path.basename(target)
       const destContent = folderLocations.contentRoots(folderLocationMap(root), root, destRelative)
@@ -5028,9 +5080,9 @@ function registerIpcHandlers() {
       let ownerInk = null
       if (file.kind !== 'pdf') {
         try {
-          const raw = (await readRegularFileNoFollow(file.absolutePath, noteByteLimit(relativePath))).toString('utf8')
+          const raw = stripBom((await readRegularFileNoFollow(file.absolutePath, noteByteLimit(relativePath))).toString('utf8'))
           const parsed = parseFamd(raw)
-          content = parsed.markdown || stripFamdPayload(raw)
+          content = toLf(parsed.markdown || stripFamdPayload(raw))
           ownerInk = parsed.payload?.ink ?? null
           if (typeof parsed.payload?.ink?.searchTranscript === 'string') {
             inkTranscript = parsed.payload.ink.searchTranscript.slice(0, 500_000)
@@ -6189,7 +6241,7 @@ function registerIpcHandlers() {
     await ensureBootstrap()
     return queueConfigMutation(async () => {
       const previousSettings = { ...currentSettings }
-      const nextSettings = diagnostics.keepDiagnosticsVersion(sanitizeSettings(settings, previousSettings), previousSettings)
+      const nextSettings = keepChannelMarker(diagnostics.keepDiagnosticsVersion(sanitizeSettings(settings, previousSettings), previousSettings), previousSettings)
       const clearProtectedSecrets = options?.clearProtectedSecrets === true
       try {
         await persistConfig({
@@ -6289,15 +6341,13 @@ function registerIpcHandlers() {
   handle(IPC.updateCheck, async () => (await ensureUpdateManager()).check({ manual: true }))
   handle(IPC.updateDownload, async () => (await ensureUpdateManager()).download())
   handle(IPC.updateInstall, async () => {
-    const nextState = await (await ensureUpdateManager()).prepareInstall()
-    setTimeout(() => {
-      if (!mainWindow || mainWindow.isDestroyed()) return
-      allowWindowClose = true
-      invalidateCloseWarningState()
-      mainWindow.close()
-    }, 120).unref?.()
-    return nextState
+    const manager = await ensureUpdateManager()
+    const current = manager.getState()
+    if (current.status !== 'downloaded') throw new Error('Es ist noch kein vollständig geprüftes Update bereit.')
+    requestUpdateRestart()
+    return manager.getState()
   })
+  handle(IPC.updateInstallLater, async (_event, requested) => (await ensureUpdateManager()).requestInstallOnQuit(requested !== false))
 
   handle(IPC.revealInFolder, async (_event, relativePath) => {
     await ensureBootstrap()
@@ -6351,12 +6401,27 @@ function registerIpcHandlers() {
   ipcMain.on(IPC.confirmClose, (event) => {
     if (!isTrustedIpcSender(event) || !mainWindow || mainWindow.isDestroyed()) return
     void (async () => {
+      const restartForUpdate = updateRestartRequestedAt > 0 && Date.now() - updateRestartRequestedAt < 60_000
+      updateRestartRequestedAt = 0
       if (updateManager) {
         try {
-          // Installs without reopening FaNotes. The package may also have been
-          // staged by the background run while this window was open.
-          await updateManager.installOnQuit()
+          if (restartForUpdate) {
+            // Everything is saved: hand over to the helper, which swaps the
+            // file and starts the new version (or restores the old one).
+            await updateManager.prepareInstall({ mode: 'relaunch' })
+          } else {
+            // Installs without reopening FaNotes. The package may also have been
+            // staged by the background run while this window was open.
+            await updateManager.installOnQuit()
+          }
         } catch (error) {
+          if (restartForUpdate) {
+            // The old version keeps running; the Settings page shows why.
+            console.warn('Das Update konnte nicht gestartet werden:', error?.message ?? error)
+            allowWindowClose = false
+            invalidateCloseWarningState()
+            return
+          }
           console.warn('Das vorbereitete FaNotes-Update konnte beim Beenden nicht installiert werden:', error?.message ?? error)
         }
       }
@@ -6509,6 +6574,13 @@ async function createWindow() {
     mainWindow.show()
   }
   mainWindow.once('ready-to-show', revealWindow)
+  // ready-to-show waits for the first visually non-empty frame. The boot surface (a themed card with a
+  // few words) does not count as non-empty, so a hidden window only got its first frame about a second
+  // later, when the React shell had enough text. A hidden page also never runs requestAnimationFrame, so
+  // the renderer's own startup steps (editor warm-up, the ready signal) waited with it. The boot
+  // surface and the window background both follow the saved theme, so mapping the window as soon as
+  // the document is parsed shows no white flash and lets the shell paint right after it renders.
+  mainWindow.webContents.once('dom-ready', revealWindow)
   mainWindow.on('focus', () => vaultWatcher?.nudge())
   // No periodic rescans while the window is hidden or minimized; showing it rescans at once.
   mainWindow.on('minimize', () => vaultWatcher?.setActive(false))
@@ -6642,7 +6714,10 @@ if (!app.requestSingleInstanceLock()) {
     installSecurityPolicy()
     registerIpcHandlers()
     await createWindow()
-    void readConfig().then(() => localMcpHost().apply(currentSettings)).catch(() => {})
+    // The local MCP host (and its modules) only matter when the HTTP transport is switched on.
+    void readConfig().then(() => {
+      if (currentSettings.mcpEnabled === true && currentSettings.mcpHttpEnabled === true) return localMcpHost().apply(currentSettings)
+    }).catch(() => {})
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) void createWindow()
@@ -6666,6 +6741,7 @@ app.on('will-quit', () => {
 })
 
 app.on('before-quit', () => {
+  appQuitting = true
   try { diagnosticsServiceInstance?.flush() } catch { /* best effort */ }
   void localMcpHostInstance?.stop()
   stopNativeOcr(new Error('FaNotes wird beendet.'))

@@ -77,7 +77,7 @@ export type SearchResult = {
   titleOnly: boolean
 }
 
-type StoredUnit = IndexUnit & { length: number; tf: Map<string, number>; textKey: string }
+type StoredUnit = IndexUnit & { length: number; textKey: string }
 
 const K1 = 1.2
 const B = 0.75
@@ -148,7 +148,9 @@ export class DocIndex {
     const tokens = tokenize(folded)
     const tf = new Map<string, number>()
     for (const token of tokens) tf.set(token, (tf.get(token) ?? 0) + 1)
-    const stored: StoredUnit = { ...unit, length: tokens.length, tf, textKey: hashText(folded) }
+    // The per-unit term frequencies live only in the postings; removeUnit re-tokenizes the text
+    // instead of keeping a second copy of every term map for the whole vault.
+    const stored: StoredUnit = { ...unit, length: tokens.length, textKey: hashText(folded) }
     this.units.set(unit.id, stored)
     if (unit.source === 'ocr') this.ocrUnits += 1
     let set = this.docUnits.get(unit.path)
@@ -172,7 +174,7 @@ export class DocIndex {
   private removeUnit(id: string) {
     const unit = this.units.get(id)
     if (!unit) return
-    for (const token of unit.tf.keys()) {
+    for (const token of new Set(tokenize(foldPlain(unit.text)))) {
       const posting = this.postings.get(token)
       if (!posting) continue
       posting.delete(id)
@@ -185,6 +187,22 @@ export class DocIndex {
     this.units.delete(id)
     if (unit.source === 'ocr') this.ocrUnits -= 1
     this.docUnits.get(unit.path)?.delete(id)
+  }
+
+  /**
+   * Same as `removeDoc`, but gives the UI a turn every `sliceMs`: removing a unit tokenizes its text again,
+   * so dropping a huge note (hundreds of units) in one go was a half-second main-thread block.
+   */
+  async removeDocSliced(path: string, keepRecord: boolean, pause: () => Promise<void>, sliceMs = 8) {
+    let sliceStart = performance.now()
+    for (const id of [...(this.docUnits.get(path) ?? [])]) {
+      this.removeUnit(id)
+      if (performance.now() - sliceStart > sliceMs) {
+        await pause()
+        sliceStart = performance.now()
+      }
+    }
+    this.removeDoc(path, keepRecord)
   }
 
   /** Removes a document's units (and the record unless `keepRecord`). */
@@ -332,7 +350,7 @@ export class DocIndex {
     return {
       format: DOC_INDEX_FORMAT,
       docs: this.listDocs(),
-      units: [...this.units.values()].map(({ length: _length, tf: _tf, textKey: _key, ...unit }) => unit as IndexUnit),
+      units: [...this.units.values()].map(({ length: _length, textKey: _key, ...unit }) => unit as IndexUnit),
     }
   }
 

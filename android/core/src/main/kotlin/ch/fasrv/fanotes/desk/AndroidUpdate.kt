@@ -78,6 +78,23 @@ fun updateChannelId(raw: String?): String = when (raw) {
     else -> "stable"
 }
 
+/** Preference key of the one-time Beta-to-Stable migration marker (value: the version that ran it). */
+const val CHANNEL_AUTO_STABLE_KEY = "update-channel-auto-stable"
+
+/**
+ * One-time migration: a device on Beta that first runs a Stable version moves to Stable,
+ * silently. The marker is written even when nothing changes, so a later manual switch back
+ * to Beta sticks, also across later stables. Nightly is not beta-like (it only prefers newer
+ * stables) and stays unchanged. Returns null when [settings] need no write. The switch never
+ * downgrades: updates are only offered when newer than the installed version.
+ */
+fun migrateBetaToStable(settings: Map<String, String>, installed: String): Map<String, String>? {
+    if (!settings[CHANNEL_AUTO_STABLE_KEY].isNullOrEmpty()) return null
+    if (releaseVersionChannel(installed) != "stable") return null
+    val next = settings + (CHANNEL_AUTO_STABLE_KEY to installed)
+    return if (settings["update-channel"] == "beta") next + ("update-channel" to "stable") else next
+}
+
 fun updateChannelCopy(channel: String): UpdateChannelCopy = when (updateChannelId(channel)) {
     "beta" -> UpdateChannelCopy(
         "Signierter Beta-Kanal",
