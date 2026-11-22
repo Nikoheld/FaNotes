@@ -40,6 +40,8 @@
     "check:a11y": "node scripts/check-a11y.mjs",
     "check:idle-wakeups": "node scripts/check-idle-wakeups.mjs",
     "check:desktop-latency": "node scripts/check-desktop-latency.mjs",
+    "check:desktop-memory": "node scripts/check-desktop-memory.mjs",
+    "check:note-open-cost": "node scripts/check-note-open-cost.mjs",
     "check:pdf-side-pages": "node scripts/check-pdf-side-pages.mjs",
     "check:study-annotations": "node scripts/check-study-annotations.cjs",
     "check:packaged-i18n": "node scripts/check-packaged-i18n.cjs",

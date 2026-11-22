@@ -21,9 +21,11 @@ const REQUEST_TIMEOUT_MS = 120_000
 
 /** At most half of the cores, never more than 2 automatically (a configured limit can raise it to 4); 1 below 12 GB RAM or on battery. */
 const SMALL_MEMORY_BYTES = 12 * 1024 ** 3
-const workerCount = (configured, cores = os.cpus().length, totalMemory = os.totalmem(), onBattery = false) => {
+/** Every worker holds its own copy of the model (~450 MB resident); a second one needs this much free on top. */
+const MIN_FREE_FOR_SECOND_WORKER = 3 * 1024 ** 3
+const workerCount = (configured, cores = os.cpus().length, totalMemory = os.totalmem(), onBattery = false, freeMemory = Infinity) => {
   // One worker keeps memory near the single-worker level and draws less power.
-  if (onBattery || totalMemory < SMALL_MEMORY_BYTES) return 1
+  if (onBattery || totalMemory < SMALL_MEMORY_BYTES || freeMemory < MIN_FREE_FOR_SECOND_WORKER) return 1
   const half = Math.max(1, Math.floor(cores / 2))
   const wanted = Number.isSafeInteger(configured) && configured >= 1 ? Math.min(4, configured) : 2
   return Math.max(1, Math.min(wanted, half))
@@ -84,7 +86,7 @@ function createOcrHost(options) {
   let idleTimer = null
   const pending = new Map()
 
-  const workers = () => workerCount(options.configuredWorkers(), os.cpus().length, os.totalmem(), Boolean(options.onBattery?.()))
+  const workers = () => workerCount(options.configuredWorkers(), os.cpus().length, os.totalmem(), Boolean(options.onBattery?.()), os.freemem())
 
   const failAll = (error) => {
     for (const waiter of pending.values()) { clearTimeout(waiter.timer); waiter.reject(error) }

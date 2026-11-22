@@ -945,6 +945,7 @@ async function recognizeInkLine(request) {
   return { logits: result.logits, dims: result.dims, engine: result.engine }
 }
 
+const OCR_INDEX_HOST_KEEP_ALIVE_SECONDS = 30
 let ocrIndexHost = null
 function getOcrIndexHost() {
   if (ocrIndexHost) return ocrIndexHost
@@ -957,9 +958,12 @@ function getOcrIndexHost() {
     preload: path.join(__dirname, 'ocr-host-preload.cjs'),
     configuredWorkers: () => Number(currentSettings.ocrThreadLimit),
     onBattery: () => { try { return powerMonitor.isOnBatteryPower() } catch { return false } },
+    // Background indexing comes in bursts a few seconds apart: the model does not need to stay loaded for the
+    // interactive keep-alive (up to 10 minutes) after the last line. Never longer than the user's setting.
     keepAliveMs: () => {
       const configured = Number(currentSettings.ocrModelKeepAliveSeconds)
-      return Number.isSafeInteger(configured) && configured >= 0 && configured <= 600 ? Math.max(1, configured * 1_000) : 120_000
+      const seconds = Number.isSafeInteger(configured) && configured >= 0 && configured <= 600 ? configured : 120
+      return Math.max(1, Math.min(seconds, OCR_INDEX_HOST_KEEP_ALIVE_SECONDS) * 1_000)
     },
   })
   return ocrIndexHost

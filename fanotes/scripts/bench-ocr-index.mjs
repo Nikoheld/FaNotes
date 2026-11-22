@@ -26,7 +26,7 @@ const userData = path.join(configHome, 'FaNotes')
 for (const d of [home, configHome, runtime, vault, userData]) fs.mkdirSync(d, { recursive: true, mode: 0o700 })
 fs.writeFileSync(path.join(userData, 'config.json'), `${JSON.stringify({
   version: 3, vaultPath: vault,
-  settings: { uiLanguage: 'de', autoCheckUpdates: false, autoDownloadUpdates: false, reduceMotion: true },
+  settings: { uiLanguage: 'de', autoCheckUpdates: false, autoDownloadUpdates: false, reduceMotion: true, ...JSON.parse(process.env.FANOTES_BENCH_SETTINGS || '{}') },
   onboarding: { version: 1, completed: true },
 }, null, 2)}\n`, { mode: 0o600 })
 
@@ -62,6 +62,7 @@ const descendants = (rootPid) => {
   }
   return [...out]
 }
+const processKind = (pid) => { try { return /--type=([\w-]+)/.exec(fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8'))?.[1] ?? 'main' } catch { return '?' } }
 const rssKb = (pid) => { try { return Number(/VmRSS:\s+(\d+)/.exec(fs.readFileSync(`/proc/${pid}/status`, 'utf8'))?.[1] ?? 0) } catch { return 0 } }
 const findElectron = () => {
   for (const name of fs.readdirSync('/proc')) {
@@ -77,7 +78,7 @@ const findElectron = () => {
 const launch = async (label) => {
   const port = 19_700 + Math.floor(Math.random() * 300)
   const executable = path.join(root, 'node_modules', 'electron', 'dist', 'electron')
-  const child = spawn('xvfb-run', ['-a', '-s', '-screen 0 1440x900x24', executable, root, `--remote-debugging-port=${port}`, '--no-sandbox'], {
+  const child = spawn('xvfb-run', ['-a', '-s', '-screen 0 1440x900x24', executable, root, `--remote-debugging-port=${port}`, '--no-sandbox', ...(process.env.FANOTES_BENCH_ELECTRON_ARGS ? process.env.FANOTES_BENCH_ELECTRON_ARGS.split(' ') : [])], {
     env: { ...process.env, HOME: home, XDG_CONFIG_HOME: configHome, XDG_RUNTIME_DIR: runtime },
     stdio: ['ignore', 'pipe', 'pipe'], detached: true,
   })
@@ -135,6 +136,7 @@ const session = async (label, { probe = false, limitMs = 1_800_000, settleMs = 8
   const base = new Map()
   const last = new Map()
   let peakRss = 0
+  const peakByProcess = new Map()
   let maxThreadShare = 0
   const busyThreads = new Set()
   const threadPrev = new Map()
@@ -154,7 +156,11 @@ const session = async (label, { probe = false, limitMs = 1_800_000, settleMs = 8
       const total = stat.utime + stat.stime
       if (!base.has(pid)) base.set(pid, total)
       last.set(pid, total)
-      rss += rssKb(pid)
+      const processRss = rssKb(pid)
+      rss += processRss
+      const seen = peakByProcess.get(pid) ?? { kind: processKind(pid), peakKb: 0 }
+      seen.peakKb = Math.max(seen.peakKb, processRss)
+      peakByProcess.set(pid, seen)
       try {
         for (const tid of fs.readdirSync(`/proc/${pid}/task`)) {
           const t = readStat(`${pid}/task/${tid}`)
@@ -218,6 +224,7 @@ const session = async (label, { probe = false, limitMs = 1_800_000, settleMs = 8
     busiestThreadShare: Math.round(maxThreadShare * 100) / 100,
     threadsOver70pct: busyThreads.size,
     peakRssMb: Math.round(peakRss / 1024),
+    peakProcessesMb: [...peakByProcess.values()].map((entry) => [entry.kind, Math.round(entry.peakKb / 1024)]).filter((entry) => entry[1] >= 60).sort((a, b) => b[1] - a[1]),
     longTasks: long.length, longTaskTotalMs: Math.round(long.reduce((a, b) => a + b, 0)), longTaskMaxMs: Math.round(Math.max(0, ...long)),
     inputDelayMsP95: delays.length ? Math.round(delays[Math.floor(delays.length * 0.95)]) : 0,
     inputDelayMsMax: delays.length ? Math.round(delays.at(-1)) : 0, inputEventsOver16ms: delays.length,

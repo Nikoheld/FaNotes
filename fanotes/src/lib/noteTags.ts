@@ -16,7 +16,13 @@ export const parseDeclaredTags = (content: string): string[] => {
   return uniqueTags(match[1].split(/[,;]+/u))
 }
 
+// Looser than HASHTAG on purpose (masking code can put a space before a '#'): one native scan tells whether
+// masking code and collecting tags can find anything at all.
+const HASHTAG_PROBE = /#[\p{L}\p{N}_-]/u
+
 export const parseHashtags = (content: string): string[] => {
+  // Most large notes have no '#word' at all (headings are '# ' or '## '); skip masking and splitting them.
+  if (!HASHTAG_PROBE.test(content)) return []
   const body = maskMarkdownCode(content).replace(TAG_MARKER, '')
   return uniqueTags([...body.matchAll(HASHTAG)].map((match) => match[1]))
 }
