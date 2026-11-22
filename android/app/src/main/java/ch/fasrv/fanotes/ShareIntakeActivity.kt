@@ -64,7 +64,8 @@ class ShareIntakeActivity : Activity() {
             Intent.ACTION_SEND -> listOfNotNull(streamExtra(source))
             Intent.ACTION_SEND_MULTIPLE -> streamListExtra(source)
             else -> emptyList()
-        }.take(INCOMING_MAX_FILES)
+        }.filter { ch.fasrv.fanotes.vault.isAcceptableIncomingUri(it.scheme, it.authority, setOf("$packageName.files")) }
+            .take(INCOMING_MAX_FILES)
         val text = if (source.action == Intent.ACTION_SEND && uris.isEmpty()) source.getStringExtra(Intent.EXTRA_TEXT) else null
         if (uris.isEmpty() && text.isNullOrBlank()) return null
         val folder = File(cacheDir, INCOMING_DIR).apply { mkdirs() }

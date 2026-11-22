@@ -190,7 +190,7 @@ private fun ConflictDetail(
 ) {
     if (conflict == null) return
     val ready = versions?.takeIf { it.copyPath == conflict.copyPath }
-    val markdown = ch.fasrv.fanotes.sync.isMarkdownConflictPath(conflict.path)
+    val markdown = ch.fasrv.fanotes.desk.isMarkdownConflictPath(conflict.path)
     Column(modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Column {
             Text(conflict.path, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)

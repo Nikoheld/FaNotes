@@ -181,10 +181,13 @@ class MainActivity : ComponentActivity() {
     private val model: FaNotesViewModel by viewModels()
     private val openTree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri == null) return@registerForActivityResult
-        contentResolver.takePersistableUriPermission(
-            uri,
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-        )
+        // A provider that offers no persistable grant throws; the folder still works until the app restarts.
+        runCatching {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
         model.useTree(uri)
     }
     private var bookImportFolder: String? = null
@@ -209,12 +212,12 @@ class MainActivity : ComponentActivity() {
     }
     private val importGlyph = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
-        val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@registerForActivityResult
+        val bytes = model.readUri(uri) ?: return@registerForActivityResult
         model.importGlyphBytes(bytes)
     }
     private val importOneNote = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
-        val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@registerForActivityResult
+        val bytes = model.readUri(uri) ?: return@registerForActivityResult
         model.importOneNoteBytes(bytes, documentDisplayName(uri))
     }
 
@@ -229,19 +232,21 @@ class MainActivity : ComponentActivity() {
     }
     private val importAddon = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
-        val text = contentResolver.openInputStream(uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8) ?: return@registerForActivityResult
+        val text = model.readUri(uri)?.toString(Charsets.UTF_8) ?: return@registerForActivityResult
         model.installAddonManifest(text)
     }
     private val importIcs = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
-        val text = contentResolver.openInputStream(uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8) ?: return@registerForActivityResult
+        val text = model.readUri(uri)?.toString(Charsets.UTF_8) ?: return@registerForActivityResult
         model.importCalendarIcs(text)
     }
     private val exportIcs = registerForActivityResult(ActivityResultContracts.CreateDocument("text/calendar")) { uri ->
         if (uri == null) return@registerForActivityResult
-        contentResolver.openOutputStream(uri)?.use { stream ->
-            stream.write(model.calendarIcs().toByteArray(Charsets.UTF_8))
-        }
+        runCatching {
+            contentResolver.openOutputStream(uri)?.use { stream ->
+                stream.write(model.calendarIcs().toByteArray(Charsets.UTF_8))
+            }
+        }.onFailure { model.reportFileFailure() }
     }
     private val exportNotePdf = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         if (uri != null) model.exportOpenNotePdf(uri)
@@ -424,13 +429,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         model.flushStudyTimer()
-        try {
-            kotlinx.coroutines.runBlocking {
-                kotlinx.coroutines.withTimeout(4_000) { model.saveNow() }
-            }
-        } catch (_: Exception) {
-            // A slow disk must not take the activity down. The next edit saves again.
-        }
+        model.saveInBackground()
         super.onPause()
     }
 

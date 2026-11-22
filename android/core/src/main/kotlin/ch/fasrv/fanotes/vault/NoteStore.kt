@@ -327,7 +327,8 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
             val folder = directory.trim('/')
             val path = if (folder.isEmpty()) leaf else "$folder/$leaf"
             if (io.exists(path)) return true
-            return extension == ".md" && io.exists(companionPath(path, FAMD_EXTENSION))
+            // A PDF and a Markdown note of one name would share one .famd (desktop `companionNameTaken`).
+            return (extension == ".md" || extension == ".pdf") && io.exists(companionPath(path, FAMD_EXTENSION))
         }
         if (!taken(stem)) return stem
         var index = 2
@@ -353,7 +354,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         val stem = safeNoteName(fileName.substringBeforeLast('.').ifBlank { "Document" })
         val folder = directory.trim('/')
         val path = if (folder.isEmpty()) "$stem.pdf" else "$folder/$stem.pdf"
-        if (io.exists(path)) throw IllegalStateException("A note named $stem already exists")
+        if (io.exists(path) || io.exists(companionPath(path, FAMD_EXTENSION))) throw IllegalStateException("A note named $stem already exists")
         io.write(path, bytes)
         val now = isoNow()
         val document = newInkDocument(stem, "blank", now)
@@ -368,14 +369,18 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
      */
     data class StoredWorksheet(val id: String, val title: String)
 
+    private fun worksheetTitle(fileName: String): String {
+        val base = fileName.substringAfterLast('/').substringAfterLast('\\')
+        return safeNoteName(base.substringBeforeLast('.').ifBlank { "Arbeitsblatt" })
+    }
+
     /** Writes image or PDF bytes and the desktop worksheet JSON. It does not create a note. */
     fun storeWorksheet(fileName: String, bytes: ByteArray, mime: String = ""): StoredWorksheet {
         val error = worksheetImportError(fileName, mime, bytes)
         if (error != null) throw IllegalArgumentException(error)
         val format = worksheetFileFormat(fileName, mime) ?: throw IllegalArgumentException(WORKSHEET_FORMAT_UNSUPPORTED)
         val id = UUID.randomUUID().toString()
-        val base = fileName.substringAfterLast('/').substringAfterLast('\\')
-        val title = safeNoteName(base.substringBeforeLast('.').ifBlank { "Arbeitsblatt" })
+        val title = worksheetTitle(fileName)
         val source = ".fanotes/worksheets/$id${format.extension}"
         val data = ".fanotes/worksheets/$id.json"
         io.write(source, bytes)
@@ -412,17 +417,24 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
     }
 
     fun importWorksheetNote(directory: String, fileName: String, bytes: ByteArray, mime: String = "", paper: String = "dots"): String {
-        val stored = storeWorksheet(fileName, bytes, mime)
-        val id = stored.id
-        val title = stored.title
+        // Check the name before anything is stored: a taken name must not leave a worksheet file behind, and a note
+        // must not take the `.famd` of a PDF of the same name.
+        val title = worksheetTitle(fileName)
         val folder = directory.trim('/')
         val path = if (folder.isEmpty()) "$title.md" else "$folder/$title.md"
-        if (io.exists(path)) throw IllegalStateException("A note named $title already exists")
+        if (io.exists(path) || io.exists(companionPath(path, FAMD_EXTENSION))) throw IllegalStateException("A note named $title already exists")
+        val stored = storeWorksheet(fileName, bytes, mime)
+        val id = stored.id
         val now = isoNow()
         val body = "# $title\n\n<!-- fanotes-worksheet:$id -->\n"
         val document = newInkDocument(title, paper, now)
         val note = OpenNote(path, NoteKind.MARKDOWN, title, body, document, emptyFamdPayload(now), listOf(id), UUID.randomUUID().toString())
-        save(note, document, body, now)
+        try {
+            save(note, document, body, now)
+        } catch (error: Exception) {
+            runCatching { deleteWorksheet(id) }
+            throw error
+        }
         return path
     }
 
@@ -469,26 +481,26 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         return io.list(parent).any { it.directory && it.path.trim('/') == path.trim('/') }
     }
 
+    /**
+     * The other files of one note, as the desktop's `companionPaths`: a `.famd` belongs to its `.md` or `.markdown`
+     * prose; prose and a PDF belong to one `.famd`. A same-name `.md` beside a PDF is another note.
+     */
+    private fun companionFiles(path: String): List<String> = when (extensionOf(path)) {
+        FAMD_EXTENSION -> listOf(".md", ".markdown").map { companionPath(path, it) }
+        ".md", ".markdown", ".pdf" -> listOf(companionPath(path, FAMD_EXTENSION))
+        else -> emptyList()
+    }
+
     private fun moveCompanions(path: String, next: String) {
-        val extension = extensionOf(path).ifBlank { ".md" }
-        val companionExt = if (extension == FAMD_EXTENSION) ".md" else FAMD_EXTENSION
-        val companion = companionPath(path, companionExt)
-        if (io.exists(companion)) io.move(companion, companionPath(next, companionExt))
-        if (extension == ".pdf") {
-            val md = companionPath(path, ".md")
-            if (io.exists(md)) io.move(md, companionPath(next, ".md"))
+        for (companion in companionFiles(path)) {
+            if (!io.exists(companion)) continue
+            io.move(companion, companionPath(next, extensionOf(companion)))
         }
     }
 
     fun delete(path: String) {
         io.delete(path)
-        val extension = extensionOf(path)
-        val companions = buildList {
-            if (extension != FAMD_EXTENSION) add(companionPath(path, FAMD_EXTENSION))
-            if (extension != ".md") add(companionPath(path, ".md"))
-            if (extension == ".pdf") add(companionPath(path, ".famd"))
-        }
-        for (companion in companions.distinct()) if (io.exists(companion)) io.delete(companion)
+        for (companion in companionFiles(path)) if (io.exists(companion)) io.delete(companion)
     }
 
     /**
@@ -634,16 +646,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         }
     }
 
-    private fun noteFiles(path: String): List<String> {
-        val extension = extensionOf(path)
-        val candidates = buildList {
-            add(path)
-            if (extension != FAMD_EXTENSION) add(companionPath(path, FAMD_EXTENSION))
-            if (extension != ".md") add(companionPath(path, ".md"))
-            if (extension == ".pdf") add(companionPath(path, FAMD_EXTENSION))
-        }
-        return candidates.distinct().filter { io.exists(it) }
-    }
+    private fun noteFiles(path: String): List<String> = (listOf(path) + companionFiles(path)).distinct().filter { io.exists(it) }
 
     private fun referencedAssets(files: List<String>): List<String> {
         val found = linkedSetOf<String>()

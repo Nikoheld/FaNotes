@@ -1559,11 +1559,27 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     recognition.afterSave()
                     return
                 } catch (error: Exception) {
-                    savePhase.value = "error"
+                    // A cancelled save is not a failure: the newer save that cancelled it writes the note.
+                    savePhase.value = if (error is kotlinx.coroutines.CancellationException) "saving" else "error"
                     // The moved boxes were not written; keep them pending for the retry.
                     if (boxes.isNotEmpty()) boxesNeedSave = true
                     throw error
                 }
+            }
+        }
+    }
+
+    /**
+     * Saves on pause without blocking the main thread: the save runs in the application scope, so it finishes
+     * even when this view model is cleared. The snapshot of the note is taken here, on the main thread.
+     */
+    fun saveInBackground() {
+        if (!dirty) return
+        graph.scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            try {
+                saveNow()
+            } catch (_: Exception) {
+                // The autosave retry loop reports a failing disk; the next edit saves again.
             }
         }
     }
@@ -2107,7 +2123,17 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun readUri(uri: Uri): ByteArray? = getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
+    /** The bytes behind a picked document, or null (with a notice) when the provider refuses, vanished or ran dry. */
+    fun readUri(uri: Uri): ByteArray? = try {
+        getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
+    } catch (error: Exception) {
+        reportFileFailure()
+        null
+    }
+
+    fun reportFileFailure() {
+        message.value = "Die Datei konnte nicht gelesen oder geschrieben werden."
+    }
 
     fun useTree(uri: Uri) {
         val app = getApplication<Application>()
@@ -5325,21 +5351,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val messageText = withContext(Dispatchers.IO) {
                 runCatching {
-                    val remote = graph.vault.read(conflict.path)?.decodeToString()
-                    val local = graph.vault.read(conflict.copyPath)?.decodeToString()
-                    when (choice) {
-                        "remote" -> graph.vault.delete(conflict.copyPath)
-                        "local" -> {
-                            if (local != null) graph.vault.write(conflict.path, local.encodeToByteArray())
-                            graph.vault.delete(conflict.copyPath)
-                        }
-                        "both" -> {
-                            if (remote != null && local != null && isMarkdownConflictPath(conflict.path)) {
-                                graph.vault.write(conflict.path, resolveMarkdownConflict(remote, local, "both").encodeToByteArray())
-                                graph.vault.delete(conflict.copyPath)
-                            }
-                        }
-                    }
+                    ch.fasrv.fanotes.vault.resolveConflictFiles(graph.vault, conflict.path, conflict.copyPath, choice)
                     "Konflikt gelöst."
                 }.getOrElse { "Der Konflikt konnte nicht gelöst werden." }
             }

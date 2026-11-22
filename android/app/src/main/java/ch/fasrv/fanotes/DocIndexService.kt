@@ -122,7 +122,7 @@ class DocIndexService(private val context: Context, private val graph: AppGraph)
             val plan = planDocIndex(sources, entries.values)
             status.value = DocIndexStatus(total = plan.total, indexed = plan.total - plan.todo.size, running = true)
             if (plan.drop.isNotEmpty()) {
-                for (key in plan.drop) entries.remove(key)
+                for (key in plan.drop) entries.remove(key)?.let { totalChars -= it.text.length }
                 append(file, plan.drop.joinToString("\n", postfix = "\n") { docIndexDeleteLine(it) })
             }
             val batch = StringBuilder()

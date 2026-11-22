@@ -94,3 +94,15 @@ fun incomingSummary(imported: Int, skipped: Int, tooLarge: Int): String = buildS
     if (skipped > 0) append(" $skipped nicht unterstützt (PDF, Bilder, Markdown).")
     if (tooLarge > 0) append(" $tooLarge zu gross.")
 }
+
+/**
+ * Whether the share intake may read [scheme]://[authority]. Only `content` URIs of other apps: the intake is
+ * exported, so an explicit intent could otherwise hand it `file://` paths or the app's own providers and make it
+ * copy private files into the vault. [ownAuthorities] are this app's own provider authorities.
+ */
+fun isAcceptableIncomingUri(scheme: String?, authority: String?, ownAuthorities: Set<String>): Boolean {
+    if (!"content".equals(scheme, ignoreCase = true)) return false
+    val host = authority?.substringAfter('@')?.lowercase().orEmpty()
+    if (host.isEmpty()) return false
+    return ownAuthorities.none { it.lowercase() == host }
+}

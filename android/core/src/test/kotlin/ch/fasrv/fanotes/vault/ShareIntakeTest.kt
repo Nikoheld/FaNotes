@@ -83,3 +83,18 @@ class ShareIntakeTest {
         assertEquals(boxes, parseNoteTextFields(store.readNote(path).payload.array("textFields")))
     }
 }
+
+class IncomingUriGuardTest {
+    private val own = setOf("ch.fasrv.fanotes.files")
+
+    @kotlin.test.Test
+    fun onlyForeignContentUrisAreRead() {
+        kotlin.test.assertTrue(isAcceptableIncomingUri("content", "com.android.providers.media.documents", own))
+        kotlin.test.assertFalse(isAcceptableIncomingUri("file", "", own))
+        kotlin.test.assertFalse(isAcceptableIncomingUri(null, null, own))
+        kotlin.test.assertFalse(isAcceptableIncomingUri("content", "ch.fasrv.fanotes.files", own))
+        kotlin.test.assertFalse(isAcceptableIncomingUri("content", "CH.FASRV.FANOTES.FILES", own))
+        kotlin.test.assertFalse(isAcceptableIncomingUri("content", "x@ch.fasrv.fanotes.files", own))
+        kotlin.test.assertFalse(isAcceptableIncomingUri("content", null, own))
+    }
+}
