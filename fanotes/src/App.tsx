@@ -84,7 +84,7 @@ import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { hasConnectedAiProvider } from './lib/aiProviderConnection'
 import { clipboardImageFile } from './lib/clipboardImage'
 import { retitleGeneratedHeading } from './lib/autoHeading'
-import { friendlyFileError, sanitizeToastMessage } from './lib/fileErrors'
+import { errorLocation, friendlyFileError, sanitizeToastMessage } from './lib/fileErrors'
 import { companionNotePath, emptyFamdPayload, famdEncodingForSave, inkHasMarks, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { inkJsonForRewrite } from './lib/packedInk'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
@@ -1186,6 +1186,7 @@ export default function App({ startupBootstrap }: AppProps) {
         version: updateState.currentVersion,
         platform: window.fanotes?.platform,
         message: event.message,
+        where: errorLocation(event.filename, event.lineno),
       })
     }
     window.addEventListener('error', onError)

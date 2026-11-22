@@ -28,7 +28,7 @@ const makeService = (settings, extra = {}) => {
     now: () => clock,
     isOnline: () => state.online,
     isIdle: () => state.idle,
-    memory: () => ({ processes: 5, totalMb: 800, mainRssMb: 150 }),
+    memory: () => ({ processes: 5, totalMb: 800, mainRssMb: 150, byType: { main: 150, renderer: 400, gpu: 200, utility: 50, other: 0 } }),
     setTimer: (fn, ms) => { const handle = { fn, ms, cleared: false, unref() {} }; timers.push(handle); return handle },
     clearTimer: (handle) => { handle.cleared = true },
     post: async (url, body, headers, signal) => { calls.push({ url, body, headers, signal }); return { status: state.status } },
@@ -39,6 +39,17 @@ const makeService = (settings, extra = {}) => {
 const decode = (call) => JSON.parse(zlib.gunzipSync(call.body).toString('utf8'))
 
 const main = async () => {
+// ---- 0. Helpers killed while the app quits are not crashes (received logs: SIGTERM exit 15 in every batch) ----
+{
+  let quitting = false
+  const s = makeService(ON, { isQuitting: () => quitting })
+  s.service.recordProcessGone('child-process-gone', { type: 'GPU', reason: 'killed', exitCode: 15 })
+  assert.equal(Object.keys(s.service.preview().crashes).length, 1, 'a kill while running is recorded')
+  quitting = true
+  s.service.recordProcessGone('render-process-gone', { reason: 'killed', exitCode: 15 })
+  s.service.recordProcessGone('child-process-gone', { type: 'Utility', reason: 'killed', exitCode: 15 })
+  assert.equal(s.service.preview().crashes.length, 1, 'nothing more is recorded while quitting')
+}
 // ---- 1. Stack scrubbing: no paths, no user names, nothing outside the app -----------------------------------
 {
   const error = Object.assign(new TypeError('Cannot open /home/anna/Notizen/Scheidung.md for "M\u00fcller"'), { code: 'ENOENT' })
@@ -214,6 +225,7 @@ const main = async () => {
   assert.equal(accepted.ok, true, accepted.error)
   assert.equal(accepted.record.crashes.length, 2)
   assert.ok(accepted.record.perf.penLatency)
+  assert.deepEqual(accepted.record.perf.memory.byType, { main: 150, renderer: 400, gpu: 200, utility: 50, other: 0 }, 'memory per process kind reaches the record')
   // Sent data is gone from the queue; at most once a day.
   assert.equal(s.service.preview(), null)
   s.service.recordRenderer({ k: 'feature', name: 'tool.eraser' })
