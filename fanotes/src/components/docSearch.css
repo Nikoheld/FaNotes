@@ -12,7 +12,7 @@
 .doc-search-issue-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .doc-search-issue-actions button { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-soft); background: transparent; font: inherit; cursor: pointer; }
 .doc-search-issue-actions button:hover, .doc-search-issue-actions button:focus-visible { background: var(--panel-hover); }
-.search-results button > p mark { padding: 0 1px; border-radius: 3px; color: inherit; background: color-mix(in srgb, var(--accent, #2a6f97) 26%, transparent); }
+.search-results button > p mark { padding: 0 1px; border-radius: 3px; color: var(--text); background: color-mix(in srgb, var(--accent, #2a6f97) 26%, transparent); }
 .doc-hit-where { color: var(--accent-readable, var(--text-soft)); font-weight: 600; }
 .search-results button > small.doc-hit-also { margin: 4px 0 0 20px; font-size: 11px; }
 @media (prefers-reduced-motion: reduce) { .doc-search-status .spin { animation: none; } }

@@ -59,6 +59,12 @@ export type DocIndexStore = {
   clear: () => Promise<void>
 }
 
+/** Longest stretch of synchronous indexing work before the main thread is handed back. */
+const INDEX_SLICE_MS = 8
+/** Units written to IndexedDB per transaction (each put structured-clones the page text). */
+const STORE_BATCH = 24
+const yieldToUi = () => new Promise<void>((resolve) => { setTimeout(resolve, 0) })
+
 export type IndexerState = 'idle' | 'loading' | 'scanning' | 'indexing' | 'paused' | 'error'
 
 export type IndexerProgress = {
@@ -142,11 +148,14 @@ export class DocIndexer {
     this.emit()
     try {
       const snapshot = await this.options.store.load()
-      const restored = DocIndex.fromSnapshot(snapshot)
       this.index.clear()
-      for (const doc of restored.listDocs()) {
-        this.index.setDoc(doc)
-        for (const unit of restored.unitsOf(doc.path)) this.index.addUnit(unit)
+      // Straight into the live index (no throwaway copy of the whole vault), in slices so the UI keeps painting.
+      for (const doc of snapshot?.docs ?? []) this.index.setDoc(doc)
+      let sliceStart = performance.now()
+      for (const unit of snapshot?.units ?? []) {
+        if (!this.index.getDoc(unit.path)) continue
+        this.index.addUnit(unit)
+        if (performance.now() - sliceStart > INDEX_SLICE_MS) { await yieldToUi(); sliceStart = performance.now() }
       }
     } catch (error) {
       this.lastError = `Index beschädigt, wird neu aufgebaut: ${error instanceof Error ? error.message : String(error)}`
@@ -309,16 +318,27 @@ export class DocIndexer {
           if (record.issues.length < 500 && !record.issues.some((known) => known.kind === issue.kind && known.page === issue.page && known.reason === issue.reason)) record.issues.push(issue)
         },
         commit: async (units, progress) => {
+          // A long note is hundreds of units: tokenize them in short slices and let a click or key
+          // press through between slices (the gate also waits while the user is typing or writing).
+          let sliceStart = performance.now()
           for (const unit of units) {
             if (unit.path !== source.path) continue
             this.index.addUnit(unit)
+            if (performance.now() - sliceStart > INDEX_SLICE_MS) {
+              await (this.options.gate ? this.options.gate() : yieldToUi())
+              sliceStart = performance.now()
+            }
           }
           if (progress?.nextPage) record.resumePage = progress.nextPage
           if (progress?.pageCount) record.pageCount = progress.pageCount
           if (progress?.ocrPages) record.ocrPages += progress.ocrPages
           record.updatedAt = this.now()
           this.index.setDoc(record)
-          await store.addUnits(units.filter((unit) => unit.path === source.path))
+          const own = units.filter((unit) => unit.path === source.path)
+          for (let from = 0; from < own.length; from += STORE_BATCH) {
+            await store.addUnits(own.slice(from, from + STORE_BATCH))
+            if (from + STORE_BATCH < own.length) await yieldToUi()
+          }
           await store.saveDoc(record)
           this.current = { path: source.path, title: source.title, page: record.resumePage, ...(record.pageCount ? { pageCount: record.pageCount } : {}) }
           this.emit()

@@ -108,6 +108,7 @@ check-shape-snap-hold.mjs
 check-sheet-write.mjs
 check-simple-latex.mjs
 check-standard-recognition.cjs
+check-startup-critical-path.cjs
 check-startup-bundle.mjs
 check-study-tools.mjs
 check-subject-book-attach.mjs

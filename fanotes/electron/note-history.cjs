@@ -3,6 +3,7 @@
 const crypto = require('node:crypto')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
+const { renameWithRetry } = require('./fs-retry.cjs')
 const {
   MAX_SNAPSHOT_BYTES,
   nextSnapshotTier,
@@ -53,7 +54,7 @@ const writeIndex = async (directory, index) => {
   await fsp.mkdir(directory, { recursive: true, mode: 0o700 })
   const temporary = path.join(directory, `.index-${process.pid}.tmp`)
   await fsp.writeFile(temporary, `${JSON.stringify(index, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
-  await fsp.rename(temporary, indexPath(directory))
+  await renameWithRetry(temporary, indexPath(directory))
 }
 
 const deleteSnapshotFiles = async (directory, entry) => {

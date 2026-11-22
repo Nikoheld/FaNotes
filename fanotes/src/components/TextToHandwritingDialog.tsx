@@ -1,3 +1,4 @@
+import { useModalFocus } from '../lib/useModalFocus'
 import { CircleAlert, Link2, PenLine, RefreshCw, Sparkles, Type, Unlink2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { Sample } from '../../../src/types'
@@ -195,6 +196,7 @@ export function TextToHandwritingDialog({
   const [seed, setSeed] = useState(createHandwritingSeed)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
+  useModalFocus(dialogRef)
 
   useEffect(() => {
     if (!open) return

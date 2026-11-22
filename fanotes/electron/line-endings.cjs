@@ -23,4 +23,13 @@ function applyLineEnding(text, ending) {
   return ending === 'crlf' ? toLf(text).replace(/\n/gu, '\r\n') : text
 }
 
-module.exports = { detectLineEnding, toLf, applyLineEnding }
+/** Notepad saves UTF-8 with a byte order mark; the editor must not see it as text (it breaks a leading "# "). */
+function hasBom(text) {
+  return typeof text === 'string' && text.charCodeAt(0) === 0xfeff
+}
+
+function stripBom(text) {
+  return hasBom(text) ? text.slice(1) : text
+}
+
+module.exports = { detectLineEnding, toLf, applyLineEnding, hasBom, stripBom }
