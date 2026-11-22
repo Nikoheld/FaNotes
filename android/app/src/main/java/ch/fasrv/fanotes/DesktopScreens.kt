@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -43,6 +44,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.InlineTextContent
@@ -61,6 +63,7 @@ import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
@@ -104,6 +107,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -139,6 +143,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
@@ -267,6 +272,39 @@ private val StatusLineStyle = TextStyle(
     platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
 )
 
+/**
+ * Soft fade at the end of a scroller that still has content beyond the edge, so a clipped
+ * last row or button reads as "scrolls" instead of "cut off".
+ */
+private fun Modifier.scrollEndFade(state: ScrollState, horizontal: Boolean, color: Color, sizeDp: Float = 28f): Modifier =
+    drawWithContent {
+        drawContent()
+        if (state.canScrollForward) {
+            val edge = sizeDp * density
+            if (horizontal) {
+                drawRect(
+                    Brush.horizontalGradient(listOf(Color.Transparent, color), startX = size.width - edge, endX = size.width),
+                    topLeft = androidx.compose.ui.geometry.Offset(size.width - edge, 0f),
+                    size = androidx.compose.ui.geometry.Size(edge, size.height),
+                )
+            } else {
+                drawRect(
+                    Brush.verticalGradient(listOf(Color.Transparent, color), startY = size.height - edge, endY = size.height),
+                    topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - edge),
+                    size = androidx.compose.ui.geometry.Size(size.width, edge),
+                )
+            }
+        }
+    }
+
+/** True when a physical keyboard is attached; key-shortcut hints are shown only then. */
+@Composable
+private fun hasHardwareKeyboard(): Boolean {
+    val config = LocalConfiguration.current
+    return config.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS &&
+        config.hardKeyboardHidden == android.content.res.Configuration.HARDKEYBOARDHIDDEN_NO
+}
+
 @Composable
 private fun tabletSideInset(): androidx.compose.ui.unit.Dp {
     val config = LocalConfiguration.current
@@ -321,10 +359,16 @@ fun DeskRibbon(
 ) {
     var toolsOpen by remember { mutableStateOf(false) }
     val toolIds = ch.fasrv.fanotes.desk.RIBBON_TOOLS.map { it.id }.toSet()
-    LaunchedEffect(destination, aiOpen) { if (aiOpen || destination in toolIds) toolsOpen = true }
+    // Narrow windows (portrait tablet) list the extra tools in a popup instead of widening the ribbon past the screen.
+    val toolsPopup = LocalConfiguration.current.screenWidthDp < ch.fasrv.fanotes.desk.RIBBON_TOOLS_POPUP_BELOW_DP
+    var toolsMenu by remember { mutableStateOf(false) }
+    LaunchedEffect(destination, aiOpen) { if (!toolsPopup && (aiOpen || destination in toolIds)) toolsOpen = true }
     val mark = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.brandMarkColor(LocalDeskThemeId.current, androidx.compose.foundation.isSystemInDarkTheme())))
+    val ribbonScroll = rememberScrollState()
     Row(
-        Modifier.fillMaxWidth().height(LocalTouch.current.ribbonHeightDp.dp).background(MaterialTheme.colorScheme.surface).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp + tabletSideInset()),
+        Modifier.fillMaxWidth().height(LocalTouch.current.ribbonHeightDp.dp).background(MaterialTheme.colorScheme.surface)
+            .scrollEndFade(ribbonScroll, horizontal = true, color = MaterialTheme.colorScheme.surface)
+            .horizontalScroll(ribbonScroll).padding(horizontal = 8.dp + tabletSideInset()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("F", modifier = Modifier.padding(end = 8.dp), fontWeight = FontWeight.SemiBold, color = mark)
@@ -343,12 +387,41 @@ fun DeskRibbon(
                 if (item.id == "pen") onPen() else onDestination(item.id)
             }
         }
+        if (toolsPopup) {
+            Box {
+                RibbonButton(
+                    ch.fasrv.fanotes.desk.ribbonToolLabel(false),
+                    toolsMenu || destination in toolIds || aiOpen,
+                    onClickLabel = "Zusätzliche Werkzeuge öffnen",
+                ) { toolsMenu = !toolsMenu }
+                DropdownMenu(expanded = toolsMenu, onDismissRequest = { toolsMenu = false }) {
+                    ch.fasrv.fanotes.desk.RIBBON_TOOLS.forEach { item ->
+                        val active = ch.fasrv.fanotes.desk.ribbonItemActive(item.id, destination, penOpen, aiOpen)
+                        val label = if (item.id == "focus") "Fokus" else item.label
+                        DropdownMenuItem(
+                            text = { Text(ch.fasrv.fanotes.desk.ChromeText.ui(label), fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal) },
+                            modifier = Modifier.heightIn(min = LocalTouch.current.menuRowDp.dp),
+                            onClick = {
+                                toolsMenu = false
+                                when (item.id) {
+                                    "daily" -> onDaily()
+                                    "commands" -> onPalette()
+                                    "focus" -> onFocus()
+                                    else -> onDestination(item.id)
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        } else {
         RibbonButton(
             ch.fasrv.fanotes.desk.ribbonToolLabel(toolsOpen),
             toolsOpen,
             onClickLabel = if (toolsOpen) "Zusätzliche Werkzeuge einklappen" else "Zusätzliche Werkzeuge ausklappen",
         ) { toolsOpen = !toolsOpen }
-        if (toolsOpen) {
+        }
+        if (!toolsPopup && toolsOpen) {
             ch.fasrv.fanotes.desk.RIBBON_TOOLS.forEach { item ->
                 val active = ch.fasrv.fanotes.desk.ribbonItemActive(item.id, destination, penOpen, aiOpen)
                 val label = if (item.id == "focus") "Fokus" else item.label
@@ -455,10 +528,10 @@ fun FaNotesToast(
             Modifier
                 .size(ch.fasrv.fanotes.desk.TOAST_CLOSE_DP.dp)
                 .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.TOAST_CLOSE_RADIUS_DP.dp))
-                .clickable(onClickLabel = "Schließen", onClick = onDismiss),
+                .clickable(onClickLabel = "Schliessen", onClick = onDismiss),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Close, contentDescription = "Schließen", modifier = Modifier.size(14.dp), tint = LocalStatusInk.current.muted)
+            Icon(Icons.Filled.Close, contentDescription = "Schliessen", modifier = Modifier.size(14.dp), tint = LocalStatusInk.current.muted)
         }
     }
 }
@@ -980,14 +1053,14 @@ private fun NoteTabChip(
                         .clickable(
                             interactionSource = closeInteraction,
                             indication = null,
-                            onClickLabel = "Tab schließen",
+                            onClickLabel = "Tab schliessen",
                             onClick = onClose,
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         Icons.Filled.Close,
-                        contentDescription = "$name schließen",
+                        contentDescription = "$name schliessen",
                         modifier = Modifier.size(ch.fasrv.fanotes.desk.NOTE_TAB_CLOSE_ICON_DP.dp),
                         tint = titleColor,
                     )
@@ -1021,17 +1094,17 @@ private fun NoteTabChip(
             DropdownMenuItem(text = { Text("Pfad kopieren") }, onClick = { menu = false; onCopyPath() })
             DropdownMenuItem(text = { Text("Im Dateimanager zeigen") }, onClick = { menu = false; onReveal() })
             DropdownMenuItem(
-                text = { Text("Schließen") },
+                text = { Text("Schliessen") },
                 enabled = !pinned,
                 onClick = { menu = false; onClose() },
             )
             DropdownMenuItem(
-                text = { Text("Andere schließen") },
+                text = { Text("Andere schliessen") },
                 enabled = canCloseOthers,
                 onClick = { menu = false; onCloseOthers() },
             )
             DropdownMenuItem(
-                text = { Text("Rechts davon schließen") },
+                text = { Text("Rechts davon schliessen") },
                 enabled = canCloseRight,
                 onClick = { menu = false; onCloseRight() },
             )
@@ -1295,11 +1368,19 @@ fun SearchScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                SearchKbd("↑")
-                SearchKbd("↓")
-                Text(ch.fasrv.fanotes.desk.SEARCH_CHOOSE, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(end = 7.dp))
-                SearchKbd("Esc")
-                Text(ch.fasrv.fanotes.desk.SEARCH_FOOTER_CLOSE, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.clickable(onClick = onClose))
+                // Key hints only with a hardware keyboard; on a touch tablet the footer is a plain close button.
+                if (hasHardwareKeyboard()) {
+                    SearchKbd("↑")
+                    SearchKbd("↓")
+                    Text(ch.fasrv.fanotes.desk.SEARCH_CHOOSE, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(end = 7.dp))
+                    SearchKbd("Esc")
+                }
+                Text(
+                    ch.fasrv.fanotes.desk.SEARCH_FOOTER_CLOSE.replace("ß", "ss"),
+                    fontSize = 12.sp,
+                    color = LocalStatusInk.current.muted,
+                    modifier = Modifier.heightIn(min = LocalTouch.current.chipHitDp.dp).clickable(onClick = onClose),
+                )
             }
         }
     }
@@ -1320,7 +1401,7 @@ fun HomeworkScreen(model: FaNotesViewModel) {
     val status by model.message.collectAsStateWithLifecycle()
     val tree by model.tree.collectAsStateWithLifecycle()
     val subjectChoices = ch.fasrv.fanotes.desk.homeworkSubjectOptions(
-        tree.filter { it.kind == ch.fasrv.fanotes.vault.NoteKind.FOLDER }.map { it.name },
+        tree.filter { it.kind == ch.fasrv.fanotes.vault.NoteKind.FOLDER && ch.fasrv.fanotes.desk.isSubjectFolderName(it.name) }.map { it.name },
         document.tasks,
     )
     var title by remember { mutableStateOf("") }
@@ -1419,22 +1500,29 @@ fun HomeworkScreen(model: FaNotesViewModel) {
             ) { filter = it }
             Text("Freigabe", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
             Text(
-                "Dieselbe Schnittstelle wie der Desktop: PUT an fanotes.fasrv.ch, Kanal-ID und Geheimnis bleiben auf diesem Tablet.",
+                "Teilt die Aufgabenliste mit dem Desktop und per Link. Die Zugangsdaten bleiben auf diesem Tablet.",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             )
-            OutlinedTextField(
-                settings["homework-channel"].orEmpty(),
-                { model.updateDesk("homework-channel", it.trim()) },
-                label = { Text("Kanal-ID") },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
-            OutlinedTextField(
-                settings["homework-secret"].orEmpty(),
-                { model.updateDesk("homework-secret", it.trim()) },
-                label = { Text("Geheimnis") },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            var accessOpen by remember { mutableStateOf(settings["homework-channel"].orEmpty().isBlank()) }
+            if (settings["homework-channel"].orEmpty().isNotBlank()) {
+                TextButton(onClick = { accessOpen = !accessOpen }) { Text(if (accessOpen) "Zugangsdaten ausblenden" else "Zugangsdaten anzeigen") }
+            }
+            if (accessOpen) {
+                OutlinedTextField(
+                    settings["homework-channel"].orEmpty(),
+                    { model.updateDesk("homework-channel", it.trim()) },
+                    label = { Text("Kanal-ID") },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+                OutlinedTextField(
+                    settings["homework-secret"].orEmpty(),
+                    { model.updateDesk("homework-secret", it.trim()) },
+                    label = { Text("Geheimnis") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             Row {
                 TextButton(onClick = { model.generateHomeworkAccess() }) { Text("Kanal erzeugen") }
                 TextButton(onClick = { model.publishHomework() }) { Text("Veröffentlichen") }
@@ -2532,7 +2620,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                                 .clickable { model.showDestination("notes") },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(Icons.Filled.Close, contentDescription = "Schließen", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                            Icon(Icons.Filled.Close, contentDescription = "Schliessen", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
                         }
                     }
                     CalendarMini(anchor, shown.events, onSelect = {
@@ -2574,10 +2662,19 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             }
             val calendarHeader: @Composable () -> Unit = {
         if (!showSide) {
-            Text("Kalender", style = MaterialTheme.typography.titleLarge)
-            Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-            TextButton(onClick = { onOpenNote(CALENDAR_NOTE_PATH) }) { Text("Als Notiz öffnen") }
-            CalendarLists(model, document, calendarName) { calendarName = it }
+            var listsOpen by remember { mutableStateOf(false) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Kalender", style = MaterialTheme.typography.titleLarge)
+                    Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                }
+                TextButton(onClick = { listsOpen = !listsOpen }) {
+                    Text(if (listsOpen) "Listen ausblenden" else "Listen (${document.calendars.size})")
+                }
+                TextButton(onClick = { onOpenNote(CALENDAR_NOTE_PATH) }) { Text("Als Notiz öffnen") }
+            }
+            // The calendar lists stay collapsed on a narrow screen: they used to take a third of the height before the grid.
+            if (listsOpen) CalendarLists(model, document, calendarName) { calendarName = it }
         }
         val calRule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
         val calShape = RoundedCornerShape(8.dp)
@@ -2688,13 +2785,13 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     fontSize = 13.sp,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { dismissedReminders = dismissedReminders + reminder.key }) { Text("Schließen") }
+                TextButton(onClick = { dismissedReminders = dismissedReminders + reminder.key }) { Text("Schliessen") }
             }
         }
         if (!status.isNullOrBlank()) Text(status.orEmpty(), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
             }
             val calendarTail: @Composable () -> Unit = {
-        Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
+        Text("Am ${ch.fasrv.fanotes.desk.calendarDayLabel(anchor)}", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
         EventsOn(model, shown, anchor) { editor = draftFor(it, anchor) }
         editor?.let { current ->
             CalendarEventEditor(
@@ -3413,63 +3510,99 @@ private fun CalendarLists(
     calendarName: String,
     onName: (String) -> Unit,
 ) {
-    val focus = LocalFocusManager.current
+    var renaming by remember { mutableStateOf<ch.fasrv.fanotes.desk.CalendarDef?>(null) }
+    var creating by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth().padding(top = 8.dp).background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp),
     ) {
         Text("Kalender", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         document.calendars.forEach { calendar ->
-            var name by remember(calendar.id) { mutableStateOf(calendar.name) }
-            var focused by remember(calendar.id) { mutableStateOf(false) }
-            LaunchedEffect(calendar.name, focused) {
-                if (!focused) name = calendar.name
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.padding(end = 8.dp).size(12.dp).clip(CircleShape).background(calendarSwatch(calendar.color)),
-                )
+            var menu by remember(calendar.id) { mutableStateOf(false) }
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 40.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Checkbox(
                     checked = calendar.visible,
                     onCheckedChange = { model.toggleCalendarVisible(calendar.id) },
                 )
-                OutlinedTextField(
-                    name,
-                    { name = it.take(80) },
-                    label = { Text("Umbenennen") },
-                    modifier = Modifier.weight(1f).onFocusChanged { state ->
-                        val wasFocused = focused
-                        focused = state.isFocused
-                        if (wasFocused && !state.isFocused) {
-                            val clean = name.replace(Regex("""\s+"""), " ").trim()
-                            if (clean.isEmpty()) name = calendar.name
-                            else if (clean != calendar.name) model.renameCalendarList(calendar.id, clean)
-                        }
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+                Box(
+                    Modifier.padding(end = 8.dp).size(12.dp).clip(CircleShape).background(calendarSwatch(calendar.color)),
                 )
-                if (document.calendars.size > 1) {
-                    TextButton(onClick = { model.deleteCalendarList(calendar.id) }) { Text("Entfernen") }
+                // The name is plain text; renaming and removing live in the row menu, so a narrow rail never squeezes a field.
+                Text(
+                    calendar.name,
+                    modifier = Modifier.weight(1f),
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Box {
+                    IconButton(onClick = { menu = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "Kalender-Optionen für ${calendar.name}", modifier = Modifier.size(18.dp))
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("Umbenennen") }, onClick = {
+                            menu = false
+                            renaming = calendar
+                        })
+                        if (document.calendars.size > 1) {
+                            DropdownMenuItem(text = { Text("Entfernen") }, onClick = {
+                                menu = false
+                                model.deleteCalendarList(calendar.id)
+                            })
+                        }
+                    }
                 }
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                calendarName,
-                { onName(it.take(80)) },
-                label = { Text("Neuer Kalender") },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-            )
-            TextButton(onClick = {
-                if (calendarName.isNotBlank()) {
-                    model.createCalendarList(calendarName)
-                    onName("")
-                }
-            }) { Text("Hinzufügen") }
+        TextButton(onClick = { creating = true }) {
+            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Neuer Kalender")
         }
     }
+    renaming?.let { calendar ->
+        CalendarNameDialog("Kalender umbenennen", calendar.name, "Umbenennen", onDismiss = { renaming = null }) { clean ->
+            if (clean != calendar.name) model.renameCalendarList(calendar.id, clean)
+            renaming = null
+        }
+    }
+    if (creating) {
+        CalendarNameDialog("Neuer Kalender", "", "Hinzufügen", onDismiss = { creating = false }) { clean ->
+            model.createCalendarList(clean)
+            creating = false
+        }
+    }
+}
+
+@Composable
+private fun CalendarNameDialog(
+    title: String,
+    initial: String,
+    confirm: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var name by remember { mutableStateOf(initial) }
+    val clean = name.replace(Regex("""\s+"""), " ").trim()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                name,
+                { name = it.take(80) },
+                label = { Text("Name") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (clean.isNotEmpty()) onConfirm(clean) }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = { TextButton(enabled = clean.isNotEmpty(), onClick = { onConfirm(clean) }) { Text(confirm) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
 }
 
 private fun calendarSwatch(hex: String): Color = runCatching {
@@ -3982,7 +4115,7 @@ fun BugReportDialog(model: FaNotesViewModel) {
                     ) {
                         Icon(
                             Icons.Filled.Close,
-                            contentDescription = "Schließen",
+                            contentDescription = "Schliessen",
                             modifier = Modifier.size(ch.fasrv.fanotes.desk.BUG_REPORT_CLOSE_ICON_DP.dp),
                             tint = ink.muted,
                         )
@@ -4263,7 +4396,7 @@ fun OverviewScreen(
                 )
             }
             TextButton(onClick = onCreate) { Text("Neue Notiz") }
-            TextButton(onClick = onClose) { Text("Schließen") }
+            TextButton(onClick = onClose) { Text("Schliessen") }
         }
         Text(ch.fasrv.fanotes.desk.overviewStatsLine(picture.topFolders, picture.noteCount), modifier = Modifier.padding(top = 12.dp))
         Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -4398,7 +4531,7 @@ fun CardsScreen(model: FaNotesViewModel) {
         Text(ch.fasrv.fanotes.desk.ChromeText.ui(summary), fontSize = 13.sp)
         Text("Fragen stehen unter ## Lernfragen, der Plan in fanotes-cards-v1. Definitionskarten und Bildtafeln zählen mit.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
         if (current == null) {
-            Text(if (wholeDeck && deck.loading) "Einen Moment …" else if (wholeDeck) "Alles gelernt: In keiner Notiz ist heute eine Karte fällig." else "In dieser Notiz sind keine Karten fällig.", modifier = Modifier.padding(vertical = 24.dp))
+            Text(if (wholeDeck && deck.loading) "Einen Moment …" else if (wholeDeck && deck.cards.isEmpty()) "Noch keine Karten. Schreibe in einer Notiz unter ## Lernfragen Frage-Antwort-Paare, oder öffne eine Notiz und tippe auf Karten erstellen (braucht ein KI-Modell)." else if (wholeDeck) "Alles gelernt: In keiner Notiz ist heute eine Karte fällig." else "In dieser Notiz sind keine Karten fällig.", modifier = Modifier.padding(vertical = 24.dp))
         } else {
             val card = current.card
             val picture by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, card.frontImage) {
@@ -4441,7 +4574,7 @@ fun BooksScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
     val placement = settings["book-placement"].orEmpty().ifBlank { "rechts" }
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text("Fachbuch", style = MaterialTheme.typography.titleLarge)
-        Text("Dieselbe Liste wie .fanotes/subject-books.json. Die Seite bleibt erhalten.", fontSize = 13.sp)
+        Text("Verknüpft ein PDF-Buch mit einem Fach-Ordner. Es öffnet sich neben den Notizen dieses Fachs, die Seite bleibt erhalten.", fontSize = 13.sp)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             listOf("links" to "Links", "rechts" to "Rechts", "oben" to "Oben", "unten" to "Unten", "popout" to "Auspoppen").forEach { (id, label) ->
                 TextButton(onClick = { model.updateDesk("book-placement", id) }) {
@@ -4449,9 +4582,10 @@ fun BooksScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                 }
             }
         }
-        OutlinedTextField(folder, { folder = it }, label = { Text("Ordner") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(pdf, { pdf = it }, label = { Text("PDF") }, modifier = Modifier.fillMaxWidth())
-        TextButton(onClick = {
+        val vaultTree by model.tree.collectAsStateWithLifecycle()
+        PathPicker("Ordner wählen", ch.fasrv.fanotes.desk.vaultFolderPaths(vaultTree), folder) { folder = it }
+        PathPicker("PDF wählen", ch.fasrv.fanotes.desk.vaultPdfPaths(vaultTree), pdf) { pdf = it }
+        TextButton(enabled = folder.isNotBlank() && pdf.isNotBlank(), onClick = {
             if (folder.isNotBlank() && pdf.isNotBlank()) {
                 model.attachSubjectBook(folder, pdf)
                 folder = ""
@@ -4467,7 +4601,43 @@ fun BooksScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                 TextButton(onClick = { model.detachSubjectBook(book.subjectPath) }) { Text("Buch entfernen") }
             }
         }
-        if (books.isEmpty()) Text("Noch kein Fachbuch mit einem Ordner verbunden.", modifier = Modifier.padding(top = 12.dp))
+        if (books.isEmpty()) Text("Noch kein Fachbuch verbunden. Wähle oben einen Fach-Ordner und ein PDF aus deinem Vault (importiere ein PDF zuerst über das Menü eines Ordners) und tippe auf Verbinden.", modifier = Modifier.padding(top = 12.dp))
+    }
+}
+
+@Composable
+private fun PathPicker(placeholder: String, options: List<String>, value: String, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(8.dp)
+    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clip(shape)
+                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), shape)
+                .clickable { open = true }
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                value.ifBlank { placeholder },
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (value.isBlank()) LocalStatusInk.current.muted else MaterialTheme.colorScheme.onSurface,
+            )
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = LocalStatusInk.current.muted)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (options.isEmpty()) DropdownMenuItem(text = { Text("Nichts gefunden") }, enabled = false, onClick = {})
+            options.forEach { path ->
+                DropdownMenuItem(text = { Text(path, maxLines = 1, overflow = TextOverflow.Ellipsis) }, onClick = {
+                    open = false
+                    onPick(path)
+                })
+            }
+        }
     }
 }
 
@@ -4594,7 +4764,7 @@ fun HistoryDialog(model: FaNotesViewModel, themeId: String) {
                     ) {
                         Icon(
                             Icons.Filled.Close,
-                            contentDescription = "Schließen",
+                            contentDescription = "Schliessen",
                             modifier = Modifier.size(ch.fasrv.fanotes.vault.HISTORY_DIALOG_CLOSE_ICON_DP.dp),
                             tint = ink.muted,
                         )
@@ -4724,12 +4894,15 @@ fun FirstRunDialog(
     val ink = LocalStatusInk.current
     val go = { step: Int -> onDraft(ch.fasrv.fanotes.desk.firstRunStep(draft, step)) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        // Centre the content vertically when the screen is taller than the step; longer steps scroll.
         Column(
             Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+                .fillMaxWidth()
+                .heightIn(min = maxHeight)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
             Column(
                 Modifier
@@ -4826,7 +4999,7 @@ fun FirstRunDialog(
                                     Icon(Icons.Filled.Check, contentDescription = "Ausgewählt", modifier = Modifier.size(17.dp), tint = accent)
                                 }
                                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED, fontSize = 12.sp, color = ink.soft, modifier = Modifier.padding(top = 15.dp))
-                                Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED_DETAIL, fontSize = 12.sp, color = ink.muted, lineHeight = 19.sp)
+                                Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED_DETAIL.replaceFirstChar { it.uppercase() }, fontSize = 12.sp, color = ink.muted, lineHeight = 19.sp)
                                 FirstRunQuiet(ch.fasrv.fanotes.desk.FIRST_RUN_BACK, leading = true) { go(2) }
                             }
                             val picker: @Composable () -> Unit = {
@@ -4860,7 +5033,7 @@ fun FirstRunDialog(
                                                         }
                                                         Column(Modifier.weight(1f)) {
                                                             Text(folder.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                            Text(ch.fasrv.fanotes.desk.firstRunFolderBlurb(folder.name), fontSize = 12.sp, color = ink.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+                                                            Text(ch.fasrv.fanotes.desk.firstRunFolderBlurb(folder.name), fontSize = 12.sp, color = ink.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
                                                         }
                                                         Box(
                                                             Modifier.size(17.dp).clip(checkShape).border(1.dp, if (on) subject else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), checkShape).background(if (on) subject else Color.Transparent),
@@ -4893,6 +5066,7 @@ fun FirstRunDialog(
                     }
                 }
             }
+        }
         }
     }
 }
@@ -5779,7 +5953,8 @@ fun StudyScreen(model: FaNotesViewModel) {
             Text("Tinte  ${kotlin.math.round(overview.inkMm).toInt()} mm")
             val peak = overview.dwellByWeekday.maxOrNull()?.coerceAtLeast(1) ?: 1L
             Row(Modifier.fillMaxWidth().padding(top = 16.dp).height(120.dp), verticalAlignment = Alignment.Bottom) {
-                listOf("So", "Mo", "Di", "Mi", "Do", "Fr", "Sa").forEachIndexed { index, label ->
+                // dwellByWeekday is indexed from Sunday (0); the week reads Monday first like the calendar.
+                ch.fasrv.fanotes.desk.STUDY_WEEKDAY_ORDER.forEach { (index, label) ->
                     val value = overview.dwellByWeekday.getOrElse(index) { 0L }
                     val bar = (4 + (value.toFloat() / peak.toFloat()) * 88).dp
                     Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -5790,7 +5965,8 @@ fun StudyScreen(model: FaNotesViewModel) {
             }
             Text("Fächer", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
             if (overview.subjects.isEmpty()) Text("Noch keine Seitenstatistik.")
-            overview.subjects.forEach { row ->
+            // Internal folders (.fanotes, .trash ...) are not subjects.
+            ch.fasrv.fanotes.desk.visibleStudySubjects(overview.subjects).forEach { row ->
                 Text(ch.fasrv.fanotes.desk.studySubjectSummary(row))
             }
         }
@@ -5838,7 +6014,7 @@ fun ConflictList(model: FaNotesViewModel) {
                             )
                         }
                     }
-                    TextButton(onClick = { model.closeConflictReview() }) { Text("Schließen") }
+                    TextButton(onClick = { model.closeConflictReview() }) { Text("Schliessen") }
                 }
             }
         }
@@ -6006,8 +6182,8 @@ private fun AiChoiceCard(title: String, detail: String, badge: String, selected:
                 if (selected) Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = accent) else Spacer(Modifier.size(14.dp))
             }
             Column(Modifier.weight(1f)) {
-                Text(title, fontSize = 12.sp, maxLines = 2, color = if (selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft)
-                Text(detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 2, modifier = Modifier.padding(top = 3.dp))
+                Text(title, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft)
+                Text(detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
             }
         }
         if (badge.isNotEmpty()) {
@@ -7174,7 +7350,7 @@ private fun TabletButtonMap(raw: String?, modifier: Modifier = Modifier, onChang
             ),
         verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.input.TABLET_MAP_GAP_DP.dp),
     ) {
-        Text(ch.fasrv.fanotes.input.TABLET_MAP_NOTE, fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp)
+        Text(ch.fasrv.fanotes.input.TABLET_MAP_NOTE.substringBefore(" ExpressKeys"), fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp)
         listOf("pen" to "Stift", "tablet" to "Tablett").forEach { (group, title) ->
             Column(
                 Modifier
@@ -7297,7 +7473,7 @@ internal fun SettingRow(
     val viewportStacks = LocalSettingsContentStacks.current
     Column(modifier.fillMaxWidth()) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val stacked = viewportStacks || maxWidth < 420.dp
+            val stacked = viewportStacks || maxWidth < ch.fasrv.fanotes.desk.SETTING_ROW_STACK_BELOW_DP.dp
             if (stacked) {
                 Column(
                     Modifier
@@ -7347,8 +7523,8 @@ private fun SettingCopy(
     mark: String? = null,
 ) {
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
-    val shownTitle = ch.fasrv.fanotes.desk.ChromeText.ui(title)
-    val shownDescription = description?.let { ch.fasrv.fanotes.desk.ChromeText.ui(it) }
+    val shownTitle = ch.fasrv.fanotes.desk.ChromeText.ui(title).replace("ß", "ss")
+    val shownDescription = description?.let { ch.fasrv.fanotes.desk.ChromeText.ui(it).replace("ß", "ss") }
     Column(modifier) {
         if (glyph == null && mark == null) {
             Text(shownTitle, fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTING_COPY_WEIGHT), color = MaterialTheme.colorScheme.onSurface)
@@ -7440,6 +7616,17 @@ private fun ThemeChoiceButton(
             if (swatch.split) {
                 Box(Modifier.fillMaxHeight().fillMaxWidth(0.5f).align(Alignment.CenterEnd).background(Color(android.graphics.Color.parseColor(swatch.surface))))
             }
+            if (!swatch.split) {
+                // Mini window: a rule line on top and two text bars, so dark themes with close backgrounds still differ.
+                val line = Color(android.graphics.Color.parseColor(swatch.line))
+                val ink = Color(android.graphics.Color.parseColor(swatch.text))
+                Box(Modifier.fillMaxWidth().height(1.dp).align(Alignment.TopStart).padding(top = 0.dp).background(line))
+                Column(Modifier.align(Alignment.CenterEnd).padding(end = 5.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Box(Modifier.width(18.dp).height(2.dp).background(ink.copy(alpha = 0.85f)))
+                    Box(Modifier.width(12.dp).height(2.dp).background(ink.copy(alpha = 0.5f)))
+                    Box(Modifier.width(15.dp).height(2.dp).background(ink.copy(alpha = 0.5f)))
+                }
+            }
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
@@ -7464,21 +7651,60 @@ private fun ThemeChoiceButton(
 
 @Composable
 private fun AccentSwatches(selected: String, onPick: (String) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SWATCH_GAP_DP.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(if (LocalTouch.current.large) 0.dp else ch.fasrv.fanotes.desk.SWATCH_GAP_DP.dp)) {
         ch.fasrv.fanotes.desk.ACCENT_COLORS.forEach { color ->
             val on = color == selected
+            // The hit box is 48 dp wide and high with the touch layer; the drawn dot keeps its 23 dp.
             Box(
                 Modifier
-                    .size(ch.fasrv.fanotes.desk.SWATCH_DP.dp)
-                    .clip(CircleShape)
-                    .background(Color(android.graphics.Color.parseColor(color)))
-                    .border(
-                        if (on) 2.dp else 0.dp,
-                        if (on) MaterialTheme.colorScheme.onSurface else Color.Transparent,
-                        CircleShape,
-                    )
+                    .size(LocalTouch.current.swatchHitDp.dp)
                     .clickable { onPick(color) },
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .size(ch.fasrv.fanotes.desk.SWATCH_DP.dp)
+                        .clip(CircleShape)
+                        .background(Color(android.graphics.Color.parseColor(color)))
+                        .border(
+                            if (on) 2.dp else 0.dp,
+                            if (on) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                            CircleShape,
+                        ),
+                )
+            }
+        }
+    }
+}
+
+/** Segmented choice for a settings row: wraps, marks the current option, 48 dp high with the touch layer. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun SettingSegments(options: List<Pair<String, String>>, selected: String, onPick: (String) -> Unit) {
+    val hit = maxOf(LocalTouch.current.chipHitDp, 32)
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        options.forEach { (id, label) ->
+            val on = selected == id
+            Box(
+                Modifier
+                    .heightIn(min = hit.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (on) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+                    .border(1.dp, if (on) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f) else Color.Transparent, RoundedCornerShape(6.dp))
+                    .selectable(selected = on, role = androidx.compose.ui.semantics.Role.RadioButton) { onPick(id) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    ch.fasrv.fanotes.desk.ChromeText.ui(label),
+                    fontSize = 12.sp,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+                )
+            }
         }
     }
 }
@@ -7863,6 +8089,7 @@ private fun SettingsPage(
     var scrollTarget by remember { mutableStateOf<String?>(null) }
     val settingsResults = ch.fasrv.fanotes.desk.searchSettings(settingsQuery)
     val paneScroll = rememberScrollState()
+    val navScroll = rememberScrollState()
     val anchorY = remember { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
     LaunchedEffect(section, scrollTarget, anchorY["$section:$scrollTarget"]) {
         val id = scrollTarget ?: return@LaunchedEffect
@@ -7885,7 +8112,8 @@ private fun SettingsPage(
     Row(Modifier.fillMaxSize()) {
         Column(
             (if (navCollapsed) Modifier.width(ch.fasrv.fanotes.desk.SETTINGS_NAV_NARROW_DP.dp) else Modifier.weight(0.38f))
-                .verticalScroll(rememberScrollState())
+                .scrollEndFade(navScroll, horizontal = false, color = MaterialTheme.colorScheme.background)
+                .verticalScroll(navScroll)
                 .padding(
                     start = navPadX.dp,
                     end = navPadX.dp,
@@ -8114,38 +8342,10 @@ private fun SettingsPage(
                         SettingRow("Sprache", "System, Deutsch oder English.") {
                             val stored = settings["ui-language"].orEmpty()
                             val current = if (stored == "de" || stored == "en") stored else "system"
-                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                listOf("system" to "System", "de" to "Deutsch", "en" to "English").forEach { (id, label) ->
-                                    val on = current == id
-                                    Text(
-                                        label,
-                                        fontSize = 12.sp,
-                                        color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (on) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-                                            .clickable { model.updateDesk("ui-language", id) }
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                    )
-                                }
-                            }
+                            SettingSegments(listOf("system" to "System", "de" to "Deutsch", "en" to "English"), current) { model.updateDesk("ui-language", it) }
                         }
                         SettingRow("Arbeitsflächen-Design", "Dekoriert den Hintergrund dezent, ohne vom Inhalt abzulenken.") {
-                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                ch.fasrv.fanotes.desk.WORKSPACE_BACKGROUNDS.forEach { (id, label) ->
-                                    val on = background == id
-                                    Text(
-                                        label,
-                                        fontSize = 12.sp,
-                                        color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (on) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-                                            .clickable { model.updateDesk("background", id) }
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                    )
-                                }
-                            }
+                            SettingSegments(ch.fasrv.fanotes.desk.WORKSPACE_BACKGROUNDS, background) { model.updateDesk("background", it) }
                         }
                         SettingRow("Akzentfarbe", "Färbt Auswahl, Fokus und interaktive Elemente.", modifier = Modifier.settingsAnchor("appearance", "settings-accent", anchorY)) {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -8257,7 +8457,8 @@ private fun SettingsPage(
                         }
                         SettingRow(
                             "Zoom-Geschwindigkeit",
-                            "Wie weit Strg+Mausrad oder Trackpad-Pinch das Blatt verändert. 1 ist langsam, 5 normal, 10 schnell.",
+                            if (hasHardwareKeyboard()) "Wie weit Strg+Mausrad oder Trackpad-Pinch das Blatt verändert. 1 ist langsam, 5 normal, 10 schnell."
+                            else "Wie weit der Zwei-Finger-Zoom das Blatt verändert. 1 ist langsam, 5 normal, 10 schnell.",
                             modifier = Modifier.settingsAnchor("editor", "settings-zoom", anchorY),
                         ) {
                             SettingSlider(metrics.zoomSpeed.toFloat(), 1f, 10f, 1f, "") { model.updateDesk("zoom-speed", it.toInt().toString()) }
@@ -8273,7 +8474,7 @@ private fun SettingsPage(
                         }
                         SettingRow(
                             "Rechtschreibprüfung",
-                            "Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt. Ein langes Drücken oder Strg+. zeigt Vorschläge.",
+                            "Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt. " + (if (hasHardwareKeyboard()) "Ein langes Drücken oder Strg+. zeigt Vorschläge." else "Ein langes Drücken zeigt Vorschläge."),
                         ) {
                             Switch(
                                 checked = settings["spellcheck"] != "off",
@@ -8298,18 +8499,10 @@ private fun SettingsPage(
                         }
                         SettingRow("Werkzeugleiste", "Legt die Werkzeugleiste des Editors oben (horizontal) oder am Rand (vertikal) ab.") {
                             val position = ch.fasrv.fanotes.desk.toolbarPosition(settings["toolbar-position"])
-                            Column {
-                                ch.fasrv.fanotes.desk.ToolbarPosition.entries.forEach { option ->
-                                    val on = option == position
-                                    Text(
-                                        ch.fasrv.fanotes.desk.ChromeText.ui(option.label),
-                                        fontSize = 13.sp,
-                                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
-                                        modifier = Modifier.heightIn(min = 48.dp).clickable { model.updateDesk("toolbar-position", option.id) }.padding(vertical = 10.dp),
-                                    )
-                                }
-                            }
+                            SettingSegments(
+                                ch.fasrv.fanotes.desk.ToolbarPosition.entries.map { it.id to it.label },
+                                position.id,
+                            ) { model.updateDesk("toolbar-position", it) }
                         }
                         SettingRow("Gliederung anzeigen", divider = false) {
                             Switch(
@@ -8452,18 +8645,10 @@ private fun SettingsPage(
                     }
                     SettingCard("Profil", Icons.Filled.Person) {
                         SettingRow("Arbeitsprofil", divider = false) {
-                            Column {
-                                listOf("school" to "Schule", "university" to "UNI", "private" to "Privat", "work" to "Arbeit").forEach { (id, label) ->
-                                    val on = settings["profile"] == id
-                                    Text(
-                                        label,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
-                                        modifier = Modifier.clickable { model.applyProfile(id) }.padding(vertical = 4.dp),
-                                    )
-                                }
-                            }
+                            SettingSegments(
+                                listOf("school" to "Schule", "university" to "UNI", "private" to "Privat", "work" to "Arbeit"),
+                                settings["profile"].orEmpty(),
+                            ) { model.applyProfile(it) }
                         }
                     }
                 }
@@ -8657,19 +8842,19 @@ private fun SettingsPage(
                         SettingRow("Bewegung reduzieren", "Deaktiviert dekorative Übergänge und Animationen.") {
                             Switch(checked = calm, onCheckedChange = { model.updateDesk("reduce-motion", if (it) "on" else "off") })
                         }
-                        SettingRow("Touch-Bedienung gross", "Grössere Tippflächen für Leiste, Tabs und Statuszeile (ab 48 dp). Standardmässig an, solange das Fenster schmaler als 840 dp ist.") {
+                        SettingRow("Touch-Bedienung gross", "Grössere Tippflächen für Leiste, Tabs und Statuszeile (ab 48 dp). Standardmässig an auf Geräten mit Touchscreen.") {
                             Switch(
                                 checked = LocalTouch.current.large,
                                 onCheckedChange = { model.updateDesk("touch-large", if (it) "on" else "off") },
                             )
                         }
                         SettingRow("Seitenleiste") {
-                            SettingSlider(ch.fasrv.fanotes.desk.sidebarWidthDp(settings["sidebar-width"]).toFloat(), 210f, 430f, 10f, " px") {
+                            SettingSlider(ch.fasrv.fanotes.desk.sidebarWidthDp(settings["sidebar-width"]).toFloat(), 210f, 430f, 10f, " dp") {
                                 model.updateDesk("sidebar-width", it.toInt().toString())
                             }
                         }
                         SettingRow("Informationsleiste", divider = false) {
-                            SettingSlider(ch.fasrv.fanotes.desk.rightPanelWidthDp(settings["panel-width"]).toFloat(), 220f, 430f, 10f, " px") {
+                            SettingSlider(ch.fasrv.fanotes.desk.rightPanelWidthDp(settings["panel-width"]).toFloat(), 220f, 430f, 10f, " dp") {
                                 model.updateDesk("panel-width", it.toInt().toString())
                             }
                         }
@@ -8687,7 +8872,7 @@ private fun SettingsPage(
                 "advanced" -> {
                     SettingCard("Eigenes CSS", Icons.Filled.Code, Modifier.settingsAnchor("advanced", "settings-css", anchorY)) {
                         Column(Modifier.padding(horizontal = 15.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Wird nur innerhalb der Oberfläche angewandt. Damit kannst du Abstände, Farben und Markdown-Elemente weiter personalisieren.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                            Text("Übernommen werden nur Variablen wie --accent, --bg, --panel, --text, --radius oder --sidebar-width; Selektoren und andere Regeln werden ignoriert.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
                             OutlinedTextField(
                                 css,
                                 { model.updateCustomCss(it) },
@@ -9026,7 +9211,7 @@ fun NoteSearchBar(model: FaNotesViewModel) {
             ) {
                 TextButton(onClick = { model.stepNoteSearch(-1) }, enabled = hits.isNotEmpty()) { Text("Vorheriger Treffer") }
                 TextButton(onClick = { model.stepNoteSearch(1) }, enabled = hits.isNotEmpty()) { Text("Nächster Treffer") }
-                SearchFlag("Groß-/Kleinschreibung", caseSensitive, model::setNoteSearchCaseSensitive)
+                SearchFlag("Gross-/Kleinschreibung", caseSensitive, model::setNoteSearchCaseSensitive)
                 SearchFlag("Regulärer Ausdruck", regexp, model::setNoteSearchRegexp)
                 SearchFlag("Ganzes Wort", wholeWord, model::setNoteSearchWholeWord)
             }
@@ -9128,7 +9313,7 @@ fun PdfNoteToolbar(model: FaNotesViewModel) {
                 fontWeight = if (mode == "custom") FontWeight.SemiBold else FontWeight.Normal,
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
-            TextButton(onClick = { model.requestPdfCamera("in") }, enabled = zoom < zoomMax - 1e-4) { Text("Vergrößern") }
+            TextButton(onClick = { model.requestPdfCamera("in") }, enabled = zoom < zoomMax - 1e-4) { Text("Vergrössern") }
             TextButton(onClick = { model.requestPdfCamera("fit-width") }) {
                 Text("Breite", fontWeight = if (mode == "fit-width") FontWeight.Bold else FontWeight.Normal)
             }
@@ -9475,6 +9660,10 @@ fun CommandPalette(
 ) {
     var query by remember(notesOnly) { mutableStateOf("") }
     var selected by remember { mutableIntStateOf(0) }
+    // Open with the cursor in the search field (and the soft keyboard up) so typing is not lost on a tablet.
+    val paletteFocus = remember { FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(notesOnly) { runCatching { paletteFocus.requestFocus() } }
+    val keyboardHints = hasHardwareKeyboard()
     val notes = if (notesOnly) rankNotes(query, 40) else if (query.isBlank()) emptyList() else rankNotes(query, 6)
     val actions = ch.fasrv.fanotes.desk.paletteCommands(penOpen, bookOpen, splitOpen, splitRows, focus, dailyFolder, workRequests)
     val commands = if (notesOnly) emptyList() else actions.filter { ch.fasrv.fanotes.desk.paletteCommandMatches(it, query) }
@@ -9535,7 +9724,7 @@ fun CommandPalette(
                     fontSize = ch.fasrv.fanotes.desk.PALETTE_SEARCH_SP.sp,
                 ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                modifier = Modifier.weight(1f).onPreviewKeyEvent { event ->
+                modifier = Modifier.weight(1f).focusRequester(paletteFocus).onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when (event.key) {
                         Key.DirectionDown -> {
@@ -9578,10 +9767,10 @@ fun CommandPalette(
                 Modifier
                     .size(ch.fasrv.fanotes.desk.PALETTE_CLOSE_DP.dp)
                     .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.PALETTE_CLOSE_RADIUS_DP.dp))
-                    .clickable(onClickLabel = "Schließen", onClick = onDismiss),
+                    .clickable(onClickLabel = "Schliessen", onClick = onDismiss),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Close, contentDescription = "Schließen", modifier = Modifier.size(16.dp), tint = LocalStatusInk.current.muted)
+                Icon(Icons.Filled.Close, contentDescription = "Schliessen", modifier = Modifier.size(16.dp), tint = LocalStatusInk.current.muted)
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
@@ -9698,21 +9887,23 @@ fun CommandPalette(
                 }
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(ch.fasrv.fanotes.desk.PALETTE_FOOTER_DP.dp)
-                .padding(horizontal = 13.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(ch.fasrv.fanotes.desk.ChromeText.ui("↑ ↓ auswählen"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
-            Text(ch.fasrv.fanotes.desk.ChromeText.ui("Enter öffnen"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
-            if (notesOnly || notes.isNotEmpty()) {
-                Text(ch.fasrv.fanotes.desk.ChromeText.ui("⇧ Enter rechts"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+        if (keyboardHints) {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(ch.fasrv.fanotes.desk.PALETTE_FOOTER_DP.dp)
+                    .padding(horizontal = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(ch.fasrv.fanotes.desk.ChromeText.ui("↑ ↓ auswählen"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                Text(ch.fasrv.fanotes.desk.ChromeText.ui("Enter öffnen"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                if (notesOnly || notes.isNotEmpty()) {
+                    Text(ch.fasrv.fanotes.desk.ChromeText.ui("⇧ Enter rechts"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                }
+                Text(ch.fasrv.fanotes.desk.ChromeText.ui("Esc schließen").replace("ß", "ss"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
             }
-            Text(ch.fasrv.fanotes.desk.ChromeText.ui("Esc schließen"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
         }
     }
 }

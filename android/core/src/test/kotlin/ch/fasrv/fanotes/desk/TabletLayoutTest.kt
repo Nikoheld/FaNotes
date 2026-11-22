@@ -15,11 +15,12 @@ class TabletLayoutTest {
     }
 
     @Test
-    fun touchLayerIsAutomaticBelowExpandedAndOverridable() {
-        assertTrue(touchLarge(null, 800))
-        assertFalse(touchLarge(null, 1280))
-        assertTrue(touchLarge("on", 1280))
-        assertFalse(touchLarge("off", 500))
+    fun touchLayerFollowsTheTouchscreenAndIsOverridable() {
+        assertTrue(touchLarge(null, touchscreen = true))
+        assertFalse(touchLarge(null, touchscreen = false))
+        assertTrue(touchLarge("", touchscreen = true))
+        assertTrue(touchLarge("on", touchscreen = false))
+        assertFalse(touchLarge("off", touchscreen = true))
     }
 
     @Test

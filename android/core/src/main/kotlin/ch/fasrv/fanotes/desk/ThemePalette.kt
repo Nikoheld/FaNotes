@@ -29,6 +29,8 @@ val THEME_PALETTES = listOf(
     ThemePalette("forest", "Wald", "Stein", true, "#171a18", "#1e221f", "#323833", "#e7ebe8", "#ff8d90", "#2a2f2c", "#5dcc78", "#e7b34a", "#aeb5b0", "#c6ccc8", "#3a413c"),
     ThemePalette("aurora", "Aurora", "Nebel", true, "#18181c", "#1f1f24", "#34343c", "#e8e8ed", "#ff8d90", "#2c2c33", "#5dcc78", "#e7b34a", "#afafb7", "#c7c7ce", "#3c3c45"),
     ThemePalette("sepia", "Studierzimmer", "Warm", false, "#fbfaf7", "#f4f1ea", "#ebe6dc", "#37352f", "#c03543", "#fffdf8", "#1f7a48", "#8a5a12", "#615c54", "#514d46", "#e3ddd1"),
+    // Desktop `oled`: pure black surfaces (pixels switch off), grey borders instead of shadows.
+    ThemePalette("oled", "OLED", "Reines Schwarz, spart Akku", true, "#000000", "#000000", "#262626", "#e8e8e8", "#ff8d90", "#000000", "#5dcc78", "#e7b34a", "#a8a8a8", "#c4c4c4", "#1f1f1f"),
 )
 
 data class ThemeChoice(val id: String, val label: String, val detail: String)
@@ -37,21 +39,26 @@ val THEME_CHOICES = listOf(ThemeChoice("system", "System", "Automatisch")) +
     THEME_PALETTES.map { ThemeChoice(it.id, it.label, it.detail) }
 
 fun themePalette(raw: String?, systemDark: Boolean): ThemePalette {
-    val id = when (raw) {
-        "dark", "light", "midnight", "forest", "aurora", "sepia" -> raw
-        else -> if (systemDark) "dark" else "light"
-    }
+    val id = if (THEME_PALETTES.any { it.id == raw }) raw else if (systemDark) "dark" else "light"
     return THEME_PALETTES.first { it.id == id }
 }
 
 /** Preview chips in the Farbschema row. System is the dark/light split from the desktop list. */
-data class ThemeSwatch(val background: String, val surface: String, val split: Boolean)
+data class ThemeSwatch(
+    val background: String,
+    val surface: String,
+    val split: Boolean,
+    /** Border/rule colour of the theme, drawn as a mini toolbar line so near-identical dark themes stay distinguishable. */
+    val line: String = surface,
+    /** Text colour of the theme, drawn as short text bars. */
+    val text: String = surface,
+)
 
 fun themeSwatch(id: String): ThemeSwatch = when (id) {
     "system" -> ThemeSwatch("#191919", "#f7f6f3", split = true)
     else -> {
         val palette = themePalette(id, systemDark = false)
-        ThemeSwatch(palette.background, palette.surface, split = false)
+        ThemeSwatch(palette.background, palette.surface, split = false, line = palette.surfaceVariant, text = palette.text)
     }
 }
 
