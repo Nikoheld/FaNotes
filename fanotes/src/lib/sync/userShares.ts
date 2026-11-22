@@ -664,7 +664,8 @@ export class UserShareManager {
   private async push(session: SyncSession, entry: Opened, dir: string): Promise<boolean> {
     const host = this.host!
     const local = this.localFor(entry.view.id)
-    const files = this.listLocal(entry, await host.scan())
+    const scan = await host.scan()
+    const files = this.listLocal(entry, scan)
     let conflicted = false
     for (const [rel, file] of files) {
       const fileId = await fileIdFor(entry.keys, rel)
@@ -696,7 +697,11 @@ export class UserShareManager {
     // A file that was synced and is now gone locally becomes a delete. If the whole folder vanished (moved, or a drive
     // that is not mounted), nothing is deleted: that is not an intent to remove the shared content.
     const known = Object.entries(local.files)
-    const missing = known.filter(([, base]) => !files.has(base.rel))
+    // A note share only lists the note and its twin, but the pull also writes what the other side added next to
+    // them (a conflict copy of the recipient). That file is outside the list, not gone: removing it from the share
+    // would take the recipient's copy away on their side too.
+    const onDisk = new Set(scan.map((file) => file.path))
+    const missing = known.filter(([, base]) => !files.has(base.rel) && !onDisk.has(this.pathFor(dir, base.rel)))
     if (missing.length && (files.size > 0 || known.length === 1)) {
       for (const [fileId, base] of missing) {
         try {

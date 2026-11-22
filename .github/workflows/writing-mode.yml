@@ -50,6 +50,7 @@ jobs:
       - run: node scripts/check-writing-export.mjs
       - run: node scripts/check-writing-sync.mjs
       - run: node scripts/check-sync.mjs
+      - run: node scripts/check-sync-stress.mjs
       - run: node scripts/check-account-share.mjs
       - run: node scripts/check-live-collab.mjs
       - run: node scripts/check-live-collab-editor.mjs
