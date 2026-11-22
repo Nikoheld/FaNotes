@@ -197,11 +197,18 @@ try {
     // Insert grid picker.
     page = await open('Start\n\nEnde', 'light', { width: 1100, height: 900 })
     await page.evaluate(() => window.__setSelection(5))
-    await page.locator('.ftb-grid-cell[aria-label="Tabelle mit 3 Zeilen und 4 Spalten einfügen"]').hover()
+    // Since the unified toolbar the grid lives in the "Mehr" popover.
+    // A real mouse press moves focus out of the harness editor and re-mounts the toolbar before the menu state
+    // settles (the app shell keeps the editor focused), so open the menu with a DOM click.
+    for (let attempt = 0; attempt < 3 && (await page.locator('.ftb-popover').count()) === 0; attempt += 1) {
+      await page.locator('.ftb-more > button').evaluate((node) => node.click())
+      await settle(page, 250)
+    }
+    await page.locator('.ftb-grid-cell:nth-child(24)' /* row 3, column 4 of the 10-column grid; the label follows the UI language */).hover()
     assert.ok((await page.locator('.ftb-table-picker .ftb-heading').textContent()).includes('3 × 4'), 'hover label shows the size')
     assert.equal(await page.locator('.ftb-grid-cell.is-lit').count(), 12)
     await shot(page, 'table-picker.png')
-    await page.locator('.ftb-grid-cell[aria-label="Tabelle mit 3 Zeilen und 4 Spalten einfügen"]').click()
+    await page.locator('.ftb-grid-cell:nth-child(24)' /* row 3, column 4 of the 10-column grid; the label follows the UI language */).click()
     await page.waitForSelector('.cm-table-shell')
     await settle(page, 300)
     assert.equal(await page.locator('.cm-table-shell th').count(), 4)
