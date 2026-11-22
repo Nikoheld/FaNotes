@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'vite'
+import { singleEntryPlugin } from './fixtures/single-entry-plugin.mjs'
 
 const desktopPlatform = process.env.FANOTES_TTH_PLATFORM || (process.env.FANOTES_TTH_LINUX === '1' ? 'linux' : '')
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -41,6 +42,7 @@ const runDialog = async () => {
   let chromium
   try {
     await build({
+      plugins: [singleEntryPlugin(path.join(appRoot, 'scripts/fixtures/tth-dialog-harness.tsx'))],
       root: appRoot,
       logLevel: 'error',
       configFile: path.join(appRoot, 'vite.config.ts'),

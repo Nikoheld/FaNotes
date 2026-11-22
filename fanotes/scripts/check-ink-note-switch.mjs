@@ -86,12 +86,12 @@ assert.deepEqual(overlaySessionForNote(sessionA, 'Welcome.md'), { key: 0, docume
 assert.deepEqual(overlaySessionForNote(sessionA, null), { key: 0, document: null, path: null })
 assert.deepEqual(overlaySessionForNote({ key: 0, document: null, path: null }, 'Welcome.md'), { key: 0, document: null, path: 'Welcome.md' })
 assert.match(app, /const noteDrawingSession = overlaySessionForNote\(drawingSession, activeTab\?\.path \?\? null\)/)
-const overlayRender = section(app, '{noteDrawingSession.key > 0 && <Suspense', 'onDirtyChange={handleDrawingDirtyChange}', 'overlay render')
-assert.match(overlayRender, /key=\{noteDrawingSession\.key\}/)
-assert.match(overlayRender, /drawingId=\{noteDrawingSession\.document\?\.id\}/)
-assert.match(overlayRender, /initialDrawingJson=\{noteDrawingSession\.document\?\.drawingJson\}/)
+const overlayRender = section(app, '{inkBoard.key > 0 && <Suspense', 'onDirtyChange={handleDrawingDirtyChange}', 'overlay render')
+assert.match(overlayRender, /key=\{inkBoard\.key\}/)
+assert.match(overlayRender, /drawingId=\{inkBoard\.document\?\.id\}/)
+assert.match(overlayRender, /initialDrawingJson=\{inkBoard\.document\?\.drawingJson\}/)
 assert.doesNotMatch(overlayRender, /[^e]drawingSession\./, 'the render never reads the raw session')
-assert.match(app, /drawingOpen && noteDrawingSession\.key === 0 && <div className="inline-ink-loading"/)
+assert.match(app, /drawingOpen && inkBoard\.key === 0 && <div className="inline-ink-loading"/)
 for (const write of app.matchAll(/setDrawingSession\(([^\n]*)\n?/g)) {
   const line = write[0]
   assert.ok(

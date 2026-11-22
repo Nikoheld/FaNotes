@@ -201,7 +201,8 @@ try {
   const releaseWorkflow = read('../.github/workflows/release.yml')
   assert.equal(releaseWorkflow.includes('macos-14'), false)
   assert.equal(releaseWorkflow.includes('dist:mac'), false)
-  assert.match(releaseWorkflow, /needs: \[linux, windows, android\]/)
+  // The publish job waits for the plan and for every platform build, the Android companion included.
+  assert.match(releaseWorkflow, /needs: \[platform-plan, linux, windows, android, android-companion\]/)
   assert.match(read('src/lib/addons/protocol.ts'), /'ink.write': 'ink:write'/)
   assert.match(read('src/lib/addons/protocol.ts'), /'recognition.run': 'recognition'/)
   assert.match(read('src/lib/addons/protocol.ts'), /'calendar.write': 'calendar:write'/)

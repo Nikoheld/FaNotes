@@ -68,9 +68,9 @@ try {
   const capped = encodeInkHistory(live, longUndo, [])
   assert.equal(capped.undo.length, INK_HISTORY_LIMIT)
 
-  assert.match(board, /decodeInkHistory\(strokesRef\.current, raw\.inkHistory/)
-  assert.match(board, /undoRef\.current = loadedHistory\.undo/)
-  assert.match(board, /redoRef\.current = loadedHistory\.redo/)
+  assert.match(board, /decodeInkHistory\(strokes, raw\.inkHistory/)
+  assert.match(board, /undoRef\.current = history\.undo/)
+  assert.match(board, /redoRef\.current = history\.redo/)
   assert.match(board, /const inkHistory = encodeInkHistory\(strokesRef\.current, undoRef\.current, redoRef\.current\)/)
   assert.match(board, /\.\.\.\(inkHistory \? \{ inkHistory \} : \{\}\)/)
   assert.doesNotMatch(board, /SCRIBBLE_ERASE_NOTICE_TEXT/)

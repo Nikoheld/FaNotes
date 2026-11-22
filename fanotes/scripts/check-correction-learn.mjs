@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
+import { singleEntryPlugin } from './fixtures/single-entry-plugin.mjs'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-correction-learn-'))
@@ -20,6 +21,7 @@ const mime = new Map([
 let server
 try {
   await build({
+    plugins: [singleEntryPlugin(path.join(appRoot, 'scripts/fixtures/correction-learn-rerecognize-harness.ts'))],
     root: appRoot,
     publicDir: path.join(appRoot, 'public'),
     logLevel: 'error',
