@@ -243,7 +243,7 @@ import {
 } from './lib/overlayInteract'
 import { installChromeTextSelect } from './lib/chromeTextSelect'
 import { readDocInputMode, writeDocInputMode } from './lib/docInputMode'
-import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, overlayAfterNoteSwitch, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
+import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, overlayAfterNoteSwitch, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot, SPLIT_PDF_TOOLBAR_SLOT_ID } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
 import { collectShareNotes, createFetchSharePort, loadShareEntries, parseShareDirectory, publicShareInk, publicShareTextFields, publishShare, queueLiveShareRefresh, readShare, resolveShareOrigin, serializeShareDirectory, type ShareTextField } from './lib/sync/share'
@@ -5766,6 +5766,22 @@ export default function App({ startupBootstrap }: AppProps) {
     // A handwriting note is the sheet on screen, with every section open.
     // The text PDF stays for notes that have no ink marker.
     const inkNote = Boolean(noteInkId(current.note))
+    const pdfPath = activePathRef.current
+    if (pdfPath && isPdfNotePath(pdfPath)) {
+      // A PDF note has no text of its own (its note text is only the marks block): export the PDF itself
+      // instead of an empty text sheet.
+      try {
+        const { loadVaultPdfBytes } = await import('./lib/pdfDocument')
+        const original = await loadVaultPdfBytes(pdfPath)
+        const copy = new Uint8Array(original.byteLength)
+        copy.set(original)
+        saveExportFile(`${noteExportBaseName(current.title)}.pdf`, new Blob([copy], { type: 'application/pdf' }))
+        toast('Original-PDF gespeichert. Handschrift und Markierungen sind nicht enthalten.', 'info')
+      } catch (error) {
+        toast(error instanceof Error ? error.message : 'PDF-Export fehlgeschlagen.', 'error')
+      }
+      return
+    }
     const folds = inkNote ? editorRef.current?.captureFolds() ?? [] : null
     try {
       let bytes: Uint8Array
@@ -5794,6 +5810,10 @@ export default function App({ startupBootstrap }: AppProps) {
       toast('Öffne eine Notiz im Editor, um sie zu exportieren.', 'info')
       return
     }
+    if (isPdfActive) {
+      toast('Ein PDF hat keinen Text für den LaTeX-Export.', 'info')
+      return
+    }
     try {
       const source = exportNoteLatex(current.note, current.title)
       saveExportFile(`${noteExportBaseName(current.title)}.tex`, new Blob([source], { type: 'text/plain;charset=utf-8' }))
@@ -5801,7 +5821,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } catch (error) {
       toast(error instanceof Error ? error.message : 'LaTeX-Export fehlgeschlagen.', 'error')
     }
-  }, [readExportNote, toast])
+  }, [isPdfActive, readExportNote, toast])
 
   const insertSimpleLatex = useCallback((button: SimpleLatexButton, operands: SimpleLatexOperands) => {
     if (!activePathRef.current || drawingOpen || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen) {
@@ -7049,7 +7069,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   <span className="editor-menu-label">Datei</span>
                   <button type="button" role="menuitem" disabled={!activePath || isPdfActive} onClick={() => { setEditorMenuOpen(false); if (activePath) void duplicateNote(activePath) }}><span><Files size={15} /></span><span><strong>Notiz duplizieren</strong><small>Text, Handschrift, Verlinkungen und Textfelder als neue Notiz</small></span><kbd>⌥⇧D</kbd></button>
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); if (activePath) copyWikiLink(activePath) }}><span><Link2 size={15} /></span><span><strong>Wiki-Link kopieren</strong><small>[[Titel]] in die Zwischenablage</small></span></button>
-                  <EditorExportControls disabled={!activeTab} onExportPdf={() => { setEditorMenuOpen(false); exportCurrentPdf() }} onExportLatex={() => { setEditorMenuOpen(false); exportCurrentLatex() }} />
+                  <EditorExportControls disabled={!activeTab} latexDisabled={isPdfActive} onExportPdf={() => { setEditorMenuOpen(false); exportCurrentPdf() }} onExportLatex={() => { setEditorMenuOpen(false); exportCurrentLatex() }} />
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); void openHistory() }}><span><History size={15} /></span><span><strong>Versionsverlauf</strong><small>Frühere Stände wiederherstellen</small></span></button>
                   <button type="button" role="menuitem" onClick={() => { setEditorMenuOpen(false); toggleSplit() }}><span><Columns2 size={15} /></span><span><strong>{splitPath ? 'Teilung schließen' : 'Geteilte Ansicht'}</strong><small>Zwei Notizen nebeneinander oder untereinander</small></span></button>
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); if (activePath) void window.fanotes.revealInFolder(activePath) }}><span>{isWeb ? <Download size={15} /> : <FolderOpen size={15} />}</span><span><strong>{isWeb ? (isPdfActive ? 'PDF herunterladen' : 'Markdown herunterladen') : 'Im Dateimanager zeigen'}</strong><small>{isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der Notiz öffnen'}</small></span></button>
@@ -7320,6 +7340,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   <button type="button" title="Als einzige Notiz öffnen" aria-label="Als einzige Notiz öffnen" onClick={() => { const target = splitTab.path; splitEditorRef.current?.flushChanges(); setSplitPath(null); void openNote(target) }}><Maximize2 size={14} /></button>
                   <button type="button" aria-label="Teilung schließen" title="Teilung schließen (Strg+\)" onClick={() => { splitEditorRef.current?.flushChanges(); setSplitPath(null) }}><X size={14} /></button>
                 </header>
+                {(splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path)) && <div id={SPLIT_PDF_TOOLBAR_SLOT_ID} className="split-pdf-toolbar subject-book-pdf-toolbar" />}
                 <PaperView
                   className={`unified-note-view paper-${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'blank' : normalizePaperStyle(notePaperByPath[splitTab.path] ?? settings.paperStyle)} ${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'is-pdf-note' : ''}`}
                   viewKey={`split:${splitTab.path}`}
@@ -7336,6 +7357,7 @@ export default function App({ startupBootstrap }: AppProps) {
                             path={splitTab.path}
                             title={splitTab.title}
                             inputDisabled={Boolean(tabHolds[splitTab.path])}
+                            toolbarSlotId={SPLIT_PDF_TOOLBAR_SLOT_ID}
                             autoFit={false}
                             quotes={readPdfMarks(splitTab.content)}
                             onMarkSelection={(quote, page) => {
