@@ -127,7 +127,22 @@ export type SyncPathOptions = {
   includeRecognitionModel?: boolean
   includeHistory?: boolean
   includeAttachments?: boolean
+  /** This device is Windows: names from Linux or Android that NTFS cannot hold are not synced here. */
+  windowsNames?: boolean
 }
+
+const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|conin\$|conout\$|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3])$/iu
+
+/**
+ * A name Windows cannot create: illegal characters (a colon would even open an NTFS alternate data stream),
+ * a reserved device name with or without extension, or a trailing dot or space. Mirrors electron/entry-names.cjs.
+ */
+export const isWindowsUnsafeSyncName = (segment: string) => (
+  !segment
+  || /[<>:"|?*\0-\x1f]/u.test(segment)
+  || /[. ]$/u.test(segment)
+  || WINDOWS_DEVICE_NAME.test(segment.split('.')[0].trim())
+)
 
 /** A note, PDF note or shared metadata file. Everything else is an attachment. */
 export const isNoteSyncPath = (path: string) => (
@@ -141,6 +156,7 @@ export const isSyncablePath = (path: string, options: SyncPathOptions = {}) => {
   if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return false
   const name = segments[segments.length - 1]
   if (SKIPPED_NAMES.has(name) || /\.tmp$/iu.test(name) || /^\.~lock\./u.test(name) || /^~\$/u.test(name)) return false
+  if (options.windowsNames && segments.some(isWindowsUnsafeSyncName)) return false
   if (path === RECOGNITION_MODEL_SYNC_PATH && !options.includeRecognitionModel) return false
   if (pathIsSyncExcluded(path, options.excludedPrefixes ?? [])) return false
   if (options.includeAttachments === false && !isNoteSyncPath(path)) return false
@@ -378,6 +394,7 @@ export class SyncEngine {
       includeRecognitionModel: this.options?.includeRecognitionModel?.() ?? false,
       includeHistory: this.options?.includeHistory?.() ?? false,
       includeAttachments: this.options?.includeAttachments?.() ?? true,
+      windowsNames: this.options?.platform === 'win32',
     }
   }
 
@@ -1131,7 +1148,12 @@ export class SyncEngine {
       return { result: 'skipped', path: null }
     }
     const path = meta.path
-    if (!this.acceptsPath(path)) return { result: 'skipped', path: null }
+    if (!this.acceptsPath(path)) {
+      if (this.pathOptions().windowsNames && path.split('/').some(isWindowsUnsafeSyncName)) {
+        this.log('warn', `„${path}“ hat einen Namen, den Windows nicht speichern kann, und wird auf diesem Gerät nicht synchronisiert.`)
+      }
+      return { result: 'skipped', path: null }
+    }
     const base = this.state.files[path]
     // We already hold this or a newer revision (our own upload, or a re-fetch after a held cursor).
     if (base && base.id === entry.id && entry.revision <= base.revision) return { result: 'noop', path }

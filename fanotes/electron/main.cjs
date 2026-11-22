@@ -55,7 +55,8 @@ const vaultWatch = require('./vault-watch.cjs')
 const { coerceWorksheetBytes } = require('./worksheet-bytes.cjs')
 const { encodeWindowCapture } = require('./window-capture.cjs')
 const { publishNewFile } = require('./exclusive-publish.cjs')
-const { safeEntryName } = require('./entry-names.cjs')
+const { openWithRetry, renameWithRetry } = require('./fs-retry.cjs')
+const { isWindowsUnsafePath, safeEntryName, samePhysicalPath } = require('./entry-names.cjs')
 const { defaultPenOnlyForPlatform } = require('./ink-defaults.cjs')
 const { DEFAULT_TABLET_BUTTON_ACTIONS } = require('./tablet-buttons.cjs')
 const { sanitizeSettings: sanitizeStoredSettings } = require('./settings-sanitize.cjs')
@@ -99,7 +100,7 @@ const {
 } = require('./famd.cjs')
 const { createLocalPageStats } = require('./page-stats-local.cjs')
 const { createExcerpt } = require('./search-ink.cjs')
-const { detectLineEnding, toLf, applyLineEnding } = require('./line-endings.cjs')
+const { detectLineEnding, toLf, applyLineEnding, hasBom, stripBom } = require('./line-endings.cjs')
 const { companionInkNeedsRecord, isUnexplainedEmptyPage, recordDocumentForEmptyCompanion, refusesEmptyInkSave } = require('./ink-save-guard.cjs')
 const { applyNoteTextFieldOps } = require('./noteTextFieldMerge.mjs')
 const { isLocalAiHostname } = require('./localAiHost.mjs')
@@ -1241,7 +1242,7 @@ async function atomicWrite(targetPath, data, options = {}) {
     await handle.close()
     handle = null
     if (options.exclusive) await publishNewFile(temporaryPath, targetPath)
-    else await fsp.rename(temporaryPath, targetPath)
+    else await renameWithRetry(temporaryPath, targetPath)
 
     try {
       const directoryHandle = await fsp.open(directory, fs.constants.O_RDONLY)
@@ -1794,6 +1795,7 @@ function normalizeRelativePath(value, { allowRoot = false, allowInternal = false
   if (segments.some((segment) => !segment || segment === '.' || segment === '..')) {
     throw new Error('Pfad-Traversal ist nicht erlaubt.')
   }
+  if (process.platform === 'win32' && isWindowsUnsafePath(trimmed)) throw new Error('Dieser Name ist unter Windows nicht erlaubt.')
   if (!allowInternal && PROTECTED_INTERNAL_VAULT_DIRECTORIES.has(segments[0].toLocaleLowerCase('en-US'))) {
     throw new Error('Interne FaNotes-Dateien sind geschützt.')
   }
@@ -2338,7 +2340,7 @@ async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, tar
 }
 
 async function readRegularFileNoFollow(target, maxBytes) {
-  const handle = await fsp.open(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+  const handle = await openWithRetry(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
   try {
     const info = await handle.stat()
     if (!info.isFile()) throw new Error('Die Datei ist keine reguläre Datei.')
@@ -2526,7 +2528,7 @@ function physicalAllowed(root, absolutePath) {
 
 async function relocatePath(source, destination) {
   try {
-    await fsp.rename(source, destination)
+    await renameWithRetry(source, destination)
     return
   } catch (error) {
     if (error?.code !== 'EXDEV') throw error
@@ -4264,7 +4266,7 @@ function registerIpcHandlers() {
       const { target } = await resolveVaultPath(relativePath, { expected: 'file' })
       const buffer = await readRegularFileNoFollow(target, noteByteLimit(relativePath))
       // The app works on LF; writeFile restores the file's own ending.
-      return toLf(stripFamdPayload(buffer.toString('utf8')))
+      return toLf(stripFamdPayload(stripBom(buffer.toString('utf8'))))
     } catch (error) {
       // A PDF without handwriting has no .famd sidecar yet; that is normal and not an error.
       // A missing .famd of a real handwriting note must still throw, so a save cannot recreate it as empty.
@@ -4378,6 +4380,8 @@ function registerIpcHandlers() {
               const lfText = lfBody.endsWith('\n') || lfBody.length === 0 ? lfBody : `${lfBody}\n`
               // Keep the ending the file already has (CRLF notes stay CRLF).
               written = applyLineEnding(lfText, existingMd ? detectLineEnding(existingMd) : 'lf')
+              // A note that began with a byte order mark keeps it.
+              if (hasBom(existingMd)) written = `\uFEFF${written}`
             }
           }
           await atomicWrite(target, written, { encoding: 'utf8', mode: 0o600 })
@@ -4800,7 +4804,7 @@ function registerIpcHandlers() {
       if (info.isDirectory() && (destRelative === oldRelativePath || destRelative.startsWith(`${oldRelativePath}/`))) {
         throw new Error('Ein Ordner kann nicht in sich selbst verschoben werden.')
       }
-      if (path.resolve(path.dirname(target)) === path.resolve(destDir)) return oldRelativePath
+      if (samePhysicalPath(path.dirname(target), destDir)) return oldRelativePath
 
       const currentName = path.basename(target)
       const destContent = folderLocations.contentRoots(folderLocationMap(root), root, destRelative)
@@ -5046,9 +5050,9 @@ function registerIpcHandlers() {
       let ownerInk = null
       if (file.kind !== 'pdf') {
         try {
-          const raw = (await readRegularFileNoFollow(file.absolutePath, noteByteLimit(relativePath))).toString('utf8')
+          const raw = stripBom((await readRegularFileNoFollow(file.absolutePath, noteByteLimit(relativePath))).toString('utf8'))
           const parsed = parseFamd(raw)
-          content = parsed.markdown || stripFamdPayload(raw)
+          content = toLf(parsed.markdown || stripFamdPayload(raw))
           ownerInk = parsed.payload?.ink ?? null
           if (typeof parsed.payload?.ink?.searchTranscript === 'string') {
             inkTranscript = parsed.payload.ink.searchTranscript.slice(0, 500_000)
