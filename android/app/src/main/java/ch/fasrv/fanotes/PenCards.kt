@@ -491,7 +491,7 @@ internal class PenCards(private val context: Context, private val host: PenCardH
             name.maxLines = 1
             name.gravity = Gravity.CENTER
             tile.addView(name)
-            tile.contentDescription = figure.label
+            tile.contentDescription = ChromeText.ui(figure.label)
             tile.setOnClickListener {
                 host.figureSpec = host.figureSpec.copy(figureId = figure.id, params = ch.fasrv.fanotes.ink.defaultFigureParams(figure.id))
                 host.armFigure(host.figureSpec)

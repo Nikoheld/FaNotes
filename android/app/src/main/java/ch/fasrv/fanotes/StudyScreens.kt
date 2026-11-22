@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,7 +29,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -202,7 +202,7 @@ private fun StudyTasksTab(model: FaNotesViewModel, onJump: (Int) -> Unit) {
     LinearProgressIndicator(progress = { progress.ratio.toFloat() }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
     val summary = counted("${progress.done} von ${progress.total} erledigt", "${progress.done} of ${progress.total} done") +
         if (progress.plannedMinutes > 0) counted(" · noch ca. ${progress.remainingMinutes} von ${progress.plannedMinutes} Min.", " · about ${progress.remainingMinutes} of ${progress.plannedMinutes} min left") else ""
-    Text(summary, fontSize = 13.sp)
+    Text(ui(summary), fontSize = 13.sp)
     Row {
         TextButton(onClick = { model.scanStudyTasks() }, enabled = !scanning && detectionAvailable) { Text(ui(if (scanning) "Suche …" else "Neu erkennen")) }
         TextButton(onClick = { model.addStudyTask() }) { Text(ui("Auftrag hinzufügen")) }
@@ -280,7 +280,7 @@ internal fun EditField(key: String, initial: String, label: String, modifier: Mo
             value = it
             onChange(it)
         },
-        label = { Text(label) },
+        label = { Text(ui(label)) },
         modifier = modifier,
         singleLine = true,
         keyboardOptions = if (numeric) KeyboardOptions(keyboardType = KeyboardType.Number) else KeyboardOptions.Default,
@@ -310,7 +310,7 @@ private fun StudyMarksTab(model: FaNotesViewModel, onJump: (Int) -> Unit) {
         ) { Text(ui("Als Notiz kopieren")) }
     }
     grouped.forEach { group ->
-        TextButton(onClick = { onJump(group.page) }) { Text("${ui("Seite")} ${group.page}", fontWeight = FontWeight.SemiBold) }
+        TextButton(onClick = { onJump(group.page) }) { Text(ui("${ui("Seite")} ${group.page}"), fontWeight = FontWeight.SemiBold) }
         group.marks.forEach { mark ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text(
@@ -461,7 +461,7 @@ private fun SortBoardEditor(data: SortData, onChange: (SortData) -> Unit) {
                     )
                 },
         ) {
-            Text(label, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), fontSize = 14.sp)
+            Text(ui(label), modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), fontSize = 14.sp)
         }
     }
 

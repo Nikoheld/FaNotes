@@ -54,6 +54,10 @@ fun aggregateStudy(notes: List<Pair<String, PageStats>>): StudyPicture {
 
 /** Fach row: page count, time on the page, typing, and pen time. */
 fun studySubjectSummary(row: StudySubject): String {
+    if (ChromeText.language == "en") {
+        val pages = if (row.notes == 1) "1 page" else "${row.notes} pages"
+        return "${row.subject} · $pages · ${formatStudyDuration(row.dwellMs)} · ${formatStudyDuration(row.typingMs)} typing · ${formatStudyDuration(row.inkMs)} pen"
+    }
     val pages = if (row.notes == 1) "1 Seite" else "${row.notes} Seiten"
     return "${row.subject} · $pages · ${formatStudyDuration(row.dwellMs)} · ${formatStudyDuration(row.typingMs)} Tippen · ${formatStudyDuration(row.inkMs)} Stift"
 }

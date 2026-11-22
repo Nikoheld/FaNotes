@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -96,7 +97,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -296,6 +296,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (ch.fasrv.fanotes.desk.ChromeText.catalog.isEmpty()) {
+            val catalog = runCatching { (application as FaNotesApplication).englishCatalog.get() }.getOrNull().orEmpty()
+            if (catalog.isNotEmpty()) ch.fasrv.fanotes.desk.ChromeText.catalog = catalog
+        }
         // targetSdk 36 enforces edge-to-edge; draw behind the bars and inset the Compose root instead.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
@@ -1525,7 +1529,7 @@ fun FaNotesScreen(
             title = { Text("FaNotes ${offered.version}") },
             text = {
                 Text(
-                    updateLabel.ifBlank { "Eine neuere Version liegt auf GitHub bereit." },
+                    updateLabel.ifBlank { ui("Eine neuere Version liegt auf GitHub bereit.") },
                     fontSize = 14.sp,
                 )
             },
@@ -1533,7 +1537,7 @@ fun FaNotesScreen(
                 TextButton(
                     enabled = !updateBusy,
                     onClick = { model.downloadAndroidUpdate { file -> installAndroidApk(context, file) } },
-                ) { Text(if (updateBusy) "Lädt…" else "Installieren") }
+                ) { Text(ui(if (updateBusy) "Lädt…" else "Installieren")) }
             },
             dismissButton = {
                 TextButton(onClick = { model.clearUpdateOffer() }, enabled = !updateBusy) { Text(ui("Später")) }
@@ -1564,10 +1568,10 @@ fun FaNotesScreen(
                 PromptChoice(ch.fasrv.fanotes.desk.PROMPT_ROOT) { model.moveEntry(path, ""); moving = null }
             }
             folders.forEach { folder ->
-                PromptChoice(folder) { model.moveEntry(path, folder); moving = null }
+                PromptChoice(folder, verbatim = true) { model.moveEntry(path, folder); moving = null }
             }
             if (atRoot && folders.isEmpty()) {
-                Text(ch.fasrv.fanotes.desk.PROMPT_NO_FOLDER, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                Text(ui(ch.fasrv.fanotes.desk.PROMPT_NO_FOLDER), fontSize = 12.sp, color = LocalStatusInk.current.muted)
             }
         }
     }
@@ -1768,7 +1772,7 @@ private fun SidebarSearchField(query: String, onQuery: (String) -> Unit, onFocus
                     .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_RADIUS_DP.dp))
                     .background(if (clearHot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
                     .hoverable(clearInteraction)
-                    .clickable(interactionSource = clearInteraction, indication = null, onClickLabel = "Suche leeren") { onQuery("") },
+                    .clickable(interactionSource = clearInteraction, indication = null, onClickLabel = ui("Suche leeren")) { onQuery("") },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -1790,7 +1794,7 @@ private fun TagFilterChip(label: String, active: Boolean, onClick: () -> Unit) {
         ch.fasrv.fanotes.desk.TAG_FILTER_BORDER_ALPHA
     }
     Text(
-        label,
+        ui(label),
         fontSize = 12.sp,
         color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
         modifier = Modifier
@@ -1975,11 +1979,11 @@ private fun VaultPane(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Text(
-                    ch.fasrv.fanotes.desk.EMPTY_VAULT_MESSAGE,
+                    ui(ch.fasrv.fanotes.desk.EMPTY_VAULT_MESSAGE),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
-                TextButton(onClick = onCreateNote) { Text(ch.fasrv.fanotes.desk.EMPTY_VAULT_ACTION) }
+                TextButton(onClick = onCreateNote) { Text(ui(ch.fasrv.fanotes.desk.EMPTY_VAULT_ACTION)) }
             }
         } else LazyColumn(
             Modifier
@@ -2109,7 +2113,7 @@ private fun VaultPane(
 @Composable
 private fun TreeMenuLabel(label: String) {
     Text(
-        label.uppercase(java.util.Locale.GERMAN),
+        upperUi(label),
         fontSize = 12.sp,
         fontWeight = FontWeight.ExtraBold,
         letterSpacing = 0.09.em,
@@ -2154,7 +2158,7 @@ private fun TreeMenuItem(label: String, danger: Boolean = false, onClick: () -> 
             tint = tint,
         )
         Text(
-            label,
+            ui(label),
             fontSize = 12.sp,
             color = if (danger) MaterialTheme.colorScheme.error else LocalStatusInk.current.soft,
         )
@@ -2272,7 +2276,7 @@ private fun NoteRow(
             )
         }
         Text(
-            if (!folder) "" else if (openFolder) "▾" else "▸",
+            ui(if (!folder) "" else if (openFolder) "▾" else "▸"),
             fontSize = 12.sp,
             color = LocalStatusInk.current.muted,
             modifier = Modifier.width(ch.fasrv.fanotes.desk.TREE_CHEVRON_DP.dp).clickable {
@@ -2484,7 +2488,7 @@ private fun NoteRow(
                             }
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    ch.fasrv.fanotes.desk.treeMenuKind(folder, node.kind == NoteKind.PDF).uppercase(java.util.Locale.GERMAN),
+                                    upperUi(ch.fasrv.fanotes.desk.treeMenuKind(folder, node.kind == NoteKind.PDF)),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight(750),
                                     letterSpacing = 0.07.em,
@@ -2516,7 +2520,7 @@ private fun NoteRow(
                             ) {
                                 Icon(Icons.Filled.Palette, contentDescription = null, modifier = Modifier.size(14.dp), tint = LocalStatusInk.current.muted)
                                 Text(
-                                    ch.fasrv.fanotes.desk.FOLDER_COLOR_MENU.uppercase(java.util.Locale.GERMAN),
+                                    upperUi(ch.fasrv.fanotes.desk.FOLDER_COLOR_MENU),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight(700),
                                     letterSpacing = 0.05.em,
@@ -2544,7 +2548,7 @@ private fun NoteRow(
                                                     },
                                                 contentAlignment = Alignment.Center,
                                             ) {
-                                                Icon(Icons.Filled.Close, contentDescription = ch.fasrv.fanotes.desk.FOLDER_COLOR_REMOVE, modifier = Modifier.size(12.dp), tint = LocalStatusInk.current.muted)
+                                                Icon(Icons.Filled.Close, contentDescription = ui(ch.fasrv.fanotes.desk.FOLDER_COLOR_REMOVE), modifier = Modifier.size(12.dp), tint = LocalStatusInk.current.muted)
                                             }
                                         } else {
                                             val selectedColor = folderColor == color
@@ -2558,7 +2562,7 @@ private fun NoteRow(
                                                         CircleShape,
                                                     )
                                                     .background(Color(android.graphics.Color.parseColor(color)))
-                                                    .clickable(onClickLabel = "Ordnerfarbe $color") {
+                                                    .clickable(onClickLabel = ui("Ordnerfarbe $color")) {
                                                         onFolderColor(node.path, color)
                                                         menu = false
                                                     },
@@ -2645,7 +2649,7 @@ private fun NoteRow(
                     .clickable(
                         interactionSource = actionInteraction,
                         indication = null,
-                        onClickLabel = "Unterordner anlegen",
+                        onClickLabel = ui("Unterordner anlegen"),
                     ) { onCreateFolderIn(node.path) }
                     .padding(horizontal = ch.fasrv.fanotes.desk.TREE_EMPTY_ACTION_PAD_DP.dp),
                 contentAlignment = Alignment.Center,
@@ -2724,7 +2728,7 @@ private fun EditorHeader(
             )
             Brushes.forEach { (id, label) ->
                 Text(
-                    label,
+                    ui(label),
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (id == style.brush) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent)
@@ -2735,7 +2739,7 @@ private fun EditorHeader(
             }
             Papers.forEach { (id, label) ->
                 Text(
-                    label,
+                    ui(label),
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (id == paper) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent)
@@ -2763,7 +2767,7 @@ private fun EditorTools(
         NavigationBarItem(selected = tool == InkTool.PEN, onClick = { onTool(InkTool.PEN) }, icon = { Icon(Icons.Filled.Edit, contentDescription = ui("Stift")) }, label = { Text(ui("Stift")) })
         NavigationBarItem(selected = tool == InkTool.ERASER, onClick = { onTool(InkTool.ERASER) }, icon = { Icon(Icons.Filled.CleaningServices, contentDescription = ui("Radierer")) }, label = { Text(ui("Radierer")) })
         NavigationBarItem(selected = tool == InkTool.SELECT, onClick = { onTool(InkTool.SELECT) }, icon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = ui("Auswahl")) }, label = { Text(ui("Auswahl")) })
-        NavigationBarItem(selected = false, onClick = onUndo, enabled = canUndo, icon = { Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = ui("Rückgängig")) }, label = { Text("Zurück") })
+        NavigationBarItem(selected = false, onClick = onUndo, enabled = canUndo, icon = { Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = ui("Rückgängig")) }, label = { Text(ui("Zurück")) })
         NavigationBarItem(selected = false, onClick = onRedo, enabled = canRedo, icon = { Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = ui("Wiederholen")) }, label = { Text("Vor") })
         NavigationBarItem(selected = textOn, onClick = onText, icon = { Icon(Icons.Filled.Description, contentDescription = ui("Text")) }, label = { Text(ui("Text")) })
     }
@@ -2910,7 +2914,7 @@ private fun SplitPane(
     val isPdf = path?.endsWith(".pdf", ignoreCase = true) == true
     Column(modifier) {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(title.ifBlank { "Zweite Spalte" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).widthIn(min = 96.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title.ifBlank { ui("Zweite Spalte") }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).widthIn(min = 96.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (splitUnsaved) {
                 Box(
                     Modifier
@@ -3081,7 +3085,7 @@ private fun EmptyEditor(
                 Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.PLACEHOLDER_GLYPH_ICON_DP.dp), tint = MaterialTheme.colorScheme.background)
             }
             Text(
-                ch.fasrv.fanotes.desk.PLACEHOLDER_EYEBROW.uppercase(java.util.Locale.GERMAN),
+                upperUi(ch.fasrv.fanotes.desk.PLACEHOLDER_EYEBROW),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.08.em,
@@ -3089,14 +3093,14 @@ private fun EmptyEditor(
                 modifier = Modifier.padding(top = 20.dp, bottom = 7.dp),
             )
             Text(
-                ch.fasrv.fanotes.desk.PLACEHOLDER_TITLE,
+                ui(ch.fasrv.fanotes.desk.PLACEHOLDER_TITLE),
                 fontSize = ch.fasrv.fanotes.desk.PLACEHOLDER_TITLE_SP.sp,
                 letterSpacing = (-0.03).em,
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
             Text(
-                ch.fasrv.fanotes.desk.PLACEHOLDER_BODY,
+                ui(ch.fasrv.fanotes.desk.PLACEHOLDER_BODY),
                 fontSize = ch.fasrv.fanotes.desk.PLACEHOLDER_BODY_SP.sp,
                 lineHeight = 21.sp,
                 color = ink.muted,
@@ -3118,7 +3122,7 @@ private fun EmptyEditor(
             }
             if (recent.isNotEmpty()) {
                 Text(
-                    "Zuletzt geöffnete Notizen",
+                    ui("Zuletzt geöffnete Notizen"),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = ink.muted,
@@ -3159,7 +3163,7 @@ private fun EmptyEditorButton(
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp), tint = ink)
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink)
+        Text(ui(label), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink)
     }
 }
 
@@ -3978,14 +3982,14 @@ private fun WorksheetImportDialog(
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
-                            ch.fasrv.fanotes.desk.SHEET_IMPORT_EYEBROW.uppercase(java.util.Locale.GERMAN),
+                            upperUi(ch.fasrv.fanotes.desk.SHEET_IMPORT_EYEBROW),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.09.em,
                             color = accent,
                         )
                         Text(
-                            ch.fasrv.fanotes.desk.SHEET_IMPORT_TITLE,
+                            ui(ch.fasrv.fanotes.desk.SHEET_IMPORT_TITLE),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(top = 2.dp),
@@ -4008,7 +4012,7 @@ private fun WorksheetImportDialog(
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
                 Text(
-                    ch.fasrv.fanotes.desk.SHEET_IMPORT_BODY,
+                    ui(ch.fasrv.fanotes.desk.SHEET_IMPORT_BODY),
                     fontSize = 12.sp,
                     lineHeight = 19.sp,
                     color = ink.muted,
@@ -4029,11 +4033,11 @@ private fun WorksheetImportDialog(
                     verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SHEET_IMPORT_OPTION_GAP_DP.dp),
                 ) {
                     if (stacked) {
-                        SheetImportChoice(Icons.Filled.FileCopy, ch.fasrv.fanotes.desk.SHEET_IMPORT_CURRENT, noteTitle ?: ch.fasrv.fanotes.desk.SHEET_IMPORT_NONE, noteTitle != null, onCurrent)
+                        SheetImportChoice(Icons.Filled.FileCopy, ch.fasrv.fanotes.desk.SHEET_IMPORT_CURRENT, noteTitle ?: ui(ch.fasrv.fanotes.desk.SHEET_IMPORT_NONE), noteTitle != null, onCurrent)
                         SheetImportChoice(Icons.AutoMirrored.Filled.NoteAdd, ch.fasrv.fanotes.desk.SHEET_IMPORT_NEW, ch.fasrv.fanotes.desk.SHEET_IMPORT_NEW_DETAIL, true, onNew)
                     } else {
                         Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SHEET_IMPORT_OPTION_GAP_DP.dp)) {
-                            SheetImportChoice(Icons.Filled.FileCopy, ch.fasrv.fanotes.desk.SHEET_IMPORT_CURRENT, noteTitle ?: ch.fasrv.fanotes.desk.SHEET_IMPORT_NONE, noteTitle != null, onCurrent, Modifier.weight(1f))
+                            SheetImportChoice(Icons.Filled.FileCopy, ch.fasrv.fanotes.desk.SHEET_IMPORT_CURRENT, noteTitle ?: ui(ch.fasrv.fanotes.desk.SHEET_IMPORT_NONE), noteTitle != null, onCurrent, Modifier.weight(1f))
                             SheetImportChoice(Icons.AutoMirrored.Filled.NoteAdd, ch.fasrv.fanotes.desk.SHEET_IMPORT_NEW, ch.fasrv.fanotes.desk.SHEET_IMPORT_NEW_DETAIL, true, onNew, Modifier.weight(1f))
                         }
                     }
@@ -4056,7 +4060,7 @@ private fun WorksheetImportDialog(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
-                        ch.fasrv.fanotes.desk.SHEET_IMPORT_FORMATS,
+                        ui(ch.fasrv.fanotes.desk.SHEET_IMPORT_FORMATS),
                         fontSize = 12.sp,
                         color = ink.muted,
                         modifier = Modifier.weight(1f),
@@ -4073,7 +4077,7 @@ private fun WorksheetImportDialog(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            ch.fasrv.fanotes.desk.SHEET_IMPORT_CANCEL,
+                            ui(ch.fasrv.fanotes.desk.SHEET_IMPORT_CANCEL),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = ink.soft,
@@ -4124,7 +4128,7 @@ private fun SheetImportChoice(
         }
     }
     val copy = @Composable {
-        Text(title, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+        Text(ui(title), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
         Text(detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
     }
     if (wide) {
@@ -4195,7 +4199,7 @@ private fun TrashDialog(
             ) {
                 Text(ui("Papierkorb"), fontSize = ch.fasrv.fanotes.desk.PROMPT_TITLE_SP.sp, fontWeight = FontWeight(650), letterSpacing = (-0.02).em)
                 Text(
-                    "Gelöschte Notizen bleiben auf diesem Tablet. Andere Geräte sehen sie nicht.",
+                    ui("Gelöschte Notizen bleiben auf diesem Tablet. Andere Geräte sehen sie nicht."),
                     fontSize = 12.sp,
                     color = LocalStatusInk.current.muted,
                     lineHeight = 17.sp,
@@ -4211,7 +4215,7 @@ private fun TrashDialog(
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(item.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
-                                    "${if (item.folder) "Ordner" else "Notiz"} · ${item.path}",
+                                    ui("${if (item.folder) "Ordner" else "Notiz"} · ${item.path}"),
                                     fontSize = 12.sp,
                                     color = LocalStatusInk.current.muted,
                                     maxLines = 1,
@@ -4283,7 +4287,7 @@ private fun PromptCard(
                     .padding(ch.fasrv.fanotes.desk.PROMPT_PAD_DP.dp),
                 verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.PROMPT_GAP_DP.dp),
             ) {
-                Text(title, fontSize = ch.fasrv.fanotes.desk.PROMPT_TITLE_SP.sp, fontWeight = FontWeight(650), letterSpacing = (-0.02).em)
+                Text(ui(title), fontSize = ch.fasrv.fanotes.desk.PROMPT_TITLE_SP.sp, fontWeight = FontWeight(650), letterSpacing = (-0.02).em)
                 content()
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                     PromptButton(dismissLabel, primary = false, onClick = onDismiss)
@@ -4319,7 +4323,7 @@ private fun PromptField(
             Box(
                 Modifier.fillMaxWidth().heightIn(min = minHeightDp.dp).border(1.dp, strong, shape).clip(shape).background(MaterialTheme.colorScheme.background).padding(horizontal = ch.fasrv.fanotes.desk.PROMPT_FIELD_PAD_X_DP.dp, vertical = ch.fasrv.fanotes.desk.PROMPT_FIELD_PAD_Y_DP.dp),
             ) {
-                if (value.isEmpty()) Text(placeholder, fontSize = 16.sp, color = LocalStatusInk.current.muted)
+                if (value.isEmpty()) Text(ui(placeholder), fontSize = 16.sp, color = LocalStatusInk.current.muted)
                 inner()
             }
         },
@@ -4327,14 +4331,14 @@ private fun PromptField(
 }
 
 @Composable
-private fun PromptChoice(label: String, onClick: () -> Unit) {
+private fun PromptChoice(label: String, verbatim: Boolean = false, onClick: () -> Unit) {
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.PROMPT_ROW_RADIUS_DP.dp)
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
     Box(
         Modifier.fillMaxWidth().heightIn(min = ch.fasrv.fanotes.desk.PROMPT_ROW_DP.dp).clip(shape).border(1.dp, rule, shape).clickable(onClick = onClick).padding(horizontal = 10.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+        Text(if (verbatim) label else ui(label), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -4348,7 +4352,7 @@ private fun PromptButton(label: String, primary: Boolean, enabled: Boolean = tru
         Modifier.height(ch.fasrv.fanotes.desk.PROMPT_BUTTON_DP.dp).alpha(if (enabled) 1f else 0.45f).clip(shape).background(fill).border(1.dp, border, shape).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink)
+        Text(ui(label), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink)
     }
 }
 

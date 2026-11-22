@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
@@ -23,7 +24,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.Dispatchers
@@ -158,7 +158,7 @@ fun TextToHandwritingDialog(
                 learning.model.observations.isNotEmpty() -> "${learning.model.pageCount} handwritten pages · ${if (learning.model.units.isEmpty()) "Personal style available; letter shapes use available samples" else "Personal trajectories and style available"}"
                 else -> "Write notes as usual. Missing letter shapes use the school script."
             }
-            Text(status.orEmpty(), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(ui(status.orEmpty()), fontSize = 12.sp, color = LocalStatusInk.current.muted)
             Choice("Learn automatically from notes", learning.enabled) { onLearningEnabled(!learning.enabled) }
             if (generating) Text(ui("Vorschau wird geladen …"), fontSize = 12.sp)
             previewError?.let { Text(ui(it), fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
@@ -272,14 +272,14 @@ private fun HandwritingControls(
         }
         if (result.missingCharacters.isNotEmpty()) {
             Text(
-                "Noch nicht trainierte Zeichen: ${result.missingCharacters.joinToString(" · ")}",
+                ui("Noch nicht trainierte Zeichen: ${result.missingCharacters.joinToString(" · ")}"),
                 fontSize = 12.sp,
                 color = Color(0xFFB8860B),
             )
         }
         if (result.overflow) {
             Text(
-                "Der Text passt nicht auf diese Seite. ${result.overflowCharacters} Zeichen haben keinen Platz.",
+                ui("Der Text passt nicht auf diese Seite. ${result.overflowCharacters} Zeichen haben keinen Platz."),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -387,7 +387,7 @@ private fun HandwritingPreviewPane(
             }
         }
         if (result.fontSizeUsed < requested - 0.5) {
-            Text(if (ch.fasrv.fanotes.desk.ChromeText.language == "en") "Automatically fitted to ${result.fontSizeUsed.toInt()} px for the available space." else "Für den verfügbaren Platz automatisch auf ${result.fontSizeUsed.toInt()} px angepasst.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(ui(if (ch.fasrv.fanotes.desk.ChromeText.language == "en") "Automatically fitted to ${result.fontSizeUsed.toInt()} px for the available space." else "Für den verfügbaren Platz automatisch auf ${result.fontSizeUsed.toInt()} px angepasst."), fontSize = 12.sp, color = LocalStatusInk.current.muted)
         }
     }
 }

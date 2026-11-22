@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,7 +28,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -102,7 +102,7 @@ private fun Title(text: String) {
 
 @Composable
 private fun Muted(text: String) {
-    Text(text, fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp)
+    Text(ui(text), fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp)
 }
 
 @Composable
@@ -115,7 +115,7 @@ private fun Busy(text: String) {
 
 @Composable
 private fun RecognitionError(text: String) {
-    Text(text, fontSize = 13.sp, color = MaterialTheme.colorScheme.error, lineHeight = 18.sp)
+    Text(ui(text), fontSize = 13.sp, color = MaterialTheme.colorScheme.error, lineHeight = 18.sp)
 }
 
 /** `.segmented.compact` with touch-sized segments. */
