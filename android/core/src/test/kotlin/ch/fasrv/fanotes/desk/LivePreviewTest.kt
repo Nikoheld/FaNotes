@@ -7,6 +7,15 @@ import kotlin.test.assertTrue
 
 class LivePreviewTest {
     @Test
+    fun inlineImageHidesItsLeadingBang() {
+        val note = "Vorher\nSiehe ![Zelle](zelle.png) dort\nNachher"
+        val marks = livePreviewMarks(note, 0, 0)
+        val bang = note.indexOf("![")
+        assertTrue(marks.any { it.kind == LiveKind.HIDE && it.start == bang && it.end == bang + 2 })
+        assertEquals(LiveKind.LINK, marks.first { it.start == note.indexOf("Zelle") }.kind)
+    }
+
+    @Test
     fun inactiveLinesHideMarkersAndTheCursorLineKeepsThem() {
         val note = "# Titel\n**fett** und *kursiv*\n- Punkt\n- [x] Tun\n> Zitat\n---\n[[Ziel|Name]]\n[Text](https://fanotes.example)\n`code` und \$x\$"
         val onTitle = livePreviewMarks(note, 0, 0)

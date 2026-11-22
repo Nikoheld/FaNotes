@@ -836,9 +836,11 @@ private fun markInline(marks: MutableList<LiveMark>, line: String, origin: Int) 
     for (match in LINK.findAll(line)) {
         val from = match.range.first
         val to = match.range.last + 1
-        if (!reserve(from, to)) continue
+        // An inline image keeps no leading "!" in front of its caption.
+        val bang = if (from > 0 && line[from - 1] == '!') 1 else 0
+        if (!reserve(from - bang, to)) continue
         val label = match.groupValues[1]
-        hideLocal(from, from + 1)
+        hideLocal(from - bang, from + 1)
         hideLocal(from + 1 + label.length, to)
         mark(from + 1, from + 1 + label.length, LiveKind.LINK)
     }

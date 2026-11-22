@@ -8940,7 +8940,7 @@ internal fun Modifier.settingsAnchor(section: String, id: String, positions: Mut
 
 @Composable
 fun NoteTagBar(model: FaNotesViewModel) {
-    val markdown by model.markdown.collectAsStateWithLifecycle()
+    val markdown by model.settledMarkdown.collectAsStateWithLifecycle()
     val open by model.open.collectAsStateWithLifecycle()
     val token by model.canvasToken.collectAsStateWithLifecycle()
     val settings by model.deskSettings.collectAsStateWithLifecycle()
@@ -9391,7 +9391,7 @@ fun PdfSearchBar(model: FaNotesViewModel) {
 
 @Composable
 fun PdfQuoteMarks(model: FaNotesViewModel) {
-    val markdown by model.markdown.collectAsStateWithLifecycle()
+    val markdown by model.settledMarkdown.collectAsStateWithLifecycle()
     val marks = readPdfMarks(markdown)
     var page by remember { mutableStateOf("1") }
     var quote by remember { mutableStateOf("") }
@@ -9429,7 +9429,7 @@ fun PdfQuoteMarks(model: FaNotesViewModel) {
 
 @Composable
 fun NoteRelations(model: FaNotesViewModel, onOpen: (String) -> Unit) {
-    val markdown by model.markdown.collectAsStateWithLifecycle()
+    val markdown by model.settledMarkdown.collectAsStateWithLifecycle()
     val incoming by model.backlinks.collectAsStateWithLifecycle()
     val outgoing = wikiTargets(markdown)
     Column(Modifier.fillMaxWidth()) {
