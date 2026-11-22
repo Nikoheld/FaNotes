@@ -185,7 +185,7 @@ async function main() {
     const started = layoutApi.chooseStartSurface(false)
     assert.deepEqual(onboarding, { surface: 'onboarding', openLastNote: false })
     assert.deepEqual(started, { surface: 'note', openLastNote: true })
-    const electron = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
+    const electron = fs.readFileSync(path.join(root, 'electron', 'settings-sanitize.cjs'), 'utf8')
     assert.match(electron, /dashboardLayout:\s*\{\s*type:\s*'string',\s*max:\s*100000\s*\}/u)
 
     const css = fs.readFileSync(path.join(root, 'src', 'styles.css'), 'utf8')

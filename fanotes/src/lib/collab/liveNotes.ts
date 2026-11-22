@@ -27,6 +27,8 @@ export class LiveNote {
       for (const listener of [...this.peopleListeners]) listener()
     }
     channel.awareness.on('change', this.watch)
+    // The channel also closes without the note's own close(): a rotated room key, a removed share, withdrawn access.
+    channel.onClosed(() => { void this.close() })
   }
 
   get status(): LiveStatus { return this.channel.status }
@@ -68,7 +70,14 @@ export class LiveNote {
     return ink
   }
 
-  async close() {
+  private closing: Promise<void> | null = null
+
+  close(): Promise<void> {
+    this.closing ??= this.shutDown()
+    return this.closing
+  }
+
+  private async shutDown() {
     this.channel.awareness.off('change', this.watch)
     this.ink?.destroy()
     this.ink = null

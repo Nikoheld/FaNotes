@@ -175,7 +175,10 @@ export function GlyphenWerkWorkspace({ activeView, appearance, onClose, onViewCh
       const ink = await recognizeInk(strokes, message.language, 900, 560)
       respond({
         text: ink.text.slice(0, 4_000),
-        exactProjectionSafe: glyphenWerkExactProjectionIsIndependent(textPrefixHint, ink.text, ink.text),
+        // Exact reprojection needs a line that is independent of the child's own evidence. The shared recognizer folds
+        // the local personalization into ink.text, so there is no separate neural line to compare: a personalized
+        // result is never independent (comparing ink.text with itself would always say yes).
+        exactProjectionSafe: !ink.personalized && glyphenWerkExactProjectionIsIndependent(textPrefixHint, ink.text, ink.text),
         confidence: ink.confidence,
         lineCount: ink.lines.length,
         wordCount: ink.wordCount,

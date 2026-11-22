@@ -179,5 +179,5 @@ try {
   socket.close()
 } finally {
   chrome.kill('SIGTERM')
-  rmSync(dir, { recursive: true, force: true })
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }) // Chromium may still be writing into the profile
 }

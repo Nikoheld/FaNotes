@@ -103,7 +103,10 @@ const runOnce = () => {
   assert.match(settings, /tablet-button-group is-\$\{group\}/)
   assert.match(settings, /group === 'pen' \? 'Stift' : 'Tablett'/)
   assert.match(settings, /settings-tablet-buttons/)
-  assert.doesNotMatch(board, /if \(event\.button !== 0 && event\.pointerType !== 'pen'\) return/)
+  // The laser pointer's own press handler (a later, separate tool) may ignore non-primary mouse buttons;
+  // the drawing pointer-down handler must not, or a pen barrel button would be dropped.
+  const withoutLaserPress = board.replace(/const press = \(event: PointerEvent\) => \{\n\s*if \(event\.button !== 0 && event\.pointerType !== 'pen'\) return\n\s*if \(!overSheet/, 'const press = (event: PointerEvent) => {\n      if (!overSheet')
+  assert.doesNotMatch(withoutLaserPress, /if \(event\.button !== 0 && event\.pointerType !== 'pen'\) return/)
   return {
     barrel: tabletButtonActionFromPointer(changed, barrel),
     eraser: tabletButtonActionFromPointer(changed, eraser),
