@@ -1,3 +1,4 @@
+import { useModalFocus } from '../lib/useModalFocus'
 import { useEffect, useId, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, FolderInput, FolderPlus, X } from 'lucide-react'
 
@@ -37,6 +38,7 @@ export function FolderPathDialog({
   const [selectedFolder, setSelectedFolder] = useState('')
   const [moveContents, setMoveContents] = useState(true)
   const dialogRef = useRef<HTMLElement>(null)
+  useModalFocus(dialogRef)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
 

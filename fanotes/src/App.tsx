@@ -304,6 +304,7 @@ import { createTreeSync, type TreeSync } from './lib/treeSync.mjs'
 import { useSettledValue, LARGE_NOTE_CHARS, LARGE_NOTE_SETTLE_MS } from './lib/useSettledValue'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
+import { useModalFocus } from './lib/useModalFocus'
 import { getUiLanguage, getUiLocale, setUiLanguage, translateUiText, uiText } from './i18n'
 import { bestContrastText, ensureReadableColor } from './lib/colorContrast'
 import { snowLayerActive } from './lib/snowTheme'
@@ -425,7 +426,7 @@ const NoteTabButton = memo(function NoteTabButton({
       ref={tabRef}
       className={`note-tab ${active ? 'active' : ''} ${inSplit ? 'in-split' : ''} ${pinned ? 'is-pinned' : ''} ${hold ? `is-${hold}` : ''} ${dropSide ? `drop-${dropSide}` : ''}`}
       title={path}
-      aria-keyshortcuts={shortcut ?? undefined}
+      role="presentation"
       draggable
       onDragStart={(event) => {
         event.dataTransfer.setData(NOTE_TAB_DRAG_TYPE, path)
@@ -452,19 +453,19 @@ const NoteTabButton = memo(function NoteTabButton({
       <button
         type="button"
         className="note-tab-main"
-        role="tab"
-        aria-selected={active}
-        aria-label={`${title}${pinned ? ', angeheftet' : ''}${inSplit ? ', in der zweiten Spalte' : ''}${dirty ? ', nicht gespeicherte Änderungen' : ''}${hold === 'deleted' ? ', Datei wurde ausserhalb von FaNotes gelöscht' : hold === 'conflict' ? ', Datei wurde ausserhalb von FaNotes geändert' : ''}`}
+        aria-current={active ? 'true' : undefined}
+        aria-keyshortcuts={shortcut ?? undefined}
+        aria-label={`${title}${pinned ? uiText(', angeheftet', ', pinned') : ''}${inSplit ? uiText(', in der zweiten Spalte', ', in the second pane') : ''}${dirty ? uiText(', nicht gespeicherte Änderungen', ', unsaved changes') : ''}${hold === 'deleted' ? uiText(', Datei wurde ausserhalb von FaNotes gelöscht', ', file was deleted outside FaNotes') : hold === 'conflict' ? uiText(', Datei wurde ausserhalb von FaNotes geändert', ', file was changed outside FaNotes') : ''}`}
         onClick={(event) => { event.shiftKey ? void onSplit(path) : void onOpen(path) }}
         onAuxClick={(event) => { if (event.button === 1 && !pinned) void onClose(path) }}
       >
         {pinned ? <Pin aria-hidden="true" size={12} /> : isPdfNotePath(path) ? <File aria-hidden="true" size={13} /> : <Files aria-hidden="true" size={13} />}
         <span>{title}</span>
         {inSplit && <Columns2 aria-hidden="true" size={11} className="tab-split-mark" />}
-        {hold && <span className="tab-hold-mark" title={hold === 'deleted' ? 'Datei wurde ausserhalb von FaNotes gelöscht' : 'Datei wurde ausserhalb von FaNotes geändert'}><CircleAlert aria-hidden="true" size={12} /></span>}
-        {dirty && <i className="dirty-dot" title="Noch nicht gespeichert" />}
+        {hold && <span className="tab-hold-mark" title={hold === 'deleted' ? uiText('Datei wurde ausserhalb von FaNotes gelöscht', 'File was deleted outside FaNotes') : uiText('Datei wurde ausserhalb von FaNotes geändert', 'File was changed outside FaNotes')}><CircleAlert aria-hidden="true" size={12} /></span>}
+        {dirty && <i className="dirty-dot" title={uiText('Noch nicht gespeichert', 'Not saved yet')} />}
       </button>
-      {!pinned && <button className="tab-close" type="button" aria-label={`${title} schließen`} title="Tab schließen (Strg+W)" onClick={() => { void onClose(path) }}><X aria-hidden="true" size={12} /></button>}
+      {!pinned && <button className="tab-close" type="button" aria-label={`${title} ${uiText('schließen', 'close')}`} title="Tab schließen (Strg+W)" onClick={() => { void onClose(path) }}><X aria-hidden="true" size={12} /></button>}
     </div>
   )
 })
@@ -509,7 +510,7 @@ function TabContextMenu({ menu, title, pinned, inSplit, isWeb, canCloseOthers, c
       ref={menuRef}
       className="file-tree__context-menu tab-context-menu"
       role="menu"
-      aria-label={`Aktionen für ${title}`}
+      aria-label={`${uiText('Aktionen für', 'Actions for')} ${title}`}
       onPointerDown={(event) => event.stopPropagation()}
       style={{ left: Math.min(Math.max(8, menu.x), window.innerWidth - 240), top: Math.min(Math.max(8, menu.y), window.innerHeight - 420) }}
     >
@@ -770,8 +771,8 @@ const effectiveTheme = (settings: AppSettings, systemDark: boolean) => settings.
   : settings.theme
 
 const THEME_CONTRAST_SURFACES: Record<string, string[]> = {
-  dark: ['#191919', '#202020', '#202020', '#2f2f2f'],
-  light: ['#ffffff', '#f7f6f3', '#f7f6f3', '#ffffff'],
+  dark: ['#191919', '#202020', '#202020', '#2f2f2f', '#3a3a3a'],
+  light: ['#ffffff', '#f7f6f3', '#f7f6f3', '#ffffff', '#e3e2de'],
   midnight: ['#17181b', '#1e1f23', '#1e1f23', '#2a2c31'],
   forest: ['#171a18', '#1e221f', '#1e221f', '#2a2f2c'],
   aurora: ['#18181c', '#1f1f24', '#1f1f24', '#2c2c33'],
@@ -950,6 +951,14 @@ export default function App({ startupBootstrap }: AppProps) {
   const [tabDrag, setTabDrag] = useState<{ path: string; over: string | null; side: 'before' | 'after' } | null>(null)
   const [paletteMode, setPaletteMode] = useState<'commands' | 'notes'>('commands')
   const [historyOpen, setHistoryOpen] = useState(false)
+  const historyDialogRef = useRef<HTMLElement>(null)
+  const worksheetDialogRef = useRef<HTMLElement>(null)
+  const shareJoinDialogRef = useRef<HTMLElement>(null)
+  const shareLinkDialogRef = useRef<HTMLElement>(null)
+  useModalFocus(historyDialogRef, { active: historyOpen, onEscape: () => setHistoryOpen(false) })
+  useModalFocus(worksheetDialogRef, { active: worksheetImportOpen })
+  useModalFocus(shareJoinDialogRef, { active: Boolean(shareJoin), onEscape: () => setShareJoin(null) })
+  useModalFocus(shareLinkDialogRef, { active: Boolean(shareLinkDialog) })
   const [folderPathTarget, setFolderPathTarget] = useState<string | null>(null)
   const [folderPathInitial, setFolderPathInitial] = useState<string[]>([])
   const [folderPathError, setFolderPathError] = useState<string | null>(null)
@@ -6471,7 +6480,7 @@ export default function App({ startupBootstrap }: AppProps) {
       '--accent': settings.accent,
       '--accent-rgb': hexRgb(settings.accent),
       '--accent-secondary': settings.accentSecondary,
-      '--accent-readable': ensureReadableColor(settings.accent, contrastSurface),
+      '--accent-readable': ensureReadableColor(settings.accent, contrastSurface, 5),
       '--accent-secondary-readable': ensureReadableColor(settings.accentSecondary, contrastSurface),
       '--paper-accent-readable': ensureReadableColor(settings.accent, ['#ffffff', '#f7f7fa']),
       '--paper-accent-secondary-readable': ensureReadableColor(settings.accentSecondary, ['#ffffff', '#f7f7fa']),
@@ -6554,7 +6563,7 @@ export default function App({ startupBootstrap }: AppProps) {
         <button type="button" className={!searchOpen && !overviewOpen && !homeworkOpen && !calendarOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Notizen" aria-label="Notizen" onClick={showFiles}><Files size={14} /><span className="ribbon-label">Notizen</span></button>
         <button type="button" className={searchOpen ? 'active' : ''} title="Im Vault suchen (Strg+Umschalt+F)" data-tooltip="Suchen · Strg ⇧ F" aria-label="Im gesamten Vault suchen" onClick={() => { setSearchOpen(true); setSidebarVisible(true) }}><Search size={14} /><span className="ribbon-label">Suchen</span></button>
         {!editorToolbarVisible && <button type="button" className={drawingOpen ? 'active' : ''} title={drawingOpen ? 'Zur Tastatureingabe wechseln' : 'Auf derselben Seite mit Stift schreiben'} data-tooltip={drawingOpen ? 'Zur Tastatur · Strg D' : 'Mit Stift schreiben · Strg D'} aria-label={drawingOpen ? 'Zur Tastatur wechseln' : 'Mit Stift schreiben'} aria-pressed={drawingOpen} onClick={toggleDrawing}><PenLine size={14} /><span className="ribbon-label">Stift</span></button>}
-        <button type="button" className={homeworkOpen ? 'active' : ''} title="Hausaufgaben & Termine" data-tooltip="Hausaufgaben" aria-label="Hausaufgaben und Termine öffnen" onClick={openHomework}><ClipboardList size={14} /><span className="ribbon-label">Aufgaben</span></button>
+        <button type="button" className={homeworkOpen ? 'active' : ''} title="Hausaufgaben & Termine" data-tooltip="Hausaufgaben" aria-label="Aufgaben: Hausaufgaben und Termine öffnen" onClick={openHomework}><ClipboardList size={14} /><span className="ribbon-label">Aufgaben</span></button>
         <button type="button" className={calendarOpen ? 'active' : ''} title="Kalender" data-tooltip="Kalender" aria-label="Kalender öffnen" onClick={openCalendar}><CalendarDays size={14} /><span className="ribbon-label">Kalender</span></button>
         <div className="ribbon-spacer" />
         <button
@@ -6573,7 +6582,7 @@ export default function App({ startupBootstrap }: AppProps) {
             <button type="button" title="Heutige Tagesnotiz" data-tooltip="Tagesnotiz" aria-label="Heutige Tagesnotiz öffnen" onClick={() => void createDailyNote()}><CalendarDays size={14} /><span className="ribbon-label">Tagesnotiz</span></button>
             <button type="button" className={overviewOpen ? 'active' : ''} title="Vault-Übersicht" data-tooltip="Übersicht" aria-label="Vault-Übersicht öffnen" onClick={openOverview}><Network size={14} /><span className="ribbon-label">Übersicht</span></button>
             <button type="button" className={glyphenWerkOpen ? 'active' : ''} title="GlyphenWerk" data-tooltip="GlyphenWerk" aria-label="GlyphenWerk öffnen" onClick={openGlyphenWerk}><Database size={14} /><span className="ribbon-label">GlyphenWerk</span></button>
-            <button type="button" title="Befehlspalette (Strg+P)" data-tooltip="Befehle · Strg P" aria-label="Befehlspalette öffnen" onClick={() => setPaletteOpen(true)}><Command size={14} /><span className="ribbon-label">Befehle</span></button>
+            <button type="button" title="Befehlspalette (Strg+P)" data-tooltip="Befehle · Strg P" aria-label="Befehle: Befehlspalette öffnen" onClick={() => setPaletteOpen(true)}><Command size={14} /><span className="ribbon-label">Befehle</span></button>
           </div>
         )}
         <div className="ribbon-status">
@@ -6582,13 +6591,21 @@ export default function App({ startupBootstrap }: AppProps) {
           {addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}
           {addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={12} /> {addonState.panels.length}</button>}
           {syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings(syncState.openConflicts > 0 ? 'conflicts' : 'sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={12} /> : syncState.status === 'offline' ? <CloudOff size={12} /> : syncState.status === 'error' ? <CircleAlert size={12} /> : syncState.status === 'paused' ? <Clock size={12} /> : <Cloud size={12} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : syncState.status === 'paused' ? 'Sync pausiert' : 'Synchron'}{syncState.openConflicts > 0 && <em title={`${syncState.openConflicts} Konflikt(e)`}>{syncState.openConflicts}</em>}{syncState.failed.length > 0 && <em className="sync-failed-badge" title={failedLabel(syncState.failed.length)}>{syncState.failed.length}</em>}</button>}
-          <button type="button" className={`save-status ${shownSaveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-label="Jetzt speichern" aria-live="polite" onClick={() => void saveCurrentWork()}>{shownSaveState === 'saved' ? <CheckCircle2 size={12} /> : shownSaveState === 'saving' ? <LoaderCircle className="spin" size={12} /> : <CircleAlert size={12} />}<span>{shownSaveState === 'saved' ? 'Gespeichert' : shownSaveState === 'saving' ? 'Speichert …' : (activeHeld ? 'Nicht gespeichert' : 'Speicherfehler')}</span></button>
+          {(() => {
+            const saveText = shownSaveState === 'saved' ? 'Gespeichert' : shownSaveState === 'saving' ? 'Speichert …' : (activeHeld ? 'Nicht gespeichert' : 'Speicherfehler')
+            return (
+              <>
+                <button type="button" className={`save-status ${shownSaveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" onClick={() => void saveCurrentWork()}>{shownSaveState === 'saved' ? <CheckCircle2 aria-hidden="true" size={12} /> : shownSaveState === 'saving' ? <LoaderCircle aria-hidden="true" className="spin" size={12} /> : <CircleAlert aria-hidden="true" size={12} />}<span>{saveText}</span></button>
+                <span className="sr-only" role="status">{saveText}</span>
+              </>
+            )
+          })()}
         </div>
         <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => openSettings()}><Settings size={14} /><span className="ribbon-label">Einstellungen</span></button>
       </nav>
 
       <div className="app-body" style={{ gridTemplateColumns: `${sidebarVisible ? 'var(--sidebar-width)' : '0px'} minmax(420px, 1fr) auto` }}>
-        <aside className={`sidebar ${sidebarVisible ? '' : 'is-hidden'} ${glyphenWerkOpen ? 'is-glyphenwerk' : ''}`}>
+        <aside aria-label="Seitenleiste" className={`sidebar ${sidebarVisible ? '' : 'is-hidden'} ${glyphenWerkOpen ? 'is-glyphenwerk' : ''}`}>
           {glyphenWerkOpen ? <>
             <div className="sidebar-header glyphenwerk-sidebar-header">
               <button type="button" className="glyphenwerk-sidebar-brand" onClick={() => openGlyphenWerkView('capture')}>
@@ -6690,6 +6707,7 @@ export default function App({ startupBootstrap }: AppProps) {
         </aside>
 
         <main className={`workspace ${sideToolbar ? 'has-side-toolbar' : ''}`}>
+          <h1 className="sr-only" data-i18n-ignore>{activeTab ? activeTab.title : 'FaNotes'}</h1>
           <div className="tabs-bar">
             <div className="note-nav" role="group" aria-label="Verlauf">
               <button
@@ -6715,7 +6733,7 @@ export default function App({ startupBootstrap }: AppProps) {
             </div>
             <div
               className="tabs-scroll"
-              role="tablist"
+              role="group"
               aria-label="Offene Notizen"
               onDragOver={(event) => {
                 if (!event.dataTransfer.types.includes(NOTE_TAB_DRAG_TYPE)) return
@@ -6838,7 +6856,7 @@ export default function App({ startupBootstrap }: AppProps) {
               )}
               {activeTab && (
                 <div className="note-tags-menu" ref={tagMenuRef}>
-                  <button type="button" className={`toolbar-button ${tagMenuOpen ? 'active' : ''}`} aria-label="Schlagwörter" aria-expanded={tagMenuOpen} title="Schlagwörter" onClick={() => setTagMenuOpen((open) => !open)}><Tag size={14} />{activeTags.length > 0 && <span>{activeTags.length}</span>}</button>
+                  <button type="button" className={`toolbar-button ${tagMenuOpen ? 'active' : ''}`} aria-expanded={tagMenuOpen} title="Schlagwörter" onClick={() => setTagMenuOpen((open) => !open)}><Tag aria-hidden="true" size={14} /><span className="sr-only">Schlagwörter</span>{activeTags.length > 0 && <span>{activeTags.length}</span>}</button>
                   {tagMenuOpen && (
                     <div className="note-tags-popover" role="dialog" aria-label="Schlagwörter">
                       <div className="note-tags">
@@ -7266,7 +7284,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 <header className="split-pane-head">
                   {splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? <File aria-hidden="true" size={13} /> : <Files aria-hidden="true" size={13} />}
                   <strong title={splitTab.path}>{splitTab.title}</strong>
-                  {splitTab.content !== splitTab.savedContent && <i className="dirty-dot" title="Noch nicht gespeichert" />}
+                  {splitTab.content !== splitTab.savedContent && <i className="dirty-dot" title={uiText('Noch nicht gespeichert', 'Not saved yet')} />}
                   <button type="button" title="Notizen tauschen (Strg+Umschalt+\)" aria-label="Notizen tauschen" onClick={() => void swapSplitPanes()}><ArrowLeftRight size={14} /></button>
                   <button type="button" title={splitLayout.orientation === 'columns' ? 'Untereinander anordnen' : 'Nebeneinander anordnen'} aria-label={splitLayout.orientation === 'columns' ? 'Untereinander anordnen' : 'Nebeneinander anordnen'} onClick={toggleSplitOrientation}>{splitLayout.orientation === 'columns' ? <Rows2 size={14} /> : <Columns2 size={14} />}</button>
                   <button type="button" title="Als einzige Notiz öffnen" aria-label="Als einzige Notiz öffnen" onClick={() => { const target = splitTab.path; splitEditorRef.current?.flushChanges(); setSplitPath(null); void openNote(target) }}><Maximize2 size={14} /></button>
@@ -7390,7 +7408,7 @@ export default function App({ startupBootstrap }: AppProps) {
       {cardsOpen && activeTab && <Suspense fallback={null}><FlashcardReview markdown={activeTab.content} title={activeTab.title} onSave={(markdown) => updateContentFor(activeTab.path, markdown)} onClose={() => setCardsOpen(false)} /></Suspense>}
       {historyOpen && (
         <div className="modal-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false) }}>
-          <section className="history-dialog" role="dialog" aria-modal="true" aria-labelledby="history-title">
+          <section ref={historyDialogRef} className="history-dialog" role="dialog" aria-modal="true" aria-labelledby="history-title">
             <header>
               <div><History size={18} /><div><small>Lokaler Verlauf</small><h2 id="history-title">Frühere Versionen</h2></div></div>
               <button type="button" aria-label="Schließen" onClick={() => setHistoryOpen(false)}><X size={17} /></button>
@@ -7440,7 +7458,7 @@ export default function App({ startupBootstrap }: AppProps) {
       )}
       {shareJoin && (
         <div className="modal-backdrop confirm-backdrop" role="presentation">
-          <section className="confirm-dialog share-link-dialog" role="dialog" aria-modal="true" aria-labelledby="fanotes-share-join-title">
+          <section ref={shareJoinDialogRef} className="confirm-dialog share-link-dialog" role="dialog" aria-modal="true" aria-labelledby="fanotes-share-join-title">
             <header className="confirm-dialog-header">
               <span className="confirm-dialog-icon"><FolderOpen size={16} /></span>
               <div><h3 id="fanotes-share-join-title">{shareJoin.step === 'folder' ? 'In welchem Ordner soll die geteilte Datei liegen?' : 'Konto anlegen oder nur einen Namen eintragen?'}</h3></div>
@@ -7480,7 +7498,7 @@ export default function App({ startupBootstrap }: AppProps) {
       )}
       {shareLinkDialog && (
         <div className="modal-backdrop confirm-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setShareLinkDialog(null) }}>
-          <section className="confirm-dialog share-link-dialog" role="dialog" aria-modal="true" aria-labelledby="fanotes-share-link-title" onPointerDown={(event) => event.stopPropagation()}>
+          <section ref={shareLinkDialogRef} className="confirm-dialog share-link-dialog" role="dialog" aria-modal="true" aria-labelledby="fanotes-share-link-title" onPointerDown={(event) => event.stopPropagation()}>
             <header className="confirm-dialog-header">
               <span className="confirm-dialog-icon"><Link2 size={16} /></span>
               <div><h3 id="fanotes-share-link-title">Die Freigabe wurde erstellt.</h3></div>
@@ -7520,7 +7538,7 @@ export default function App({ startupBootstrap }: AppProps) {
         toast('Wichtige Stellen wurden mit dem Textmarker markiert.', 'success')
       }} onClose={() => setLmStudioOpen(false)} /></Suspense>}
       {worksheetImportOpen && <div className="modal-backdrop worksheet-import-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setWorksheetImportOpen(false) }}>
-        <section className="worksheet-import-dialog" role="dialog" aria-modal="true" aria-labelledby="worksheet-import-title">
+        <section ref={worksheetDialogRef} className="worksheet-import-dialog" role="dialog" aria-modal="true" aria-labelledby="worksheet-import-title">
           <header><div><span><FileUp size={19} /></span><div><small>Bild oder PDF</small><h2 id="worksheet-import-title">Arbeitsblatt importieren</h2></div></div><button type="button" aria-label="Schließen" onClick={() => setWorksheetImportOpen(false)}><X size={17} /></button></header>
           <p>Das Arbeitsblatt bleibt Teil deines Vaults. Anschließend kannst du direkt darauf Textfelder platzieren oder mit dem Grafiktablett schreiben.</p>
           <div className="worksheet-import-options">

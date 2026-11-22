@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, Columns2, CornerDownLeft, File, FileText, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useModalFocus } from '../lib/useModalFocus'
 import type { SwitcherNote } from '../lib/workspaceNav'
 
 export type PaletteAction = {
@@ -38,6 +39,8 @@ export function CommandPalette({ actions, mode = 'commands', rankNotes, activePa
   const [selected, setSelected] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLElement>(null)
+  useModalFocus(dialogRef)
 
   const rows = useMemo<PaletteRow[]>(() => {
     const trimmed = query.trim()
@@ -81,7 +84,7 @@ export function CommandPalette({ actions, mode = 'commands', rankNotes, activePa
 
   return (
     <div className="modal-backdrop palette-backdrop" onPointerDown={onClose}>
-      <section className={`command-palette ${noteMode ? 'is-note-switcher' : ''}`} role="dialog" aria-modal="true" aria-label={noteMode ? 'Notiz öffnen' : 'Befehlspalette'} onPointerDown={(event) => event.stopPropagation()}>
+      <section ref={dialogRef} className={`command-palette ${noteMode ? 'is-note-switcher' : ''}`} role="dialog" aria-modal="true" aria-label={noteMode ? 'Notiz öffnen' : 'Befehlspalette'} onPointerDown={(event) => event.stopPropagation()}>
         <div className="palette-search">
           <Search size={19} />
           <input

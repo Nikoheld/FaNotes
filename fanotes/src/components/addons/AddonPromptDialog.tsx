@@ -1,3 +1,4 @@
+import { useModalFocus } from '../../lib/useModalFocus'
 import { useEffect, useRef, useState } from 'react'
 
 export type AddonPromptRequest = {
@@ -13,6 +14,8 @@ export type AddonPromptRequest = {
 export function AddonPromptDialog({ request }: { request: AddonPromptRequest | null }) {
   const [value, setValue] = useState(request?.value ?? '')
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null)
+  const dialogRef = useRef<HTMLElement>(null)
+  useModalFocus(dialogRef, { active: Boolean(request) })
 
   useEffect(() => {
     setValue(request?.value ?? '')
@@ -25,7 +28,7 @@ export function AddonPromptDialog({ request }: { request: AddonPromptRequest | n
   const cancel = () => request.resolve(null)
   return (
     <div className="modal-backdrop addon-prompt-backdrop" role="presentation" onPointerDown={cancel}>
-      <section className="addon-prompt" role="dialog" aria-modal="true" aria-label={request.title} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); cancel() } }}>
+      <section ref={dialogRef} className="addon-prompt" role="dialog" aria-modal="true" aria-label={request.title} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); cancel() } }}>
         <header>
           <h3 data-i18n-ignore>{request.title}</h3>
           <p data-i18n-ignore>{request.message}</p>
