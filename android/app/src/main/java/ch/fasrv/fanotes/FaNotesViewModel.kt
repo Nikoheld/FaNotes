@@ -540,6 +540,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
                 if (generation != openGeneration) return@launch
                 noteTextFieldBase = path to ch.fasrv.fanotes.desk.parseNoteTextFields(note.payload.array("textFields"))
+                // PDF panels (outline, pages, search) belong to their PDF: another note starts without them.
+                if (open.value?.path != path && editorMenu.value?.startsWith("pdf-") == true) editorMenu.value = null
                 session.replace(note.document)
                 open.value = noteOpened(note)
                 markdown.value = note.markdown
@@ -4067,6 +4069,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         splitMarkdown.value = ""
         splitFolded.value = emptySet()
         splitUnsaved.value = false
+        refreshSplitBackdrop(null)
         persistWorkspace()
     }
 
@@ -4079,6 +4082,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         splitMarkdown.value = ""
         splitFolded.value = emptySet()
         splitUnsaved.value = false
+        refreshSplitBackdrop(null)
         openPath(path, force = true)
     }
 
@@ -4758,6 +4762,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         splitMarkdown.value = mainMarkdown
         splitFolded.value = foldsForSections(mainMarkdown, mainDocument)
         splitPath.value = mainNote.path
+        refreshSplitBackdrop(mainNote)
         open.value = noteOpened(savedSplit)
         markdown.value = savedSplit.markdown
         foldedHeadings.value = foldsForSections(savedSplit.markdown, savedSplit.document)
@@ -4798,6 +4803,82 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         openInSplit(active)
     }
 
+    /** The pages of a PDF in the second pane (empty for any other note). Same layout as the main pane's backdrop. */
+    val splitBackdrop = MutableStateFlow<List<BackdropSlice>>(emptyList())
+    private var splitBackdropJob: Job? = null
+
+    private fun refreshSplitBackdrop(note: OpenNote?) {
+        splitBackdropJob?.cancel()
+        splitBackdrop.value.forEach { it.bitmap?.recycle() }
+        splitBackdrop.value = emptyList()
+        if (note == null || note.kind != NoteKind.PDF) return
+        val path = note.path
+        splitBackdropJob = viewModelScope.launch {
+            val built = ArrayList<BackdropSlice>()
+            var height: Float? = null
+            try {
+                withContext(Dispatchers.Default) {
+                    val bytes = graph.vault.read(path) ?: return@withContext
+                    val file = File.createTempFile("fanotes-pdf-split", ".pdf")
+                    try {
+                        file.writeBytes(bytes)
+                        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                            openNotePdf(descriptor).use { renderer ->
+                                val aspects = (0 until renderer.pageCount.coerceAtMost(ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP)).map { index ->
+                                    renderer.openPage(index).use { page -> page.height.toDouble() / page.width.toDouble() }
+                                }
+                                val boxes = layoutPdfStack(PAGE_START_WIDTH, aspects)
+                                val stack = pdfStackHeight(boxes)
+                                val scaleY = if (note.document.strokes.isEmpty() || stack <= 0) 1.0 else note.document.sourceHeight / stack
+                                height = boxes.lastOrNull()?.let { (it.top * scaleY).toFloat() + (it.height * scaleY).toFloat() }
+                                for (box in boxes) {
+                                    ensureActive()
+                                    renderer.openPage(box.index).use { page ->
+                                        // The second pane is narrower than the main one: a smaller bitmap keeps memory low.
+                                        val width = 900
+                                        val bitmapHeight = (width * (page.height.toFloat() / page.width)).toInt().coerceAtLeast(1)
+                                        val bitmap = try {
+                                            Bitmap.createBitmap(width, bitmapHeight, Bitmap.Config.ARGB_8888)
+                                        } catch (_: OutOfMemoryError) {
+                                            return@use
+                                        }
+                                        android.graphics.Canvas(bitmap).drawColor(android.graphics.Color.WHITE)
+                                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                        built += BackdropSlice(
+                                            topPagePx = (box.top * scaleY).toFloat(),
+                                            heightPagePx = (box.height * scaleY).toFloat(),
+                                            widthPagePx = PAGE_START_WIDTH.toFloat(),
+                                            bitmap = bitmap,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } finally {
+                        file.delete()
+                    }
+                }
+                if (splitPath.value != path) {
+                    built.forEach { it.bitmap?.recycle() }
+                    return@launch
+                }
+                val stackHeight = height
+                if (stackHeight != null && stackHeight > 64 && splitSession.document.strokes.isEmpty()) {
+                    splitSession.replace(splitSession.document.copy(sourceWidth = PAGE_START_WIDTH, sourceHeight = stackHeight.toDouble(), paperStyle = "blank"))
+                }
+                splitBackdrop.value = built.toList()
+            } catch (error: Exception) {
+                built.forEach { it.bitmap?.recycle() }
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message.value = if (ch.fasrv.fanotes.desk.pdfNeedsPassword(error.javaClass.simpleName, error.message.orEmpty())) {
+                    "Dieses PDF ist passwortgeschützt. Öffne es im Hauptfenster."
+                } else {
+                    ch.fasrv.fanotes.desk.userVisibleFailure(error, "Die Notiz konnte nicht geöffnet werden.")
+                }
+            }
+        }
+    }
+
     fun loadSplit(path: String) {
         if (path.isBlank() || path == splitPath.value) return
         splitUnsaved.value = false
@@ -4819,6 +4900,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             rememberTags(path, note.markdown)
             splitPath.value = path
             splitUnsaved.value = false
+            refreshSplitBackdrop(note)
             persistWorkspace()
         }
     }

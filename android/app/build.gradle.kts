@@ -108,7 +108,7 @@ val writingBundle = tasks.register<Exec>("writingBundle") {
     onlyIf {
         val missing = !file("src/main/assets/writing/writing.html").exists() || !file("src/main/assets/writing/recognition.html").exists() || project.hasProperty("fanotesWritingBundle")
         val canBuild = File(app, "node_modules/vite").exists()
-        if (missing && !canBuild) logger.warn("FaNotes: writing mode bundle missing and fanotes/node_modules not installed; the writing screen will be empty.")
+        if (missing && !canBuild) logger.warn("FaNotes: writing mode bundle missing and fanotes/node_modules not installed; the writing screen will show a \"not included in this build\" page.")
         missing && canBuild
     }
 }
