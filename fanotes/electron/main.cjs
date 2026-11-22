@@ -242,6 +242,7 @@ process.on('uncaughtException', (error) => {
   console.error('FaNotes: unbehandelte Ausnahme:', error?.stack ?? error)
   diagnosticsService()?.recordMainException('uncaughtException', error)
 })
+let appQuitting = false
 app.on('child-process-gone', (_event, details) => {
   diagnosticsService()?.recordProcessGone('child-process-gone', details)
   if (!details || details.type === 'Utility') return
@@ -259,6 +260,8 @@ function diagnosticsService() {
       getSettings: () => currentSettings,
       appInfo: () => ({ version: app.getVersion(), platform: process.platform === 'win32' ? 'windows' : process.platform, arch: process.arch, language: String(currentSettings.uiLanguage === 'system' ? app.getLocale() : currentSettings.uiLanguage).slice(0, 2) }),
       appRoots: [app.getAppPath(), __dirname],
+      // Helpers are killed (SIGTERM, exit 15) on every quit; that is not a crash.
+      isQuitting: () => appQuitting,
       isOnline: () => net.isOnline(),
       isIdle: () => {
         try {
@@ -269,7 +272,14 @@ function diagnosticsService() {
       memory: () => {
         const metrics = app.getAppMetrics()
         const mb = (kb) => Math.round(kb / 1024 / 10) * 10
+        // Per process kind, so a 1.6 GB total can be traced to the renderer, the GPU or a helper.
+        const byType = { main: 0, renderer: 0, gpu: 0, utility: 0, other: 0 }
+        for (const item of metrics) {
+          const kind = item.type === 'Browser' ? 'main' : item.type === 'Tab' ? 'renderer' : item.type === 'GPU' ? 'gpu' : item.type === 'Utility' ? 'utility' : 'other'
+          byType[kind] += item.memory?.workingSetSize ?? 0
+        }
         return {
+          byType: Object.fromEntries(Object.entries(byType).map(([kind, kb]) => [kind, mb(kb)])),
           processes: metrics.length,
           totalMb: mb(metrics.reduce((sum, item) => sum + (item.memory?.workingSetSize ?? 0), 0)),
           mainRssMb: mb(process.memoryUsage().rss / 1024),
@@ -6698,6 +6708,7 @@ app.on('will-quit', () => {
 })
 
 app.on('before-quit', () => {
+  appQuitting = true
   try { diagnosticsServiceInstance?.flush() } catch { /* best effort */ }
   void localMcpHostInstance?.stop()
   stopNativeOcr(new Error('FaNotes wird beendet.'))
