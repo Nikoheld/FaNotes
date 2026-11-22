@@ -189,6 +189,22 @@ export class DocIndex {
     this.docUnits.get(unit.path)?.delete(id)
   }
 
+  /**
+   * Same as `removeDoc`, but gives the UI a turn every `sliceMs`: removing a unit tokenizes its text again,
+   * so dropping a huge note (hundreds of units) in one go was a half-second main-thread block.
+   */
+  async removeDocSliced(path: string, keepRecord: boolean, pause: () => Promise<void>, sliceMs = 8) {
+    let sliceStart = performance.now()
+    for (const id of [...(this.docUnits.get(path) ?? [])]) {
+      this.removeUnit(id)
+      if (performance.now() - sliceStart > sliceMs) {
+        await pause()
+        sliceStart = performance.now()
+      }
+    }
+    this.removeDoc(path, keepRecord)
+  }
+
   /** Removes a document's units (and the record unless `keepRecord`). */
   removeDoc(path: string, keepRecord = false) {
     for (const id of [...(this.docUnits.get(path) ?? [])]) this.removeUnit(id)

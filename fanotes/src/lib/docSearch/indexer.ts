@@ -252,7 +252,7 @@ export class DocIndexer {
     // Deleted, moved or trashed documents leave the index.
     for (const doc of this.index.listDocs()) {
       if (byPath.has(doc.path)) continue
-      this.index.removeDoc(doc.path)
+      await this.index.removeDocSliced(doc.path, false, yieldToUi)
       await this.options.store.removeDoc(doc.path).catch(() => undefined)
     }
     const now = this.now()
@@ -285,7 +285,7 @@ export class DocIndexer {
     const resuming = Boolean(previous && previous.status === 'partial' && previous.fingerprint === source.fingerprint && previous.extractor === EXTRACTOR_VERSION)
     if (!resuming) {
       // Edited, new or changed: old text goes first, so nothing stale stays searchable.
-      this.index.removeDoc(source.path, true)
+      await this.index.removeDocSliced(source.path, true, () => (this.options.gate ? this.options.gate() : yieldToUi()))
       await store.removeUnits(source.path).catch(() => undefined)
     }
     const record: DocRecord = {
@@ -371,7 +371,7 @@ export class DocIndexer {
         result = 'partial'
       }
     } else if (outcome.status === 'unsupported') {
-      this.index.removeDoc(source.path, true)
+      await this.index.removeDocSliced(source.path, true, () => (this.options.gate ? this.options.gate() : yieldToUi()))
       await store.removeUnits(source.path).catch(() => undefined)
       record.status = 'unsupported'
       record.reason = outcome.reason

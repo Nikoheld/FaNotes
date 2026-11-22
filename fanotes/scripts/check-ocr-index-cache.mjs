@@ -185,6 +185,8 @@ try {
     assert.equal(host.workerCount(NaN, 8, 16 * GB), 2)
     assert.equal(host.workerCount(NaN, 8, 8 * GB), 1, 'under 12 GB')
     assert.equal(host.workerCount(NaN, 8, 16 * GB, true), 1, 'on battery')
+    assert.equal(host.workerCount(NaN, 8, 16 * GB, false, 2 * GB), 1, 'little free memory')
+    assert.equal(host.workerCount(NaN, 8, 16 * GB, false, 6 * GB), 2, 'enough free memory')
     assert.equal(host.workerCount(4, 16, 32 * GB, true), 1)
     assert.equal(host.workerCount(NaN, 8), host.workerCount(NaN, 8, os.totalmem()))
     assert.equal(host.workerCount(NaN, 4, 16 * GB), 2)

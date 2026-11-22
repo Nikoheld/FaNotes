@@ -684,7 +684,7 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
                 </div>
               ))}
             </div>
-            <div className="cal-scroll" ref={scrollerRef}>
+            <div className="cal-scroll" ref={scrollerRef} tabIndex={0} role="region" aria-label="Kalenderansicht">
               <div className="cal-hours" style={{ gridTemplateColumns: `56px repeat(${range.days.length}, minmax(0, 1fr))` }}>
                 <div className="cal-hour-labels">
                   {Array.from({ length: 24 }, (_, hour) => <span key={hour} style={{ top: hour * HOUR_PX }}>{padTime(hour)}</span>)}

@@ -508,7 +508,7 @@ export function VaultOverview({
 
                     return (
                       <button
-                        aria-label={actionLabel}
+                        title={actionLabel}
                         className={`vault-overview__folder-row ${folder.depth ? 'is-nested' : ''}`}
                         key={folder.id}
                         style={style}

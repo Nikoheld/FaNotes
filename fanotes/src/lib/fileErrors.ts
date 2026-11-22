@@ -35,3 +35,10 @@ export const sanitizeToastMessage = (message: string): string => {
   if (!IPC_PREFIX.test(message) && !/\b(EPERM|EACCES|EBUSY|ENOENT|ENOSPC)\b/u.test(message)) return message
   return friendlyFileError(message, 'Die Aktion ist fehlgeschlagen.')
 }
+
+/** "file.js:12" from an ErrorEvent source (base name only), so reports can group errors by place. */
+export const errorLocation = (filename: unknown, line: unknown): string | undefined => {
+  const base = typeof filename === 'string' ? filename.split(/[\\/]/u).pop()?.split('?')[0] ?? '' : ''
+  if (!/^[A-Za-z0-9_.-]{1,60}\.m?js$/u.test(base)) return undefined
+  return `${base}:${Number.isInteger(line) && Number(line) > 0 ? Number(line) : 0}`
+}

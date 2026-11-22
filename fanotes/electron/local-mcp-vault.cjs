@@ -20,6 +20,7 @@ const fsp = require('node:fs/promises')
 const path = require('node:path')
 const crypto = require('node:crypto')
 const { germanIndexOf } = require('./german-search.cjs')
+const { renameWithRetry } = require('./fs-retry.cjs')
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024
 const MAX_WALK_ENTRIES = 30_000
@@ -1045,7 +1046,7 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
       if (current.mtimeMs !== expected.mtimeMs || current.size !== expected.size || current.ino !== expected.ino) {
         throw new McpError('The note changed while it was being updated. Nothing was written; try again.', 'conflict')
       }
-      await fsp.rename(temp, real)
+      await renameWithRetry(temp, real)
     } catch (error) {
       await fsp.rm(temp, { force: true }).catch(() => {})
       throw error

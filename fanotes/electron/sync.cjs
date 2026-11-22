@@ -15,6 +15,8 @@ const crypto = require('node:crypto')
 const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
+const { openWithRetry, renameWithRetry } = require('./fs-retry.cjs')
+const { isWindowsUnsafePath } = require('./entry-names.cjs')
 
 const INTERNAL_DIRECTORY = '.fanotes'
 const SKIPPED_INTERNAL = new Set(['history', 'tree-cache', 'trash'])
@@ -210,7 +212,7 @@ async function atomicWriteBytes(target, bytes, mtimeMs) {
       const when = new Date(mtimeMs)
       await fsp.utimes(temporary, when, when).catch(() => undefined)
     }
-    await fsp.rename(temporary, target)
+    await renameWithRetry(temporary, target)
   } catch (error) {
     if (handle) await handle.close().catch(() => undefined)
     await fsp.rm(temporary, { force: true }).catch(() => undefined)
@@ -226,7 +228,7 @@ async function atomicWriteBytes(target, bytes, mtimeMs) {
  * @param {(absolutePath: string) => Promise<void>} [deps.trashItem]
  * @param {() => Record<string, string[]>} [deps.folderLocations]  linked folders of the active vault (logical folder -> real folders)
  */
-function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem, folderLocations = () => ({}) }) {
+function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem, folderLocations = () => ({}), platform = process.platform }) {
   const stateDirectory = path.join(userDataDirectory, 'sync')
   const statePath = (vaultId) => {
     if (typeof vaultId !== 'string' || !/^[a-f0-9]{16,64}$/u.test(vaultId)) throw new Error('Ungültige Vault-ID.')
@@ -310,7 +312,7 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem, 
       const info = await fsp.lstat(target)
       if (!info.isFile()) throw new Error('Die Datei ist keine reguläre Datei.')
       if (info.size > MAX_FILE_BYTES) throw new Error('Die Datei ist zu groß für den Sync.')
-      const handle = await fsp.open(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+      const handle = await openWithRetry(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
       try {
         return new Uint8Array(await handle.readFile())
       } finally {
@@ -318,6 +320,7 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem, 
       }
     },
     async write(relativePath, bytes, mtimeMs) {
+      if (platform === 'win32' && isWindowsUnsafePath(normalizeRelative(relativePath).join('/'))) throw new Error('Dieser Dateiname ist unter Windows nicht erlaubt.')
       if (!(bytes instanceof Uint8Array)) throw new Error('Der Sync-Inhalt muss binär sein.')
       if (bytes.byteLength > MAX_FILE_BYTES) throw new Error('Die Datei ist zu groß für den Sync.')
       const root = await vaultRoot()

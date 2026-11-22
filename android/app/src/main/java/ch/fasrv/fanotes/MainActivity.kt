@@ -616,6 +616,7 @@ fun FaNotesScreen(
     val sidebarOpen by model.sidebarOpen.collectAsStateWithLifecycle()
     val inspectorOpen by model.inspectorOpen.collectAsStateWithLifecycle()
     val markdown by model.markdown.collectAsStateWithLifecycle()
+    val settledText by model.settledMarkdown.collectAsStateWithLifecycle()
     val sync by model.sync.collectAsStateWithLifecycle()
     val message by model.message.collectAsStateWithLifecycle()
     val backdrop by model.backdrop.collectAsStateWithLifecycle()
@@ -1308,7 +1309,7 @@ fun FaNotesScreen(
             syncText,
             sync.status.name.lowercase(),
             if (rawDesk["spellcheck"] == "off" || !showText || open == null) "" else {
-                val code = if (spellingLanguage == "unknown") ch.fasrv.fanotes.desk.detectNoteLanguage(markdown) else spellingLanguage
+                val code = if (spellingLanguage == "unknown") ch.fasrv.fanotes.desk.detectNoteLanguage(settledText) else spellingLanguage
                 ch.fasrv.fanotes.desk.statusBarLanguage(
                     code,
                     ch.fasrv.fanotes.desk.ChromeText.language,
@@ -3407,7 +3408,9 @@ private fun PageSurface(
     val worksheetTextRequest by model.worksheetTextRequest.collectAsStateWithLifecycle()
     val noteFields by model.noteTextFields.collectAsStateWithLifecycle()
     val noteFieldFocus by model.noteTextFieldFocus.collectAsStateWithLifecycle()
-    val pdfMarks = remember(markdown) { ch.fasrv.fanotes.desk.readPdfMarks(markdown) }
+    // Whole-note scans follow the typing pause in large notes.
+    val settledMarkdown by model.settledMarkdown.collectAsStateWithLifecycle()
+    val pdfMarks = remember(settledMarkdown) { ch.fasrv.fanotes.desk.readPdfMarks(settledMarkdown) }
     val studyItems by model.studyAnnotations.collectAsStateWithLifecycle()
     val studyHistory by model.studyHistory.collectAsStateWithLifecycle()
     val studyPageRef = remember { arrayOfNulls<NotePageView>(1) }
@@ -3442,9 +3445,9 @@ private fun PageSurface(
     }
     val pdfCamera by model.pdfCameraCommand.collectAsStateWithLifecycle()
     val studyTimer by model.studyTimer.collectAsStateWithLifecycle()
-    val timerChip = remember(studyTimer, markdown) {
+    val timerChip = remember(studyTimer, settledMarkdown) {
         studyTimer?.let { run ->
-            ch.fasrv.fanotes.study.readTaskList(markdown)?.tasks?.firstOrNull { it.id == run.taskId }?.let { task ->
+            ch.fasrv.fanotes.study.readTaskList(settledMarkdown)?.tasks?.firstOrNull { it.id == run.taskId }?.let { task ->
                 val name = ch.fasrv.fanotes.desk.ChromeText.ui("Auftrag")
                 StudyTimerChip(if (task.number.isNotEmpty()) "$name ${task.number}" else name, task.spentSec, run)
             }

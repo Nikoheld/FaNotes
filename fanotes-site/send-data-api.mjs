@@ -24,6 +24,7 @@ const sanitizeLog = (raw) => {
     tool: typeof raw.tool === 'string' ? raw.tool.slice(0, 40) : undefined,
     version: typeof raw.version === 'string' ? raw.version.slice(0, 40) : undefined,
     platform: typeof raw.platform === 'string' ? raw.platform.slice(0, 40) : undefined,
+    where: typeof raw.where === 'string' ? raw.where.slice(0, 80) : undefined,
     message: typeof raw.message === 'string' ? raw.message.slice(0, 400) : undefined,
   }
 }

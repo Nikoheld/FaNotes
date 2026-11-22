@@ -482,6 +482,12 @@ async function main() {
             helperParentPid: exitedPid(),
           })
           await manager.initialize()
+          // A download that begins at launch never restarts the app by itself; once the
+          // package is staged and verified, the next launch-time call installs it.
+          const fresh = await manager.applyPendingInstallOnLaunch()
+          assert.equal(fresh.installStarted, false, 'A fresh download must not restart the app.')
+          for (let waited = 0; manager.getState().status !== 'downloaded' && waited < 20_000; waited += 50) await new Promise((resolve) => { setTimeout(resolve, 50) })
+          assert.equal(manager.getState().status, 'downloaded', manager.getState().error)
           const started = await manager.applyPendingInstallOnLaunch()
           assert.equal(started.installStarted, true, started.state.error)
           return { done: waitForInstall(profile, 40_000) }

@@ -197,6 +197,12 @@ fun paperImageCaption(text: String): String {
     return source.ifBlank { "Bild" }
 }
 
+/** Caption and source when [line] is a whole-line image (`![alt](src)`), else null. */
+fun paperImageLine(line: String): Pair<String, String>? {
+    val image = IMAGE_LINE.matchEntire(line.trim()) ?: return null
+    return image.groupValues[1] to image.groupValues[2]
+}
+
 fun paperImageSource(text: String): String = text.substringAfter('\u001f')
 
 /** Whole-line pictures in a note, in order, without repeats. Inline images stay in their paragraph. */
@@ -213,22 +219,44 @@ fun paperImageSources(markdown: String): List<String> =
 private fun listIndent(raw: String): String = raw.takeWhile { it == ' ' || it == '\t' }
 
 /**
- * Vault paths for a markdown image. A relative source is tried beside the note,
- * then from the vault root. Web and data URLs are left to the caption card.
+ * Vault paths a markdown image reference can mean, best guess first (mirrors the desktop
+ * `imageCandidates`). `img.png` and `../x/img.png` are relative to the note's folder; `/Assets/img.png`
+ * is vault-root absolute. Plain relative paths also fall back to the vault root, which is how older
+ * notes wrote them. A path that climbs above the vault root is dropped, so nothing outside the vault is read.
+ * Web, data and drive-letter references are left to the caption card.
  */
 fun resolvePaperImagePaths(notePath: String, source: String): List<String> {
     val decoded = runCatching { java.net.URLDecoder.decode(source.trim(), Charsets.UTF_8.name()) }.getOrDefault(source.trim())
-    val raw = decoded.removePrefix("./").replace('\\', '/').trim()
-    if (raw.isEmpty()) return emptyList()
-    val lower = raw.lowercase()
-    if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("data:") || lower.startsWith("blob:") || lower.startsWith("mailto:")) {
-        return emptyList()
+    val raw = decoded.replace('\\', '/').trim()
+    if (raw.isEmpty() || raw.startsWith("//") || URL_SCHEME.containsMatchIn(raw)) return emptyList()
+    val result = ArrayList<String>()
+    fun add(value: String?) {
+        if (value != null && value !in result) result += value
     }
-    val cleaned = raw.trim('/')
-    if (cleaned.isEmpty() || cleaned.split('/').any { it.isEmpty() || it == "." || it == ".." }) return emptyList()
-    val folder = notePath.replace('\\', '/').substringBeforeLast('/', "")
-    val beside = if (folder.isEmpty()) cleaned else "$folder/$cleaned"
-    return listOf(beside, cleaned).distinct()
+    if (raw.startsWith("/")) {
+        add(normalizeVaultPath(raw.split('/')))
+        return result
+    }
+    val folder = notePath.replace('\\', '/').split('/').dropLast(1)
+    add(normalizeVaultPath(folder + raw.split('/')))
+    add(normalizeVaultPath(raw.split('/')))
+    return result
+}
+
+private val URL_SCHEME = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*:")
+
+private fun normalizeVaultPath(parts: List<String>): String? {
+    val stack = ArrayList<String>()
+    for (part in parts) {
+        if (part.isEmpty() || part == ".") continue
+        if (part == "..") {
+            if (stack.isEmpty()) return null
+            stack.removeAt(stack.size - 1)
+            continue
+        }
+        stack += part
+    }
+    return if (stack.isEmpty()) null else stack.joinToString("/")
 }
 
 /** Display size inside the text column. Tall pictures stay within 1.35× the column width. */

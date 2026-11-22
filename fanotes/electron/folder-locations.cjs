@@ -4,6 +4,7 @@ const { randomBytes } = require('node:crypto')
 const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
+const { samePhysicalPath } = require('./entry-names.cjs')
 
 const MAX_PATHS = 8
 const MAX_FOLDERS = 200
@@ -143,10 +144,10 @@ async function validateLocation(vaultPath, candidate, accepted, map, logicalFold
   }
   const real = await assertRealDirectory(candidate)
   const vault = await fsp.realpath(vaultPath)
-  if (real === vault || isInsideRoot(vault, real)) throw new Error('Der Ordnerpfad darf nicht im Vault liegen.')
+  if (samePhysicalPath(real, vault) || isInsideRoot(vault, real)) throw new Error('Der Ordnerpfad darf nicht im Vault liegen.')
   if (isInsideRoot(real, vault)) throw new Error('Der Ordnerpfad darf den Vault nicht enthalten.')
   for (const previous of accepted) {
-    if (previous === real || isInsideRoot(previous, real) || isInsideRoot(real, previous)) {
+    if (samePhysicalPath(previous, real) || isInsideRoot(previous, real) || isInsideRoot(real, previous)) {
       throw new Error('Die Ordnerpfade dürfen sich nicht überlappen.')
     }
   }
@@ -159,7 +160,7 @@ async function validateLocation(vaultPath, candidate, accepted, map, logicalFold
       } catch {
         otherReal = path.resolve(other)
       }
-      if (otherReal === real || isInsideRoot(otherReal, real) || isInsideRoot(real, otherReal)) {
+      if (samePhysicalPath(otherReal, real) || isInsideRoot(otherReal, real) || isInsideRoot(real, otherReal)) {
         throw new Error('Dieser Ordner ist bereits einem anderen FaNotes-Ordner zugeordnet.')
       }
     }
@@ -233,7 +234,7 @@ function identityPath(vaultPath, absolutePath, map) {
   for (const [folder, roots] of Object.entries(map || {})) {
     for (const root of roots) {
       const base = path.resolve(root)
-      if (absolute === base) return folder
+      if (samePhysicalPath(absolute, base)) return folder
       if (isInsideRoot(base, absolute)) {
         const rest = path.relative(base, absolute).split(path.sep).join('/')
         return rest ? `${folder}/${rest}` : folder
@@ -310,7 +311,7 @@ async function moveContents(from, to) {
   await fsp.mkdir(to, { recursive: true, mode: 0o700 })
   const fromReal = await fsp.realpath(from)
   const toReal = await fsp.realpath(to)
-  if (fromReal === toReal) return { moved: 0, conflicts: [] }
+  if (samePhysicalPath(fromReal, toReal)) return { moved: 0, conflicts: [] }
   if (isInsideRoot(fromReal, toReal)) throw new Error('Der neue Ordner liegt im bisherigen Ordner.')
   const conflicts = []
   let moved = 0
