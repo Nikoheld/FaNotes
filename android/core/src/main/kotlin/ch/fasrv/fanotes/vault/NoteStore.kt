@@ -291,6 +291,8 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
     }
 
     private fun savePlainMarkdown(note: OpenNote, document: InkDocument, markdown: String, now: String): OpenNote {
+        // Same rule as the sidecar path: a temp-file replace would bypass a read-only flag.
+        if (io.isReadOnly(note.path)) throw java.nio.file.ReadOnlyFileSystemException()
         val body = if (markdown.contains("fanotes-famd")) stripFamdPayload(markdown) else markdown
         val previous = io.read(note.path)?.decodeToString()
         if (previous != null) runCatching { recordNoteHistory(io, note.path, previous, companion = null) }

@@ -1096,7 +1096,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.setTextColor(0xFF252630.toInt())
         editor.highlightColor = selectionWashArgb(ink.accentColor)
         editor.setHintTextColor(0xFF8A8D98.toInt())
-        editor.hint = "Text auf dem Papier"
+        editor.hint = ch.fasrv.fanotes.desk.ChromeText.ui("Text auf dem Papier")
         editor.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
         editor.setLineSpacing(0f, 1.72f)
         editor.gravity = Gravity.TOP or Gravity.START
@@ -1379,7 +1379,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 topMargin = dp(ch.fasrv.fanotes.desk.TOUCH_TOOLBAR_DP) - dp(1).coerceAtLeast(1)
             },
         )
-        handle.text = "Werkzeuge"
+        handle.text = ch.fasrv.fanotes.desk.ChromeText.ui("Werkzeuge")
         handle.gravity = Gravity.CENTER
         handle.textSize = 13f
         handle.visibility = GONE
@@ -2056,7 +2056,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             tools.gravity = Gravity.CENTER_VERTICAL
             tools.setPadding(0, 0, dp(8), 0)
             toolbar.addView(tools, LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.TOUCH_TOOLBAR_DP)))
-            handle.text = "Werkzeuge"
+            handle.text = ch.fasrv.fanotes.desk.ChromeText.ui("Werkzeuge")
             handle.textSize = 13f
             handle.layoutParams = LayoutParams(dp(120), dp(40), Gravity.TOP or Gravity.END)
         }
@@ -2652,7 +2652,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val terms = ch.fasrv.fanotes.study.termsOf(ink.study.items)
         textDialog(
             title = "Begriffe",
-            hint = "Begriffe, mit Komma getrennt",
+            hint = ch.fasrv.fanotes.desk.ChromeText.ui("Begriffe, mit Komma getrennt"),
             initial = draft ?: terms.joinToString(", "),
             max = 4000,
             multiline = true,

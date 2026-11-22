@@ -67,7 +67,10 @@ fun parseNoteOutline(content: String): List<NoteOutlineHeading> {
     var fenceMarker = ""
     var fenceLength = 0
     for ((index, line) in lines.withIndex()) {
-        val fence = FENCE.matchEntire(line)
+        // A regex per line is slow on a long note: only lines that can be a fence or a heading reach one.
+        val lead = line.firstOrNull { it != ' ' }
+        if (lead != '`' && lead != '~' && fenceMarker.isEmpty() && !line.startsWith('#')) continue
+        val fence = if (lead == '`' || lead == '~') FENCE.matchEntire(line) else null
         if (fence != null) {
             val token = fence.groupValues[1]
             val marker = token.first().toString()

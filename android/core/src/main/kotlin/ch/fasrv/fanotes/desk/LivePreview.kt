@@ -638,6 +638,8 @@ fun toggleTaskMarker(text: String, offset: Int): String? {
 }
 
 fun findDetailsBlocks(text: String): List<DetailsBlock> {
+    // Cheap pre-check: most notes have no details block, and the line scan below is a regex per line.
+    if (!text.contains("<details", ignoreCase = true)) return emptyList()
     val lines = documentLines(text)
     val blocks = ArrayList<DetailsBlock>()
     var index = 0
@@ -887,7 +889,7 @@ data class CodeFenceBlock(val from: Int, val to: Int, val openLine: Int, val clo
 
 /** Fenced code, including an unclosed fence through the end of the note. */
 fun codeFenceBlocks(text: String): List<CodeFenceBlock> {
-    if (text.isEmpty()) return emptyList()
+    if (text.isEmpty() || (!text.contains("```") && !text.contains("~~~"))) return emptyList()
     val lines = documentLines(text)
     val blocks = ArrayList<CodeFenceBlock>()
     var index = 0

@@ -114,7 +114,7 @@ fun applyLivePreview(
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
         )
     }
-    for (mark in sourceSyntaxMarks(source, selectionStart, selectionEnd)) {
+    for (mark in syntaxMarksNear(source, selectionStart, selectionEnd, windows != null)) {
         val start = mark.start.coerceIn(0, length)
         val end = mark.end.coerceIn(start, length)
         if (start == end || !touches(start, end)) continue
@@ -148,6 +148,21 @@ fun applyLivePreview(
 private fun removeSpans(editable: Editable, spans: Array<LivePreviewSpan>) {
     if (spans.isEmpty()) return
     for (span in spans) editable.removeSpan(span)
+}
+
+/**
+ * Source-syntax marks only ever land on the caret lines (and fenced code). In a long note without fences they are
+ * computed on the text around the caret instead of the whole note.
+ */
+private fun syntaxMarksNear(source: String, selectionStart: Int, selectionEnd: Int, windowed: Boolean): List<ch.fasrv.fanotes.desk.SyntaxMark> {
+    if (!windowed || source.contains("```") || source.contains("~~~")) return sourceSyntaxMarks(source, selectionStart, selectionEnd)
+    val low = minOf(selectionStart, selectionEnd).coerceIn(0, source.length)
+    val high = maxOf(selectionStart, selectionEnd).coerceIn(0, source.length)
+    val from = source.lastIndexOf('\n', (low - 400).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+    val to = source.indexOf('\n', (high + 400).coerceAtMost(source.length)).let { if (it < 0) source.length else it }
+    val part = source.substring(from, to)
+    return sourceSyntaxMarks(part, selectionStart - from, selectionEnd - from)
+        .map { it.copy(start = it.start + from, end = it.end + from) }
 }
 
 private fun syntaxSpan(style: SourceSyntax): Any = when (style) {

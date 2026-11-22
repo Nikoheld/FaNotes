@@ -148,7 +148,7 @@ internal class PenToolbarKit(private val context: Context) {
     }
 
     /** Round colour swatch, [TOUCH_SWATCH_DP] drawn in a 48 dp target. [effect] paints a special ink. */
-    fun swatch(color: String, selected: Boolean, description: String = "Farbe $color", effect: String? = null, click: () -> Unit): View {
+    fun swatch(color: String, selected: Boolean, description: String = ChromeText.ui("Farbe") + " " + color, effect: String? = null, click: () -> Unit): View {
         val view = SwatchView(context, color, effect, selected, colors, dpf(TOUCH_SWATCH_DP.toFloat()))
         view.contentDescription = ChromeText.ui(description)
         view.setOnClickListener { click() }
