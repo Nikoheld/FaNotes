@@ -1130,6 +1130,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.visibility = GONE
         editor.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
+                textRevision += 1
+                if (writing) foldStructural = true
                 if (!writing) {
                     editBefore = s?.toString().orEmpty()
                     changeStart = start
@@ -1145,6 +1147,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
                     closedBrackets.clear()
                 } else {
                     val next = s?.toString().orEmpty()
+                    val insertedChars = next.length - editBefore.length + changeDeleted
+                    if (!ch.fasrv.fanotes.desk.foldMarkersSurviveEdit(editBefore, next, changeStart, changeDeleted, insertedChars)) foldStructural = true
                     val bracket = bracketTyping(editBefore, changeStart, changeDeleted, next, closedBrackets)
                         ?: ch.fasrv.fanotes.desk.htmlAutoClose(editBefore, changeStart, changeDeleted, next)?.let {
                             ch.fasrv.fanotes.desk.BracketEdit(it.text, it.selectionStart, it.selectionEnd, emptySet())
@@ -1205,6 +1209,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
                                 onVisibleMarkdown(origin, corrected.text)
                             } else {
                                 editor.rememberChange(editBefore, next)
+                                typedText = next
+                                typedTextRevision = textRevision
                                 onVisibleMarkdown(editBefore, next)
                             }
                         }
@@ -1392,6 +1398,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
         toolbar.setPadding(dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_PAD_DP), 0, dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_PAD_DP), 0)
         toolbar.addView(tools, LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.TOUCH_TOOLBAR_DP)))
         toolbar.elevation = 12f
+        toolbar.addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
+            if (right - left != fitWidth) toolbar.post { fitTextToolbar() }
+        }
         addView(toolbar, LayoutParams(LayoutParams.MATCH_PARENT, dp(ch.fasrv.fanotes.desk.TOUCH_TOOLBAR_DP), Gravity.TOP))
         addView(
             toolbarRule,
@@ -1831,7 +1840,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
         sourceMarkdown = markdown
         foldedLines = folded
         val visible = ch.fasrv.fanotes.desk.markdownWithFolds(markdown, folded)
-        val shown = editor.text?.toString().orEmpty()
+        // The text typed a moment ago is the editor's text still: no second 300 KB copy per keystroke.
+        val shown = typedText?.takeIf { typedTextRevision == textRevision } ?: editor.text?.toString().orEmpty()
         val pending = pendingCursor
         if (path != boundPath || shown != visible || pending != null) {
             val selection = when {
@@ -1895,6 +1905,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editable.replace(change.from, change.to.coerceAtMost(editable.length), change.insert)
     }
 
+    private var textRevision = 0
+    private var typedText: String? = null
+    private var typedTextRevision = -1
     private var toolSignature = ""
     private var builtTool: InkTool = InkTool.PEN
     private var builtStyle: StrokeStyle = StrokeStyle()
@@ -2374,7 +2387,64 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 "search" -> tools.addView(endIcon("search", "Im Text suchen") { onToolbarAction("search") })
                 "backup" -> tools.addView(endIcon("history", "Notiz sichern") { onToolbarAction("backup") })
                 "links" -> addLinkTools()
-                "more" -> tools.addView(endIcon("ellipsis", "Mehr") { onToolbarAction("more") })
+                "more" -> endIcon("ellipsis", "Mehr") { onToolbarAction("more") }.also {
+                    moreButton = it
+                    tools.addView(it)
+                }
+            }
+        }
+        toolbar.post { fitTextToolbar() }
+    }
+
+    private var moreButton: View? = null
+    private var overflowViews: List<View> = emptyList()
+    private var fitWidth = -1
+
+    /**
+     * Keyboard-mode toolbar at a narrow width: items that do not fit (last first) are hidden and listed in a
+     * popup behind the "Mehr" button, which stays pinned at the end. With room, "Mehr" opens the sheet as before.
+     */
+    private fun fitTextToolbar() {
+        val more = moreButton ?: return
+        if (!textMode || studyOpen || pdfNote || barPosition.vertical || tools.childCount < 3 || tools.getChildAt(tools.childCount - 1) !== more) return
+        val available = toolbar.width - toolbar.paddingLeft - toolbar.paddingRight
+        if (available <= 0) return
+        fitWidth = toolbar.width
+        val items = (1 until tools.childCount - 1).map { tools.getChildAt(it) }
+        fun divider(view: View) = !view.isClickable
+        items.forEach { it.visibility = VISIBLE }
+        val spec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
+        fun natural(): Int {
+            tools.measure(spec, spec)
+            return tools.measuredWidth
+        }
+        var index = items.lastIndex
+        while (natural() > available && index >= 0) {
+            items[index].visibility = GONE
+            index--
+        }
+        items.forEachIndexed { position, view ->
+            if (!divider(view)) return@forEachIndexed
+            val before = items.take(position).any { !divider(it) && it.visibility == VISIBLE }
+            val after = items.drop(position + 1).any { !divider(it) && it.visibility == VISIBLE }
+            view.visibility = if (before && after) VISIBLE else GONE
+        }
+        overflowViews = items.filter { !divider(it) && it.visibility == GONE }
+        more.setOnClickListener {
+            if (overflowViews.isEmpty()) {
+                onToolbarAction("more")
+            } else {
+                val menu = android.widget.PopupMenu(context, more)
+                overflowViews.forEachIndexed { position, view ->
+                    val title = view.contentDescription?.toString() ?: (view as? TextView)?.text?.toString() ?: ""
+                    menu.menu.add(0, position, position, title).isEnabled = view.isEnabled
+                }
+                menu.menu.add(0, overflowViews.size, overflowViews.size, ch.fasrv.fanotes.desk.ChromeText.ui("Mehr") + " ...")
+                menu.setOnMenuItemClickListener { item ->
+                    if (item.itemId < overflowViews.size) overflowViews[item.itemId].performClick() else onToolbarAction("more")
+                    true
+                }
+                menu.show()
             }
         }
     }
@@ -3296,9 +3366,45 @@ class NotePageView(context: Context) : FrameLayout(context) {
         suppressBoxClose = false
     }
 
-    private var foldGlyphText: String? = null
+    private var foldGlyphText: String = ""
     private var editorPlaceKey = ""
     private var lineNumberCount = -1
+
+    private var foldGlyphSource: String? = null
+    private var foldGlyphFolds: Set<Int> = emptySet()
+    private var foldGlyphList: List<String> = emptyList()
+    private var foldLaidOutText: String? = null
+    /** Set when the text changed in a way the kept gutter glyphs cannot follow. */
+    private var foldStructural = true
+    private val foldRefresh = Runnable {
+        foldStructural = true
+        placeEditor()
+    }
+
+    /**
+     * The fold gutter glyphs. Scanning a long note for headings costs tens of milliseconds, so typing a plain word
+     * in the middle of a line keeps the glyphs from before and refreshes them after a pause; a new line, a heading
+     * mark or a fence character (see [foldMarkersSurviveEdit]) or any other change of the text updates them at once.
+     */
+    private fun foldGlyphsFor(source: String, folds: Set<Int>): List<String> {
+        val last = foldGlyphSource
+        if (last != null && folds == foldGlyphFolds && !foldStructural && source.length > PREVIEW_WINDOW_MIN_CHARS) {
+            if (last !== source) {
+                removeCallbacks(foldRefresh)
+                postDelayed(foldRefresh, FOLD_GLYPH_SETTLE_MS)
+            }
+            return foldGlyphList
+        }
+        if (last != null && last === source && folds == foldGlyphFolds && !foldStructural) return foldGlyphList
+        removeCallbacks(foldRefresh)
+        val glyphs = ch.fasrv.fanotes.desk.foldMarkerGlyphs(source, folds)
+        foldGlyphSource = source
+        foldGlyphFolds = folds
+        foldGlyphList = glyphs
+        foldGlyphText = glyphs.joinToString("\n")
+        foldStructural = false
+        return glyphs
+    }
 
     private fun placeEditor() {
         if (editor.visibility != VISIBLE) {
@@ -3329,11 +3435,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         // The frame layout moves its children in onLayout; put the editor back where it belongs.
         editor.layout(x, y, x + width, y + height)
         val foldWidth = dp(18)
-        val glyphs = ch.fasrv.fanotes.desk.foldMarkerGlyphs(sourceMarkdown, foldedLines)
+        val glyphs = foldGlyphsFor(sourceMarkdown, foldedLines)
         // A five-thousand-line gutter is re-laid out whenever its text is set, even to the same string.
-        val glyphText = glyphs.joinToString("\n")
-        if (glyphText != foldGlyphText) {
-            foldGlyphText = glyphText
+        val glyphText = foldGlyphText
+        if (glyphText != foldLaidOutText) {
+            foldLaidOutText = glyphText
             foldMarks.text = glyphText
         }
         if (foldMarks.typeface !== ink.editorTypeface) foldMarks.typeface = ink.editorTypeface
@@ -3400,6 +3506,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private companion object {
+        const val FOLD_GLYPH_SETTLE_MS = 400L
         val PenColors = listOf("#202333", "#2457D6", "#D23B4A", "#1F8A4C", "#E2A21B", "#7A4DD6")
         val Papers = ch.fasrv.fanotes.desk.PAPER_STYLES.map { it.id to it.label }
         /** Drawing colours on the bar (desktop quick-menu ring, first six). */

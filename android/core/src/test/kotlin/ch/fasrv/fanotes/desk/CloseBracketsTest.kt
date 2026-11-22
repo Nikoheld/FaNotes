@@ -42,4 +42,13 @@ class CloseBracketsTest {
         assertEquals(0, bracketTyping("()", 0, 1, ")", emptySet())?.selectionStart)
         assertNull(bracketTyping("Hallo", 5, 1, "Hall", emptySet()))
     }
+
+    @Test
+    fun aPlainLetterInALongNoteIsNotAnEditAndStepsOverOnlyAMarkedPartner() {
+        val note = "x".repeat(300_000)
+        assertNull(bracketTyping(note, 100, 0, note.substring(0, 100) + "a" + note.substring(100), emptySet()))
+        val before = note.substring(0, 100) + ")" + note.substring(100)
+        val after = before.substring(0, 100) + ")" + before.substring(100)
+        assertEquals(101, bracketTyping(before, 100, 0, after, setOf(100))?.selectionStart)
+    }
 }

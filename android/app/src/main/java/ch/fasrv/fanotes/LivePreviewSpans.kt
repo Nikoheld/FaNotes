@@ -1066,7 +1066,20 @@ private class BracketMatchSpan(color: Int) : BackgroundColorSpan(color), LivePre
 
 private class SelectionMatchSpan : BackgroundColorSpan(0x8099FF77.toInt()), LivePreviewSpan
 
-private class CollapseSpan : LineHeightSpan, LivePreviewSpan {
+/**
+ * A concealed source line (table rows, math fences) takes no room. The line height span alone is not enough in a
+ * long-spaced editor: the line kept its full height. Shrinking the text of the line to one pixel makes the font
+ * metrics, and with them the line, tiny.
+ */
+private class CollapseSpan : MetricAffectingSpan(), LineHeightSpan, LivePreviewSpan {
+    override fun updateMeasureState(paint: android.text.TextPaint) {
+        paint.textSize = 1f
+    }
+
+    override fun updateDrawState(paint: android.text.TextPaint) {
+        paint.textSize = 1f
+    }
+
     override fun chooseHeight(text: CharSequence, start: Int, end: Int, spanstartv: Int, lineHeight: Int, fm: Paint.FontMetricsInt) {
         fm.ascent = 0
         fm.descent = 0
