@@ -2867,9 +2867,11 @@ private fun SplitPane(
     var typing by remember(path) { mutableStateOf(false) }
     var splitEditor by remember(path) { mutableStateOf<SplitEditorView?>(null) }
     val splitImages by model.splitPaperImages.collectAsStateWithLifecycle()
+    val splitBackdrop by model.splitBackdrop.collectAsStateWithLifecycle()
+    val isPdf = path?.endsWith(".pdf", ignoreCase = true) == true
     Column(modifier) {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(title.ifBlank { "Zweite Spalte" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
+            Text(title.ifBlank { "Zweite Spalte" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).widthIn(min = 96.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (splitUnsaved) {
                 Box(
                     Modifier
@@ -2880,12 +2882,15 @@ private fun SplitPane(
                         .semantics { contentDescription = "Noch nicht gespeichert" },
                 )
             }
-            TextButton(onClick = { typing = !typing }) { Text(if (typing) "Stift" else "Text") }
-            if (typing) TextButton(onClick = { splitEditor?.selectNext() }) { Text("Nächstes") }
-            TextButton(onClick = { model.swapSplit() }) { Text("Tauschen") }
-            TextButton(onClick = { model.toggleSplitOrientation() }) { Text("Drehen") }
-            TextButton(onClick = { model.promoteSplit() }) { Text("Einzeln") }
-            TextButton(onClick = { model.closeSplit() }) { Text("Schließen") }
+            // Narrow panes: the title keeps a readable minimum and the actions scroll instead of squeezing it.
+            Row(Modifier.weight(2f, fill = false).horizontalScroll(androidx.compose.foundation.rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                if (!isPdf) TextButton(onClick = { typing = !typing }) { Text(if (typing) "Stift" else "Text") }
+                if (typing && !isPdf) TextButton(onClick = { splitEditor?.selectNext() }) { Text("Nächstes") }
+                TextButton(onClick = { model.swapSplit() }) { Text("Tauschen") }
+                TextButton(onClick = { model.toggleSplitOrientation() }) { Text("Drehen") }
+                TextButton(onClick = { model.promoteSplit() }) { Text("Einzeln") }
+                TextButton(onClick = { model.closeSplit() }) { Text("Schließen") }
+            }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
         AndroidView(
@@ -2935,6 +2940,7 @@ private fun SplitPane(
                     openFollowedLink(view.context, model, target, web, anchor)
                 }
                 if (view.paperImages !== splitImages) view.paperImages = splitImages
+                if (view.backdrop !== splitBackdrop) { view.backdrop = splitBackdrop; view.invalidate() }
                 view.onCamera = camera@{ _, _, _ ->
                     val current = path ?: return@camera
                     val sample = view.cameraSample() ?: return@camera
@@ -3207,6 +3213,7 @@ private fun NotePage(
                                 "more" -> "Mehr"
                                 "study-insert" -> "Lernblock einfügen"
                                 "pdf-outline" -> "Gliederung"
+                                "pdf-thumbs" -> "Seiten"
                                 else -> "Werkzeuge"
                             },
                         ),
