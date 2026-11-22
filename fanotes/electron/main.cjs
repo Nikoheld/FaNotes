@@ -4707,24 +4707,39 @@ function registerIpcHandlers() {
         const stripped = base.replace(new RegExp(` ${word.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?: \\d+)?$`, 'u'), '').trim()
         if (stripped) base = stripped
       }
-      const destination = path.join(path.dirname(target), await availableName(path.dirname(target), `${base} ${copyWord}`))
-      if (!physicalAllowed(root, destination)) throw new Error('Das Ziel liegt außerhalb des Vaults.')
-      if (destination === target || destination.startsWith(`${target}${path.sep}`)) throw new Error('Der Ordner kann nicht in sich selbst kopiert werden.')
+      let destination = ''
       let files = 0
       const copyTree = async (from, to) => {
-        await fsp.mkdir(to, { mode: 0o700 })
         for (const item of await fsp.readdir(from, { withFileTypes: true })) {
           // Symbolic links and half-written temp files are never copied.
           if (item.isSymbolicLink() || /\.tmp$/iu.test(item.name)) continue
           const source = path.join(from, item.name)
           const copy = path.join(to, item.name)
-          if (item.isDirectory()) await copyTree(source, copy)
-          else if (item.isFile()) {
+          if (item.isDirectory()) {
+            await fsp.mkdir(copy, { mode: 0o700 })
+            await copyTree(source, copy)
+          } else if (item.isFile()) {
             if (++files > 20000) throw new Error('Der Ordner ist zu groß zum Duplizieren.')
             await fsp.copyFile(source, copy, fs.constants.COPYFILE_EXCL)
           }
         }
       }
+      // The destination is created without `recursive`, so it fails when the name was taken meanwhile; only a
+      // folder this call created is ever removed.
+      let created = false
+      for (let attempt = 0; attempt < 50 && !created; attempt += 1) {
+        const candidate = path.join(path.dirname(target), await availableName(path.dirname(target), `${base} ${copyWord}`))
+        if (!physicalAllowed(root, candidate)) throw new Error('Das Ziel liegt außerhalb des Vaults.')
+        if (candidate === target || candidate.startsWith(`${target}${path.sep}`)) throw new Error('Der Ordner kann nicht in sich selbst kopiert werden.')
+        try {
+          await fsp.mkdir(candidate, { mode: 0o700 })
+          created = true
+          destination = candidate
+        } catch (error) {
+          if (error?.code !== 'EEXIST') throw error
+        }
+      }
+      if (!created) throw new Error('Es konnte kein freier Ordnername erzeugt werden.')
       try {
         await copyTree(target, destination)
       } catch (error) {
