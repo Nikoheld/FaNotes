@@ -1199,7 +1199,7 @@ export class SyncEngine {
       const merged = mergeHomeworkMarkdownBytes(local.bytes, plain)
       if (merged) {
         // The download took a while: an editor may have started on this file meanwhile (writing mode).
-        if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
+        if (this.options?.isPathBusy?.(path) || (local && await this.changedSince(path, local.bytes))) return { result: 'deferred', path }
         await this.host.write(path, merged, Date.now())
         // Size and mtime of the remote copy, so the push scan sees the merged file as changed.
         this.state.files[path] = {
@@ -1227,7 +1227,7 @@ export class SyncEngine {
         storyAdopt = true
       } else if (outcome?.kind === 'merged') {
         // The download took a while: an editor may have started on this file meanwhile (writing mode).
-        if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
+        if (this.options?.isPathBusy?.(path) || (local && await this.changedSince(path, local.bytes))) return { result: 'deferred', path }
         if (!outcome.sameAsLocal) await this.host.write(path, outcome.bytes, Date.now())
         this.state.files[path] = remoteBase()
         idIndex.set(entry.id, path)
@@ -1257,7 +1257,7 @@ export class SyncEngine {
       // The download took a while: an editor may have started on this file meanwhile (writing mode). Ask before the
       // copy is written, not after: a deferral that leaves a copy and a conflict entry behind would write a second
       // copy and a second entry for the same remote version when it is tried again.
-      if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
+      if (this.options?.isPathBusy?.(path) || (local && await this.changedSince(path, local.bytes))) return { result: 'deferred', path }
       const at = new Date(this.options?.now?.() ?? Date.now())
       const copyPath = await this.freeConflictCopyPath(path, at)
       await this.host.write(copyPath, local.bytes, at.getTime())
@@ -1273,7 +1273,7 @@ export class SyncEngine {
       body = new TextEncoder().encode(spliced)
     }
     // The download took a while: an editor may have started on this file meanwhile (writing mode).
-    if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
+    if (this.options?.isPathBusy?.(path) || (local && await this.changedSince(path, local.bytes))) return { result: 'deferred', path }
     const stat = await this.host.write(path, body, meta.mtimeMs || Date.now())
     this.rememberStoryBase(path, download.revision, plain)
     const storedKind = noteSyncKind(path, body)
@@ -1292,6 +1292,19 @@ export class SyncEngine {
   }
 
   private scanCache: Map<string, SyncScanEntry> | null = null
+
+  /**
+   * True when the file no longer holds the bytes this cycle based its decision on. A download can take seconds; a save
+   * (or an external tool) in that time must not be overwritten: the path is deferred and meets the next cycle's fresh snapshot.
+   */
+  private async changedSince(path: string, snapshot: Uint8Array) {
+    if (!this.host) return false
+    const now = await this.host.read(path).catch(() => null)
+    if (!now) return true
+    if (now.byteLength !== snapshot.byteLength) return true
+    for (let index = 0; index < now.byteLength; index += 1) if (now[index] !== snapshot[index]) return true
+    return false
+  }
 
   /** The file is listed here (the scan needs no read access), even if reading it fails. */
   private async presentHere(path: string) {
