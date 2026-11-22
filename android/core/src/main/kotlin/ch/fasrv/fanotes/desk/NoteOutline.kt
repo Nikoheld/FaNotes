@@ -405,3 +405,38 @@ private fun hiddenMask(text: String, foldedLines: Set<Int>): BooleanArray {
 
 private fun normalizeNewlines(markdown: String) =
     if (markdown.indexOf('\r') < 0) markdown else markdown.replace("\r\n", "\n").replace('\r', '\n')
+
+/** Characters that can make or break a heading, a fence or a table when they start a line or are typed. */
+private const val FOLD_RISK_CHARS = "#=-`~|<>"
+
+/**
+ * Whether one edit ([deleted] characters of [before] at [start] became [inserted] characters of [after]) is a small
+ * change inside a plain line, so the fold gutter built before it still fits. A new line, a heading, rule, fence or
+ * table mark typed or removed, or a line that starts like one says no unless the edit is in its text behind the mark. Looks at the edit only, never at the whole note.
+ */
+fun foldMarkersSurviveEdit(before: CharSequence, after: CharSequence, start: Int, deleted: Int, inserted: Int): Boolean {
+    if (start < 0 || deleted < 0 || inserted < 0 || deleted > 40 || inserted > 40) return false
+    if (start + deleted > before.length || start + inserted > after.length) return false
+    for (index in 0 until deleted) {
+        val ch = before[start + index]
+        if (ch == '\n' || ch == '\r' || ch in FOLD_RISK_CHARS) return false
+    }
+    for (index in 0 until inserted) {
+        val ch = after[start + index]
+        if (ch == '\n' || ch == '\r' || ch in FOLD_RISK_CHARS) return false
+    }
+    var lineStart = start
+    var steps = 0
+    while (lineStart > 0 && after[lineStart - 1] != '\n') {
+        lineStart -= 1
+        steps += 1
+        if (steps > 400) return false
+    }
+    var first = lineStart
+    while (first < after.length && after[first] != '\n' && after[first].isWhitespace()) first += 1
+    if (first >= after.length || after[first] == '\n' || after[first] !in FOLD_RISK_CHARS) return true
+    // A heading, list or table line: only text typed after its mark and the space behind it leaves the gutter alone.
+    var markEnd = first
+    while (markEnd < after.length && after[markEnd] in FOLD_RISK_CHARS) markEnd += 1
+    return markEnd < after.length && (after[markEnd] == ' ' || after[markEnd] == '\t') && start > markEnd
+}

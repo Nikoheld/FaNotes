@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.desk
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -162,5 +163,28 @@ class NoteOutlineTest {
         assertEquals("▸", glyphs[0])
         assertEquals("", glyphs[1])
         assertEquals("▾", glyphs[2])
+    }
+
+    @Test
+    fun aPlainWordInOneLineKeepsTheFoldGutterButHeadingsAndNewLinesDoNot() {
+        val note = "# Titel\ntext\nmehr Text hier\n## Zwei\nende"
+        val at = note.indexOf("Text")
+        fun typed(insert: String, deleted: Int = 0) = note.substring(0, at) + insert + note.substring(at + deleted)
+        assertTrue(foldMarkersSurviveEdit(note, typed("e", 4), at, 4, 1))
+        assertTrue(foldMarkersSurviveEdit(note, typed("x"), at, 0, 1))
+        assertTrue(foldMarkersSurviveEdit(note, typed("", 1), at, 1, 0))
+        assertFalse(foldMarkersSurviveEdit(note, typed("\n"), at, 0, 1))
+        assertFalse(foldMarkersSurviveEdit(note, typed("#"), at, 0, 1))
+        assertFalse(foldMarkersSurviveEdit(note, typed("-"), at, 0, 1))
+        // A letter typed in the text of a heading keeps the gutter; one typed in or next to its mark does not.
+        val title = note.indexOf("Titel")
+        assertTrue(foldMarkersSurviveEdit(note, note.substring(0, title + 2) + "x" + note.substring(title + 2), title + 2, 0, 1))
+        assertFalse(foldMarkersSurviveEdit(note, note.substring(0, 1) + "x" + note.substring(1), 1, 0, 1))
+        // Removing the line break between two lines.
+        val nl = note.indexOf('\n')
+        assertFalse(foldMarkersSurviveEdit(note, note.removeRange(nl, nl + 1), nl, 1, 0))
+        assertFalse(foldMarkersSurviveEdit(note, note, 0, 100, 0))
+        // Typing at the very end of a note that ends in a line break.
+        assertTrue(foldMarkersSurviveEdit("# A\ntext\n", "# A\ntext\na", 9, 0, 1))
     }
 }
