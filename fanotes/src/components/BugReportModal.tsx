@@ -1,5 +1,6 @@
+import { useModalFocus } from '../lib/useModalFocus'
 import { Bug, LoaderCircle, Send, X } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { diagnosticLog, submitBugReport } from '../lib/bugReport'
 
 type BugReportModalProps = {
@@ -10,6 +11,8 @@ type BugReportModalProps = {
 }
 
 export function BugReportModal({ version, platform, onClose, onSent }: BugReportModalProps) {
+  const dialogRef = useRef<HTMLElement>(null)
+  useModalFocus(dialogRef, { onEscape: onClose })
   const [description, setDescription] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -41,7 +44,7 @@ export function BugReportModal({ version, platform, onClose, onSent }: BugReport
 
   return (
     <div className="modal-backdrop" onPointerDown={onClose}>
-      <section className="settings-modal bug-report-modal" role="dialog" aria-modal="true" aria-label="Fehler melden" onPointerDown={(event) => event.stopPropagation()}>
+      <section ref={dialogRef} className="settings-modal bug-report-modal" role="dialog" aria-modal="true" aria-label="Fehler melden" onPointerDown={(event) => event.stopPropagation()}>
         <header className="settings-header">
           <div className="settings-heading">
             <Bug size={18} />

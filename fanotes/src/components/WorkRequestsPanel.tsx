@@ -1,3 +1,4 @@
+import { useModalFocus } from '../lib/useModalFocus'
 import { Bug, Camera, Check, ExternalLink, Lightbulb, LoaderCircle, MessageSquare, Send, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { diagnosticLog } from '../lib/bugReport'
@@ -24,6 +25,8 @@ function StatusChip({ request }: { request: WorkRequest }) {
 }
 
 export function WorkRequestsPanel({ client, version, platform, onClose, onSent }: Props) {
+  const dialogRef = useRef<HTMLElement>(null)
+  useModalFocus(dialogRef)
   const [tab, setTab] = useState<'new' | 'mine'>('new')
   const [hidden, setHidden] = useState(false)
   const [kind, setKind] = useState<WorkRequestKind>('bug')
@@ -75,7 +78,7 @@ export function WorkRequestsPanel({ client, version, platform, onClose, onSent }
 
   return (
     <div className="modal-backdrop" onPointerDown={onClose} style={hidden ? { visibility: 'hidden' } : undefined}>
-      <section className="settings-modal bug-report-modal work-requests-modal" role="dialog" aria-modal="true" aria-label="Fehler & Wünsche" onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}>
+      <section ref={dialogRef} className="settings-modal bug-report-modal work-requests-modal" role="dialog" aria-modal="true" aria-label="Fehler & Wünsche" onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}>
         <header className="settings-header">
           <div className="settings-heading">
             <Bug size={18} />

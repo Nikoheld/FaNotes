@@ -150,7 +150,7 @@ const act = async (name, run, settleMs = 1400) => {
 
 const tree = (text) => page.locator('[role=treeitem]', { hasText: text }).first()
 const openTreeItem = (text) => async () => { await tree(text).click({ timeout: 8000 }) }
-const closeTab = () => async () => { await page.locator('.note-tab-main[aria-selected="true"] + .tab-close').first().click({ timeout: 8000 }) }
+const closeTab = () => async () => { await page.locator('.note-tab-main[aria-current="true"] + .tab-close').first().click({ timeout: 8000 }) }
 const ribbon = (label) => async () => { await page.locator(`button[aria-label="${label}"]`).first().click({ timeout: 8000 }) }
 
 // --- QA-036: click latency ---------------------------------------------------
@@ -211,7 +211,7 @@ await snapshot('1-baseline')
 await tree('Lang 50000').click({ timeout: 8000 }).catch(() => {})
 await sleep(2500)
 await sample('50,000-line note open')
-await page.locator('.note-tab-main[aria-selected="true"] + .tab-close').first().click({ timeout: 4000 }).catch(() => {})
+await page.locator('.note-tab-main[aria-current="true"] + .tab-close').first().click({ timeout: 4000 }).catch(() => {})
 await sleep(800)
 const noteNames = await page.evaluate(() => [...document.querySelectorAll("[role=treeitem]")].map((el) => el.textContent.trim()).filter((text) => /^(Notiz|Nötiz)/.test(text)))
 let peakHeap = 0
@@ -219,7 +219,7 @@ for (let round = 0; round < 3; round += 1) {
   for (const label of ['Klein 5 Seiten', 'Mittel 40 Seiten', 'Gross 250 Seiten', 'Gescannt']) {
     await tree(label).click({ timeout: 8000 }).catch(() => {})
     await sleep(1200)
-    await page.locator('.note-tab-main[aria-selected="true"] + .tab-close').first().click({ timeout: 4000 }).catch(() => {})
+    await page.locator('.note-tab-main[aria-current="true"] + .tab-close').first().click({ timeout: 4000 }).catch(() => {})
     await sleep(300)
   }
 }

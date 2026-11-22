@@ -37,6 +37,7 @@
     "check:editor-perf": "node scripts/check-editor-perf.mjs",
     "check:famd": "node scripts/check-famd.cjs && node scripts/check-famd-v2.cjs && node scripts/check-famd-open.cjs",
     "check:famd-v2": "node scripts/check-famd-v2.cjs",
+    "check:a11y": "node scripts/check-a11y.mjs",
     "check:idle-wakeups": "node scripts/check-idle-wakeups.mjs",
     "check:desktop-latency": "node scripts/check-desktop-latency.mjs",
     "check:pdf-side-pages": "node scripts/check-pdf-side-pages.mjs",

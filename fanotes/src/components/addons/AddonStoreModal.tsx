@@ -1,3 +1,4 @@
+import { useModalFocus } from '../../lib/useModalFocus'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { ADDON_CATEGORIES, ADDON_PERMISSION_LABELS, type AddonManifest, type AddonPermission } from '../../lib/addons/manifest'
 import { addonIndexCache } from '../../lib/addons/indexCache'
@@ -122,6 +123,7 @@ export function AddonStoreModal({ open, onClose, runtime, runtimeState, source, 
   const cache = useSyncExternalStore(addonIndexCache.subscribe, addonIndexCache.getState, addonIndexCache.getState)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLElement>(null)
+  useModalFocus(modalRef, { active: open })
 
   useEffect(() => { setSourceDraft(sourceText) }, [sourceText])
 

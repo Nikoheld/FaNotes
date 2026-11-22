@@ -1,3 +1,4 @@
+import { useModalFocus } from '../lib/useModalFocus'
 import { uiText } from '../i18n'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, FolderPlus, ImageIcon, LoaderCircle, NotebookTabs, PenLine, X } from 'lucide-react'
@@ -24,6 +25,8 @@ const safeFolderName = (value: string) => value
   .slice(0, 120)
 
 export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
+  const dialogRef = useRef<HTMLElement>(null)
+  useModalFocus(dialogRef)
   const [stage, setStage] = useState<Stage>('opening')
   const [scan, setScan] = useState<OneNoteScan | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -128,7 +131,7 @@ export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
 
   return (
     <div className="modal-backdrop onenote-dialog-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget && stage !== 'importing') close() }}>
-      <section className="onenote-dialog" role="dialog" aria-modal="true" aria-label="Microsoft OneNote importieren">
+      <section ref={dialogRef} className="onenote-dialog" role="dialog" aria-modal="true" aria-label="Microsoft OneNote importieren">
         <header>
           <div>
             <span><NotebookTabs size={19} /></span>

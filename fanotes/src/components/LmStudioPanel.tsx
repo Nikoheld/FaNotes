@@ -1,3 +1,4 @@
+import { useModalFocus } from '../lib/useModalFocus'
 import {
   BookOpenCheck,
   Bot,
@@ -15,7 +16,7 @@ import {
   WandSparkles,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode, useRef } from 'react'
 import type { AppSettings, LmStudioAction, LmStudioModel, LmStudioTransformResult } from '../types'
 import { getUiLocale } from '../i18n'
 import { MarkdownPreview } from './MarkdownPreview'
@@ -116,6 +117,8 @@ export function LmStudioPanel({
   onApply: (markdown: string, relativePath: string) => void
   onClose: () => void
 }) {
+  const dialogRef = useRef<HTMLElement>(null)
+  useModalFocus(dialogRef)
   const [baseUrl, setBaseUrl] = useState(settings.lmStudioBaseUrl)
   const [apiToken, setApiToken] = useState(settings.lmStudioApiToken)
   const [models, setModels] = useState<LmStudioModel[]>([])
@@ -212,7 +215,7 @@ export function LmStudioPanel({
 
   return (
     <div className="modal-backdrop lm-studio-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget && !running) onClose() }}>
-      <section className="lm-studio-panel" role="dialog" aria-modal="true" aria-labelledby="lm-studio-title">
+      <section ref={dialogRef} className="lm-studio-panel" role="dialog" aria-modal="true" aria-labelledby="lm-studio-title">
         <header className="lm-studio-header">
           <span className="lm-studio-mark"><Bot size={22} /></span>
           <div>
@@ -246,7 +249,7 @@ export function LmStudioPanel({
             </section>
           </aside>
 
-          <main className="lm-studio-preview">
+          <div className="lm-studio-preview" role="region" aria-label="Vorschau">
             <div className="lm-preview-toolbar">
               <div><span className="eyebrow">3 · Prüfen</span><strong>{result ? 'KI-Ergebnis' : note ? note.title : 'Keine Notiz geöffnet'}</strong></div>
               {result && <div className="segmented"><button type="button" className={previewMode === 'rendered' ? 'active' : ''} onClick={() => setPreviewMode('rendered')}>Schön</button><button type="button" className={previewMode === 'source' ? 'active' : ''} onClick={() => setPreviewMode('source')}>Markdown</button></div>}
@@ -267,7 +270,7 @@ export function LmStudioPanel({
                   : <button type="button" className="primary-button lm-run" onClick={() => void run()} disabled={running || modelsLoading || !note || !model || !actions.size}>{running ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />} Vorschau erzeugen</button>}
               </div>
             </footer>
-          </main>
+          </div>
         </div>
       </section>
     </div>

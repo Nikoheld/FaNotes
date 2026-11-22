@@ -41,7 +41,8 @@ import {
   X,
 } from 'lucide-react'
 import { colorSwatchName } from '../lib/colorNames'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useModalFocus } from '../lib/useModalFocus'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { getUiLocale, uiText } from '../i18n'
 import {
   generateHomeworkApiChannelId,
@@ -373,6 +374,17 @@ const updateStatusText = (state: UpdateState, isWeb = false) => {
   return 'Automatische Updateprüfung ist bereit'
 }
 
+// Names every bare form control of a row after the row title, so selects, sliders and colour pickers are
+// not announced as unlabeled fields. Controls that already carry a label, id or wrapping <label> are kept.
+const labelRowControls = (container: HTMLElement | null, titleId: string) => {
+  if (!container) return
+  for (const control of container.querySelectorAll<HTMLElement>('input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]), select, textarea')) {
+    if (control.hasAttribute('aria-label') || control.hasAttribute('aria-labelledby') || control.closest('label')) continue
+    if (control.id && container.ownerDocument.querySelector(`label[for="${CSS.escape(control.id)}"]`)) continue
+    control.setAttribute('aria-labelledby', titleId)
+  }
+}
+
 const SettingRow = ({
   title,
   description,
@@ -381,15 +393,18 @@ const SettingRow = ({
   title: string
   description?: string
   children: React.ReactNode
-}) => (
-  <div className="setting-row">
-    <div className="setting-copy">
-      <span>{title}</span>
-      {description && <small>{description}</small>}
+}) => {
+  const titleId = useId()
+  return (
+    <div className="setting-row">
+      <div className="setting-copy">
+        <span id={titleId}>{title}</span>
+        {description && <small>{description}</small>}
+      </div>
+      <div className="setting-control" ref={(node) => labelRowControls(node, titleId)}>{children}</div>
     </div>
-    <div className="setting-control">{children}</div>
-  </div>
-)
+  )
+}
 
 const Toggle = ({ checked, onChange, label, disabled = false }: { checked: boolean; onChange: (value: boolean) => void; label: string; disabled?: boolean }) => (
   <button
@@ -499,6 +514,7 @@ export function SettingsModal({
   const profileOrigin = useMemo(() => resolveProfileOrigin(), [])
   const trainingInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLElement>(null)
+  useModalFocus(modalRef)
   const section = useMemo(() => {
     const found = SECTIONS.find((candidate) => candidate.id === active)!
     return {
@@ -741,7 +757,7 @@ export function SettingsModal({
   return (
     <div className="modal-backdrop settings-backdrop" role="presentation" onPointerDown={onClose}>
       <section ref={modalRef} className="settings-modal" role="dialog" aria-modal="true" aria-label="Einstellungen" onPointerDown={(event) => event.stopPropagation()}>
-        <aside className="settings-nav">
+        <aside className="settings-nav" aria-label="Einstellungsnavigation">
           <div className="settings-brand">
             <span className="brand-glyph"><Settings2 size={14} /></span>
             <div><strong>Einstellungen</strong><small>FaNotes an dich anpassen</small></div>
