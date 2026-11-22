@@ -2668,6 +2668,11 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .ribbon-status button:hover { background: var(--panel-hover); color: var(--text); }
 .ribbon-status .save-status { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; }
 .ribbon-status .update-ready-button { display: inline-flex; align-items: center; gap: 4px; padding-inline: 6px; color: var(--accent-readable); background: rgba(var(--accent-rgb), .1); }
+.ribbon-status .update-ready-button.is-failed { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.update-rollback-note { display: grid; gap: 4px; margin: -5px 0 13px; }
+.update-rollback-note > .setting-import-status { margin: 0; align-items: flex-start; }
+.update-rollback-note small { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+.update-actions .update-later-note { color: var(--text-muted); font-size: 12px; }
 
 /* CodeMirror and Markdown */
 .markdown-editor { width: 100%; height: 100%; overflow: hidden; }
