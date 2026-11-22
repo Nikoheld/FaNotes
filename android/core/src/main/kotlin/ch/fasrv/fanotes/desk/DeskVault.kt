@@ -757,11 +757,12 @@ fun monthEventLabel(event: CalendarEvent): String {
 fun agendaPlace(event: CalendarEvent): String? = event.location.trim().takeIf { it.isNotEmpty() }
 
 fun calendarHeading(view: String, anchor: LocalDate): String {
-    val german = Locale.GERMAN
+    val german = calendarLocale()
+    val english = german == Locale.ENGLISH
     if (view == "month") return anchor.format(DateTimeFormatter.ofPattern("MMMM yyyy", german))
-    if (view == "day") return anchor.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", german))
+    if (view == "day") return anchor.format(DateTimeFormatter.ofPattern(if (english) "EEEE, d MMMM" else "EEEE, d. MMMM", german))
     val days = calendarRange(view, anchor)
-    val format = DateTimeFormatter.ofPattern("d. MMM", german)
+    val format = DateTimeFormatter.ofPattern(if (english) "d MMM" else "d. MMM", german)
     return "${days.first().format(format)} – ${days.last().format(format)}"
 }
 
@@ -803,7 +804,10 @@ fun calendarRangeIsEmpty(view: String, occupiedDays: Int): Boolean = view != "mo
 
 private val CAL_WEEKDAYS = listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
 
-fun calendarWeekdayShort(date: LocalDate): String = CAL_WEEKDAYS[date.dayOfWeek.value - 1]
+private val CAL_WEEKDAYS_EN = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+fun calendarWeekdayShort(date: LocalDate): String =
+    (if (calendarLocale() == Locale.ENGLISH) CAL_WEEKDAYS_EN else CAL_WEEKDAYS)[date.dayOfWeek.value - 1]
 
 /** Desktop `.cal-hour-line` / `.cal-hours`: each of the 24 rows is 48px. */
 const val CAL_HOUR_DP = 48

@@ -4145,9 +4145,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         if (pruned.tabs.isEmpty()) return false
         pinnedTabs.value = pruned.pinned.toSet()
         openTabs.value = sortPinnedFirst(pruned.tabs.map { DeskTab(it, it in pinnedTabs.value) }).map { it.path }
-        noteTrail.value = NoteTrail()
         closedTabs.value = emptyList()
         val active = pruned.active ?: pruned.tabs.first()
+        // Seed the history with the other tabs so "Zurück" is usable right after a restart.
+        noteTrail.value = ch.fasrv.fanotes.desk.restoredNoteTrail(openTabs.value, active)
         if (pruned.split != null) splitPath.value = pruned.split
         openPath(active, force = true)
         pruned.split?.let { loadSplit(it) }

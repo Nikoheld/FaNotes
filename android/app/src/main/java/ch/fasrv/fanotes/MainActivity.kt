@@ -1048,6 +1048,7 @@ fun FaNotesScreen(
                     searchQuery = model.searchQuery.collectAsStateWithLifecycle().value,
                     onSearchQuery = { model.searchVaultText(it) },
                     onOpenSearch = { model.showDestination("search") },
+                    searchOpen = destination == "search",
                     selected = open?.path,
                     splitPath = split,
                     vaultLabel = vaultLabel,
@@ -1263,7 +1264,10 @@ fun FaNotesScreen(
             SearchScreen(
                 model,
                 { model.openPath(it); model.showDestination("notes") },
-                { model.showDestination("notes") },
+                {
+                    model.searchVaultText("")
+                    model.showDestination("notes")
+                },
                 Modifier
                     .align(Alignment.CenterStart)
                     .width((chrome.sidebarDp ?: ch.fasrv.fanotes.desk.searchPanelWidthDp(desk["sidebar-width"])).dp)
@@ -1694,7 +1698,16 @@ private fun SidebarLabelButton(label: String, onClick: () -> Unit, wide: Boolean
 }
 
 @Composable
-private fun SidebarSearchField(query: String, onQuery: (String) -> Unit, onFocus: () -> Unit) {
+private fun SidebarSearchField(query: String, onQuery: (String) -> Unit, onFocus: () -> Unit, panelOpen: Boolean) {
+    // Once the results panel is closed the field must not keep the cursor or the soft keyboard.
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    androidx.compose.runtime.LaunchedEffect(panelOpen) {
+        if (!panelOpen) {
+            focusManager.clearFocus()
+            keyboard?.hide()
+        }
+    }
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     var focused by remember { mutableStateOf(false) }
@@ -1802,6 +1815,7 @@ private fun VaultPane(
     searchQuery: String = "",
     onSearchQuery: (String) -> Unit = {},
     onOpenSearch: () -> Unit = {},
+    searchOpen: Boolean = false,
     selected: String?,
     splitPath: String? = null,
     vaultLabel: String,
@@ -1874,19 +1888,28 @@ private fun VaultPane(
                 letterSpacing = ch.fasrv.fanotes.desk.SIDEBAR_VAULT_TRACKING.em,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_GAP_DP.dp)) {
-                SidebarIconButton("Neue Notiz", onCreateNote) {
-                    Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_ICON_DP.dp))
-                }
-                SidebarIconButton("Neuer Ordner", onCreateFolder) {
-                    Icon(Icons.Filled.CreateNewFolder, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_ICON_DP.dp))
-                }
-                SidebarLabelButton("PDF", onImportPdf, wide = true)
                 SidebarIconButton("Seitenleiste einklappen", onCollapse) {
                     Icon(Icons.Filled.Menu, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_ICON_DP.dp))
                 }
             }
         }
-        SidebarSearchField(searchQuery, onSearchQuery, onOpenSearch)
+        // The vault title keeps the whole row; the creation actions sit on their own line so the name is not truncated.
+        Row(
+            Modifier
+                .padding(horizontal = ch.fasrv.fanotes.desk.SIDEBAR_HEADER_PAD_X_DP.dp)
+                .padding(bottom = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_MARGIN_BOTTOM_DP.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_GAP_DP.dp),
+        ) {
+            SidebarIconButton("Neue Notiz", onCreateNote) {
+                Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_ICON_DP.dp))
+            }
+            SidebarIconButton("Neuer Ordner", onCreateFolder) {
+                Icon(Icons.Filled.CreateNewFolder, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_ICON_DP.dp))
+            }
+            SidebarLabelButton("PDF", onImportPdf, wide = true)
+        }
+        SidebarSearchField(searchQuery, onSearchQuery, onOpenSearch, searchOpen)
         Row(
             Modifier
                 .padding(horizontal = ch.fasrv.fanotes.desk.SIDEBAR_HEADER_PAD_X_DP.dp)
@@ -2002,6 +2025,7 @@ private fun VaultPane(
                 }
                 .background(if (dropDest == "") MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent),
             userScrollEnabled = dragPath == null,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 12.dp),
         ) {
             items(tree, key = { it.path }) { node ->
                 NoteRow(
@@ -2043,8 +2067,19 @@ private fun VaultPane(
                 )
             }
         }
-        TextButton(onClick = onOpenVault) { Text(ui("Vault-Ordner öffnen")) }
-        TextButton(onClick = onPrivateVault) { Text(ui("Tablet-Vault verwenden")) }
+        FlowRow(
+            Modifier.fillMaxWidth().padding(horizontal = ch.fasrv.fanotes.desk.SIDEBAR_HEADER_PAD_X_DP.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf("Vault-Ordner öffnen" to onOpenVault, "Tablet-Vault verwenden" to onPrivateVault).forEach { (label, action) ->
+                androidx.compose.material3.OutlinedButton(
+                    onClick = action,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    modifier = Modifier.heightIn(min = 36.dp),
+                ) { Text(ui(label), fontSize = 12.sp, maxLines = 1) }
+            }
+        }
         Box(
             Modifier
                 .fillMaxWidth()
@@ -2596,7 +2631,7 @@ private fun NoteRow(
             horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.TREE_EMPTY_GAP_DP.dp),
         ) {
             Text(
-                "Leer",
+                ui("Leer"),
                 fontSize = 12.sp,
                 fontStyle = FontStyle.Italic,
                 color = LocalStatusInk.current.muted,
@@ -2615,7 +2650,7 @@ private fun NoteRow(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    "Unterordner anlegen",
+                    ui("Unterordner anlegen"),
                     fontSize = 12.sp,
                     fontStyle = FontStyle.Normal,
                     color = if (actionActive) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
@@ -3078,7 +3113,7 @@ private fun EmptyEditor(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(13.dp), tint = ink.muted)
-                Text(ch.fasrv.fanotes.desk.PLACEHOLDER_COMMAND, fontSize = 12.sp, color = ink.muted)
+                Text(ui(if (hasHardwareKeyboard()) ch.fasrv.fanotes.desk.PLACEHOLDER_COMMAND else "Alle Aktionen"), fontSize = 12.sp, color = ink.muted)
             }
             if (recent.isNotEmpty()) {
                 Text(
