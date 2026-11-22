@@ -117,6 +117,7 @@ internal class PenToolbarKit(private val context: Context) {
         }
         box.background = rounded(if (active) colors.active else android.graphics.Color.TRANSPARENT, 10)
         box.contentDescription = ChromeText.ui(description)
+        if (!showLabel) box.tooltipText = ChromeText.ui(description)
         box.isSelected = active
         box.isEnabled = enabled
         box.alpha = if (enabled) 1f else ch.fasrv.fanotes.desk.FORMAT_DISABLED_ALPHA

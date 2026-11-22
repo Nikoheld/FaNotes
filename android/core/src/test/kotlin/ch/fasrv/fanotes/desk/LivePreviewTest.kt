@@ -386,4 +386,44 @@ class LivePreviewTest {
         assertEquals(pad, previewReadingListPrefix(nestedTask.text))
         assertEquals("drei", nestedTask.text.substring(nestedTask.inlines.single().start, nestedTask.inlines.single().end))
     }
+
+    @Test
+    fun aWholeLineImageIsDrawnUntilTheCaretEntersIt() {
+        val note = "Text\n![Zelle](Bilder/zelle.png)\nEnde"
+        val away = livePreviewMarks(note, 0, 0).single { it.kind == LiveKind.IMAGE }
+        assertEquals("Zelle", away.label)
+        assertEquals("Bilder/zelle.png", away.body)
+        assertEquals(5, away.start)
+        assertTrue(livePreviewMarks(note, 10, 10).none { it.kind == LiveKind.IMAGE })
+        assertTrue(livePreviewMarks("Text ![a](b.png) mehr", 0, 0).none { it.kind == LiveKind.IMAGE })
+    }
+
+    @Test
+    fun aTableIsDrawnAsOneBlockUntilTheCaretEntersIt() {
+        val note = "Vor\n| Name | Zahl |\n|---|---:|\n| a | 1 |\n| b | 2 |\nNach"
+        val away = livePreviewMarks(note, 0, 0)
+        val block = away.single { it.kind == LiveKind.TABLE_BLOCK }
+        assertEquals(listOf("Name\u001fZahl", "a\u001f1", "b\u001f2"), block.body.split('\n'))
+        assertTrue(away.none { it.kind == LiveKind.TABLE_ROW || it.kind == LiveKind.TABLE_RULE })
+        val inside = livePreviewMarks(note, note.indexOf("| a"), note.indexOf("| a"))
+        assertTrue(inside.none { it.kind == LiveKind.TABLE_BLOCK })
+        assertTrue(inside.any { it.kind == LiveKind.TABLE_ROW })
+        assertTrue(livePreviewMarks("| nur | eine |", 0, 0).none { it.kind == LiveKind.TABLE_BLOCK })
+    }
+
+    @Test
+    fun aWindowOnlyBuildsTheLinesItTouches() {
+        val note = buildString {
+            for (i in 1..400) append(if (i % 9 == 0) "- Punkt **$i**\n" else "Zeile $i mit _Text_\n")
+            append("| a | b |\n|---|---|\n| 1 | 2 |\n")
+        }
+        val caret = note.length / 2
+        val window = (caret - 300)..(caret + 300)
+        val touching = { mark: LiveMark -> mark.start <= window.last && mark.end >= window.first }
+        val full = livePreviewMarks(note, caret, caret)
+        val windowed = livePreviewMarks(note, caret, caret, listOf(window))
+        assertTrue(windowed.size < full.size)
+        assertEquals(full.filter(touching), windowed.filter(touching))
+        assertTrue(windowed.any { it.kind == LiveKind.TABLE_BLOCK })
+    }
 }

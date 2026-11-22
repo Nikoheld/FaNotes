@@ -2,6 +2,8 @@ package ch.fasrv.fanotes.desk
 
 import ch.fasrv.fanotes.text.PaperKind
 import ch.fasrv.fanotes.text.paperImageCaption
+import ch.fasrv.fanotes.text.paperImageLine
+import ch.fasrv.fanotes.text.paperLines
 import ch.fasrv.fanotes.text.paperImageSource
 import ch.fasrv.fanotes.text.tableAlignWire
 import ch.fasrv.fanotes.text.tableRows
@@ -39,6 +41,10 @@ enum class LiveKind {
     TABLE_ROW,
     TABLE_RULE,
     RULE,
+    /** A whole-line image drawn in place; [LiveMark.label] is the caption, [LiveMark.body] the source. */
+    IMAGE,
+    /** A table drawn as a grid; [LiveMark.body] holds rows split by `\n` and cells by `\u001f`, [LiveMark.label] the alignments. */
+    TABLE_BLOCK,
 }
 
 data class LiveMark(
@@ -152,7 +158,12 @@ data class DetailsBlock(
     val open: Boolean,
 )
 
-fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List<LiveMark> {
+/**
+ * Marks for the live preview. With [windows] (character ranges) the per-line marks are built only for lines that
+ * touch a window; block marks (details, study blocks, fences, math, tables) are always found for the whole text,
+ * because a block can start outside the window.
+ */
+fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int, windows: List<IntRange>? = null): List<LiveMark> {
     if (text.isEmpty()) return emptyList()
     val from = selectionStart.coerceIn(0, text.length)
     val to = selectionEnd.coerceIn(0, text.length)
@@ -220,8 +231,30 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
             hidden += number
         }
     }
+    for (block in tableBlocks(lines)) {
+        if ((block.first..block.last).any { it in hidden }) continue
+        if (to >= lines[block.first - 1].from && from <= lines[block.last - 1].to) continue
+        val host = lines[block.first - 1]
+        val source = (block.first..block.last).joinToString("\n") { lines[it - 1].text }
+        val table = paperLines(source).firstOrNull { it.kind == PaperKind.TABLE } ?: continue
+        val rows = tableRows(table.text).map { cells -> styledTableRow(cells).first }
+        marks += LiveMark(host.from, host.to, LiveKind.TABLE_BLOCK, tableAlignWire(table.text), rows.joinToString("\n"))
+        hidden += block.first
+        for (number in (block.first + 1)..block.last) {
+            concealLine(marks, text, lines[number - 1])
+            hidden += number
+        }
+    }
     for (line in lines) {
         if (line.number in hidden) continue
+        if (windows != null && windows.none { line.from <= it.last && line.to >= it.first }) continue
+        if (line.number !in active && line.text.contains("![")) {
+            val image = paperImageLine(line.text)
+            if (image != null && line.to > line.from) {
+                marks += LiveMark(line.from, line.to, LiveKind.IMAGE, image.first, image.second)
+                continue
+            }
+        }
         markLine(marks, line.text, line.from, line.number in active)
     }
     return marks
@@ -678,6 +711,22 @@ fun findDetailsBlocks(text: String): List<DetailsBlock> {
 
 private fun selectionEditsDetails(block: DetailsBlock, from: Int, to: Int): Boolean =
     if (from == to) from > block.from && from < block.to else from < block.to && to > block.from
+
+private fun isTableLine(text: String): Boolean = text.contains('|') && TABLE_LINE.matches(text)
+
+/** Runs of table lines (header, rule, rows) as 1-based line ranges; a run needs a header and a rule line. */
+private fun tableBlocks(lines: List<DocLine>): List<IntRange> {
+    val out = ArrayList<IntRange>()
+    var index = 0
+    while (index < lines.size) {
+        if (!isTableLine(lines[index].text)) { index += 1; continue }
+        var end = index
+        while (end + 1 < lines.size && isTableLine(lines[end + 1].text)) end += 1
+        if (end > index && TABLE_RULE.matches(lines[index + 1].text)) out += (index + 1)..(end + 1)
+        index = end + 1
+    }
+    return out
+}
 
 private fun concealLine(marks: MutableList<LiveMark>, text: String, line: DocLine) {
     val spanEnd = if (line.to < text.length && text[line.to] == '\n') line.to + 1 else line.to

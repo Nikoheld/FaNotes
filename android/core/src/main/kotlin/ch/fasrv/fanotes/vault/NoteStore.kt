@@ -1,7 +1,11 @@
 package ch.fasrv.fanotes.vault
 
 import ch.fasrv.fanotes.famd.FAMD_EXTENSION
+import ch.fasrv.fanotes.famd.applyLineEnding
 import ch.fasrv.fanotes.famd.attachNoteInk
+import ch.fasrv.fanotes.famd.detectLineEnding
+import ch.fasrv.fanotes.famd.payloadIsStatsOnly
+import ch.fasrv.fanotes.famd.toLf
 import ch.fasrv.fanotes.famd.safeWorksheetSource
 import ch.fasrv.fanotes.famd.worksheetRecordPath
 import ch.fasrv.fanotes.famd.companionPath
@@ -37,6 +41,13 @@ import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.name
 import kotlin.io.path.relativeTo
+
+/**
+ * The note text of a Markdown file. A file with an embedded FaNotes payload is cut at it, as before; a plain
+ * file is kept as it is, minus the one final newline every saved note ends with.
+ */
+private fun plainMarkdownBody(text: String): String =
+    if (text.contains("fanotes-famd")) stripFamdPayload(text) else text.removeSuffix("\n").removeSuffix("\r")
 
 private fun famdHeaderStored(text: String) = text.contains("fanotes-famd:v1") || text.contains("fanotes-famd:v2")
 
@@ -185,8 +196,8 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
             null
         }
         val markdown = when {
-            mdBytes != null -> stripFamdPayload(mdBytes.decodeToString())
-            famd != null -> famd.markdown
+            mdBytes != null -> toLf(plainMarkdownBody(mdBytes.decodeToString()))
+            famd != null -> toLf(famd.markdown)
             else -> ""
         }
         val payload = famd?.payload ?: embedded?.payload ?: emptyFamdPayload(isoNow())
@@ -217,6 +228,14 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         now: String = isoNow(),
         textFieldBase: List<ch.fasrv.fanotes.desk.NoteTextField>? = null,
     ): OpenNote {
+        val famdPathForPlain = if (note.path.endsWith(FAMD_EXTENSION)) note.path else companionPath(note.path, FAMD_EXTENSION)
+        // A plain Markdown note that never had ink stays a plain file: no marker, no sidecar, no asset.
+        val plain = note.kind == NoteKind.MARKDOWN &&
+            !note.path.endsWith(FAMD_EXTENSION) &&
+            noteInkId(markdown) == null &&
+            !io.exists(famdPathForPlain) &&
+            payloadIsStatsOnly(note.payload, markdown, document.strokes.isNotEmpty(), document.paperStyle)
+        if (plain) return savePlainMarkdown(note, document, markdown, now)
         val withMarker = attachNoteInk(markdown, note.inkId)
         val ink = document.copy(title = note.title, updatedAt = now).toJson()
         val payload = (note.payload.deepCopy() as JsonValue.Obj).also { obj ->
@@ -249,12 +268,28 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         io.write(famdPath, serializeFamd(withMarker, payload, famdEncodingForSave(previousFamd)).encodeToByteArray())
         if (note.kind == NoteKind.MARKDOWN && !note.path.endsWith(FAMD_EXTENSION)) {
             val body = stripFamdPayload(withMarker)
-            val text = if (body.endsWith("\n") || body.isEmpty()) body else "$body\n"
-            io.write(note.path, text.encodeToByteArray())
+            io.write(note.path, markdownFileText(note.path, body).encodeToByteArray())
         }
         writeInkAsset(note.inkId, ink)
         onSaved(famdPath)
         return note.copy(markdown = withMarker, document = document.copy(updatedAt = now), payload = payload, worksheets = worksheetIdsFromMarkdown(withMarker))
+    }
+
+    /** The file text of a note body: a final newline, and the line ending the file on disk already has. */
+    private fun markdownFileText(path: String, body: String): String {
+        val lf = toLf(body)
+        val text = if (lf.isEmpty()) lf else "$lf\n"
+        val existing = io.read(path)?.decodeToString()
+        return applyLineEnding(text, if (existing != null) detectLineEnding(existing) else "lf")
+    }
+
+    private fun savePlainMarkdown(note: OpenNote, document: InkDocument, markdown: String, now: String): OpenNote {
+        val body = if (markdown.contains("fanotes-famd")) stripFamdPayload(markdown) else markdown
+        val previous = io.read(note.path)?.decodeToString()
+        if (previous != null) runCatching { recordNoteHistory(io, note.path, previous, companion = null) }
+        io.write(note.path, markdownFileText(note.path, body).encodeToByteArray())
+        onSaved(note.path)
+        return note.copy(markdown = markdown, document = document.copy(updatedAt = now))
     }
 
     private fun mergeTextFieldsFromDisk(payload: JsonValue.Obj, previousFamd: String, base: List<ch.fasrv.fanotes.desk.NoteTextField>, now: String) {
@@ -280,7 +315,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         if (io.exists(path) || io.exists(companionPath(path, FAMD_EXTENSION))) {
             throw IllegalStateException("A note named $name already exists")
         }
-        val body = "# $name\n\n"
+        val body = "# $name\n"
         val document = newInkDocument(name, paper, now)
         val note = OpenNote(path, NoteKind.MARKDOWN, name, body, document, emptyFamdPayload(now), emptyList(), UUID.randomUUID().toString())
         save(note, document, body, now)
@@ -295,7 +330,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         val folder = directory.trim('/')
         val stem = nextFreeLeaf(folder, safeNoteName(fileName.substringBeforeLast('.').ifBlank { "Geteilte Notiz" }), ".md")
         val path = if (folder.isEmpty()) "$stem.md" else "$folder/$stem.md"
-        val body = stripFamdPayload(text).let { if (it.isBlank()) "# $stem\n\n" else it }
+        val body = stripFamdPayload(text).let { if (it.isBlank()) "# $stem\n" else it }
         val document = newInkDocument(stem, paper, now)
         val note = OpenNote(path, NoteKind.MARKDOWN, stem, body, document, emptyFamdPayload(now), emptyList(), UUID.randomUUID().toString())
         save(note, document, body, now)
