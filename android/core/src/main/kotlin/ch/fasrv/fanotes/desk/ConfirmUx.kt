@@ -77,6 +77,7 @@ fun confirmDialogShadow(themeId: String = "light"): ConfirmDialogShadow = when (
     "sepia" -> ConfirmDialogShadow(0, 12, 40, 0.08f, 55, 48, 36)
     "midnight", "forest", "aurora" -> ConfirmDialogShadow(0, 16, 48, 0.32f, 0, 0, 0)
     "dark" -> ConfirmDialogShadow(0, 16, 48, 0.28f, 0, 0, 0)
+    "oled" -> ConfirmDialogShadow(0, 0, 0, 0f, 0, 0, 0)
     else -> ConfirmDialogShadow(
         CONFIRM_SHADOW_X_DP,
         CONFIRM_SHADOW_Y_DP,
