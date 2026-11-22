@@ -62,6 +62,7 @@ const { DEFAULT_TABLET_BUTTON_ACTIONS } = require('./tablet-buttons.cjs')
 const { sanitizeSettings: sanitizeStoredSettings } = require('./settings-sanitize.cjs')
 const diagnostics = require('./diagnostics.cjs')
 const { channelForPackagedVersion } = require('./releaseVersion.cjs')
+const { migrateBetaToStable, keepChannelMarker } = require('./channel-migration.cjs')
 const { localizeDialogOptions, localizeText, resolveLanguage } = require('./i18n.cjs')
 const { installSecurityHeaders } = require('./content-security-policy.cjs')
 const {
@@ -486,6 +487,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   installUpdatesOnQuit: true,
   backgroundUpdates: true,
   updateChannel: channelForPackagedVersion(app.getVersion()),
+  channelAutoStableDoneAt: '',
   memoryBudgetMb: 0,
   ocrThreadLimit: 0,
   desktopOcrModel: 'extended',
@@ -1531,7 +1533,10 @@ function readConfig() {
             ? decodedSettings
             : { ...decodedSettings, recognitionMode: 'auto', lastRecognitionMode: previousMode }
           const sanitized = sanitizeSettings(settingsCandidate)
-          currentSettings = diagnostics.migrateDiagnosticsSettings(applyExperimentalHandwritingGate(sanitized))
+          currentSettings = migrateBetaToStable(
+            diagnostics.migrateDiagnosticsSettings(applyExperimentalHandwritingGate(sanitized)),
+            app.getVersion(),
+          )
           applyThemeToShell(currentSettings.theme)
           if (plaintextSecretsNeedScrub) {
             plaintextSecretsNeedScrub = false
@@ -1541,6 +1546,7 @@ function readConfig() {
             currentSettings.experimentalHandwritingToTextSeenVersion
             !== sanitized.experimentalHandwritingToTextSeenVersion
             || currentSettings.diagnosticsSettingsVersion !== sanitized.diagnosticsSettingsVersion
+            || currentSettings.channelAutoStableDoneAt !== sanitized.channelAutoStableDoneAt
           ) {
             void persistConfig()
           }
@@ -1564,7 +1570,7 @@ function readConfig() {
         }
       }
       // A fresh install has no config yet: the same one-time migration gives it the "on" default.
-      currentSettings = diagnostics.migrateDiagnosticsSettings(currentSettings)
+      currentSettings = migrateBetaToStable(diagnostics.migrateDiagnosticsSettings(currentSettings), app.getVersion())
       diagnosticsService()?.applySettings(currentSettings)
     })()
   }
@@ -6235,7 +6241,7 @@ function registerIpcHandlers() {
     await ensureBootstrap()
     return queueConfigMutation(async () => {
       const previousSettings = { ...currentSettings }
-      const nextSettings = diagnostics.keepDiagnosticsVersion(sanitizeSettings(settings, previousSettings), previousSettings)
+      const nextSettings = keepChannelMarker(diagnostics.keepDiagnosticsVersion(sanitizeSettings(settings, previousSettings), previousSettings), previousSettings)
       const clearProtectedSecrets = options?.clearProtectedSecrets === true
       try {
         await persistConfig({

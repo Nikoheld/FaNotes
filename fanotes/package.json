@@ -150,6 +150,7 @@
     "check:updater-vectors": "node scripts/check-updater-vectors.mjs",
     "check:background-update": "node scripts/check-background-update.cjs",
     "check:update-scheduler": "node scripts/check-update-scheduler.cjs",
+    "check:channel-migration": "node scripts/check-channel-migration.cjs",
     "check:update-flow": "node scripts/check-update-flow.cjs",
     "check:updater-all": "node scripts/check-updater.cjs && node scripts/check-updater-vectors.mjs && node scripts/check-windows-release.cjs && node scripts/check-update-scheduler.cjs && node scripts/check-background-update.cjs && node scripts/check-update-flow.cjs",
     "version:nightly": "node scripts/nightly-version.cjs",

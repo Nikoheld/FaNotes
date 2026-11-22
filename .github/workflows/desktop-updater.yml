@@ -21,6 +21,8 @@ on:
       - 'fanotes/scripts/check-windows-release.cjs'
       - 'fanotes/scripts/check-background-update.cjs'
       - 'fanotes/scripts/check-update-scheduler.cjs'
+      - 'fanotes/scripts/check-channel-migration.cjs'
+      - 'fanotes/electron/channel-migration.cjs'
       - 'fanotes/scripts/create-delta.cjs'
       - 'fanotes/scripts/fixtures/updater/**'
       - '.github/workflows/desktop-updater.yml'
@@ -55,6 +57,7 @@ jobs:
       - run: node scripts/check-updater-vectors.mjs
       - run: node scripts/check-windows-release.cjs
       - run: node scripts/check-update-scheduler.cjs
+      - run: node scripts/check-channel-migration.cjs
       - name: Background updates (fake release server, headless Electron measured)
         run: node scripts/check-background-update.cjs
         env:

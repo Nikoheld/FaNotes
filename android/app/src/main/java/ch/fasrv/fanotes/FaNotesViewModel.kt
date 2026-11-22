@@ -3473,6 +3473,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val clearLinkRequest = MutableStateFlow(0)
     val placeLinkRequest = MutableStateFlow(0)
     val installedVersion: String = installedAppVersion(getApplication())
+
+    init {
+        ch.fasrv.fanotes.desk.migrateBetaToStable(deskSettings.value, installedVersion)?.let { migrated ->
+            deskSettings.value = migrated
+            graph.writeDesk(migrated)
+        }
+    }
     val updateLabel = MutableStateFlow("")
     val updateOffer = MutableStateFlow<ch.fasrv.fanotes.desk.AndroidUpdate?>(null)
     val updateBusy = MutableStateFlow(false)

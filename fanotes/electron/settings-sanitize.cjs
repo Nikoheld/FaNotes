@@ -83,6 +83,7 @@ const SETTINGS_SCHEMA = Object.freeze({
   installUpdatesOnQuit: { type: 'boolean' },
   backgroundUpdates: { type: 'boolean' },
   updateChannel: { type: 'enum', values: ['stable', 'beta', 'nightly'] },
+  channelAutoStableDoneAt: { type: 'string', max: 40 },
   memoryBudgetMb: { type: 'enum', values: [0, 1536, 2048, 3072, 4096, 6144, 8192] },
   ocrThreadLimit: { type: 'enum', values: [0, 1, 2, 3, 4] },
   desktopOcrModel: { type: 'enum', values: ['compact', 'extended'] },
