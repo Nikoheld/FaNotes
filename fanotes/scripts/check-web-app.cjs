@@ -218,13 +218,13 @@ void (async () => {
       if (message.method === 'Log.entryAdded' && message.params?.entry?.level === 'error') errors.push(message.params.entry.text)
     })
     await Promise.all([cdp.send('Runtime.enable'), cdp.send('Log.enable'), cdp.send('Page.enable'), cdp.send('Network.enable'), cdp.send('DOM.enable'), cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false })])
-    await waitFor(cdp, `Boolean(document.querySelector('.first-run')) && document.querySelectorAll('.first-run-profiles > button').length === 4 && document.querySelectorAll('.first-run-subjects > button').length === 11 && Boolean(document.querySelector('.first-run-continue'))`, 'Die Einrichtung')
+    await waitFor(cdp, `Boolean(document.querySelector('.first-run')) && document.querySelectorAll('.first-run-profiles > button').length === 4 && document.querySelectorAll('.first-run-subjects > button').length === ${require('../electron/onboarding.cjs').STARTER_SUBJECTS.length} && Boolean(document.querySelector('.first-run-continue'))`, 'Die Einrichtung')
     const onboarding = await cdp.evaluate(`({
       purposes: document.querySelectorAll('.first-run-profiles > button').length,
       folders: document.querySelectorAll('.first-run-subjects > button').length,
       finish: document.querySelector('.first-run-continue')?.textContent || '',
     })`)
-    if (onboarding.purposes !== 4 || onboarding.folders !== 11 || !onboarding.finish.includes('FaNotes einrichten')) throw new Error(`Das Onboarding ist unvollständig: ${JSON.stringify(onboarding)}`)
+    if (onboarding.purposes !== 4 || onboarding.folders !== require('../electron/onboarding.cjs').STARTER_SUBJECTS.length || !onboarding.finish.includes('FaNotes einrichten')) throw new Error(`Das Onboarding ist unvollständig: ${JSON.stringify(onboarding)}`)
     await wait(850)
     const onboardingScreenshot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true })
     fs.writeFileSync(onboardingScreenshotPath, Buffer.from(onboardingScreenshot.data, 'base64'))
