@@ -1,0 +1,51 @@
+name: No periodic stalls
+
+# Freeze guard: the desktop app (Electron under Xvfb, temp profile, synthetic vault) must not stall the
+# main thread while idle or in use, and its heap and CSS rule count must stay flat while notes are opened
+# and closed. Runs on pull requests that touch the renderer shell or the check; never builds a release.
+on:
+  pull_request:
+    paths:
+      - 'fanotes/src/App.tsx'
+      - 'fanotes/src/components/MarkdownEditor.tsx'
+      - 'fanotes/src/styles.css'
+      - 'fanotes/electron/main.cjs'
+      - 'fanotes/scripts/check-no-periodic-stalls.mjs'
+      - '.github/workflows/no-periodic-stalls.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: fanotes
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:spelling
+      - run: node scripts/stage-main-i18n.cjs
+      - name: Root packages the renderer imports (hershey)
+        working-directory: .
+        run: npm ci --no-audit --no-fund
+      - name: Renderer
+        run: npx vite build
+      - name: Xvfb and playwright-core
+        run: |
+          command -v xvfb-run || (sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 xvfb)
+          npm install --no-save --no-audit --no-fund playwright-core@1.65.0
+          test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
+      # The check has its own 6-minute watchdog; one retry absorbs a stuck Electron start on the runner
+      # while a real regression still fails twice.
+      - name: No periodic stalls
+        timeout-minutes: 14
+        run: npm run check:no-periodic-stalls || { echo "::warning::stall check failed once; retrying"; npm run check:no-periodic-stalls; }
