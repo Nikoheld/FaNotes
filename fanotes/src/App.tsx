@@ -3693,7 +3693,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setTextFieldPlacing((current) => !current)
   }, [toast])
 
-  const placeTextFieldAt = useCallback((point: { page: number; x: number; y: number }) => {
+  const placeTextFieldAt = useCallback((point: { page: number; x: number; y: number; aspect?: number }) => {
     const path = activePathRef.current
     if (!path) return
     if (noteTextFieldsRef.current.length >= 200) {
@@ -3714,7 +3714,7 @@ export default function App({ startupBootstrap }: AppProps) {
     rememberNoteTextFields(path, patchNoteTextField(noteTextFieldsRef.current, id, { text }), false)
   }, [rememberNoteTextFields])
 
-  const changeTextFieldGeometry = useCallback((id: string, patch: { page?: number; x?: number; y?: number; width?: number }, commit: boolean) => {
+  const changeTextFieldGeometry = useCallback((id: string, patch: { page?: number; x?: number; y?: number; width?: number; aspect?: number }, commit: boolean) => {
     const path = activePathRef.current
     if (!path) return
     rememberNoteTextFields(path, patchNoteTextField(noteTextFieldsRef.current, id, patch), commit)

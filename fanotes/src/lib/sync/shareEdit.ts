@@ -265,6 +265,8 @@ export const applyRemoteTextFields = (
       ...(existing?.color ? { color: existing.color } : {}),
       ...(existing?.bold ? { bold: true } : {}),
       ...(existing?.updatedAt ? { updatedAt: existing.updatedAt } : {}),
+      // The basis belongs to y: keep it only while the remote edit left the box where it was.
+      ...(existing?.aspect !== undefined && existing.y === field.y ? { aspect: existing.aspect } : {}),
     }
   })
 }

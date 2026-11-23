@@ -23,6 +23,26 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
 const { serializeFamd, emptyFamdPayload, parseFamd } = require('../electron/famd.cjs')
 
+// Two devices edit boxes of one note: each box carries the sheet basis its y was written against, and the newer edit wins whole.
+{
+  const { applyNoteTextFieldOps, diffNoteTextFields } = await import('../electron/noteTextFieldMerge.mjs')
+  const box = (id, extra = {}) => ({ id, page: 1, x: 0.1, y: 0.2, width: 0.3, fontSize: 16, text: id, updatedAt: 1000, aspect: 1.4, ...extra })
+  const disk = [box('a'), box('b'), box('c')]
+  const deviceA = diffNoteTextFields(disk, [box('a', { y: 0.5, aspect: 3, updatedAt: 2000 }), box('b'), box('c')], 2000)
+  const deviceB = diffNoteTextFields(disk, [box('a'), box('b', { text: 'neu', aspect: 2, updatedAt: 2500 }), box('c', { y: 0.7, aspect: 4, updatedAt: 1500 })], 2500)
+  let merged = applyNoteTextFieldOps(disk, [], deviceA, 3000)
+  merged = applyNoteTextFieldOps(merged.fields, merged.tombstones, deviceB, 3000)
+  const byId = Object.fromEntries(merged.fields.map((item) => [item.id, item]))
+  assert.deepEqual([byId.a.y, byId.a.aspect], [0.5, 3], 'device A moved a box: y and its basis travel together')
+  assert.deepEqual([byId.b.text, byId.b.aspect], ['neu', 2], 'device B edited another box')
+  assert.deepEqual([byId.c.y, byId.c.aspect], [0.7, 4], 'a box changed on one device keeps y with its own basis')
+  const sameBoxA = diffNoteTextFields([box('a')], [box('a', { y: 0.6, aspect: 3, updatedAt: 2000 })], 2000)
+  const sameBoxB = diffNoteTextFields([box('a')], [box('a', { y: 0.1, aspect: 5, updatedAt: 2600 })], 2600)
+  const both = applyNoteTextFieldOps(applyNoteTextFieldOps([box('a')], [], sameBoxB, 3000).fields, [], sameBoxA, 3000).fields[0]
+  assert.deepEqual([both.y, both.aspect], [0.1, 5], 'two devices move one box: the newer edit wins whole, never y of one and basis of the other')
+  console.log('ok merge of box edits from two devices keeps y and its basis together')
+}
+
 const executable = path.join(root, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron')
 const xvfb = spawnSync('sh', ['-c', 'command -v xvfb-run'], { encoding: 'utf8' }).stdout.trim()
 let playwright = null
@@ -280,18 +300,47 @@ try {
   await sleep(1000)
   const written = await snapshot(anchors)
 
+  // Another device (or a sync) rewrites the companion: a box moved there is read against the basis it was saved with.
+  const sheetWidth = (await snapshot()).sheet[2] / (await snapshot()).zoom
+  const external = parseFamd(fs.readFileSync(path.join(vault, 'Notiz.famd'), 'utf8'))
+  const rewritten = external.payload.textFields.map((item, index) => (index === 0 ? { ...item, y: 0.2, aspect: 2.5, updatedAt: Date.now() + 60_000 } : item))
+  fs.writeFileSync(path.join(vault, 'Notiz.famd'), serializeFamd(external.markdown, { ...external.payload, textFields: rewritten }))
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await openNote('Zwei')
+  await openNote('Notiz')
+  await page.waitForFunction(() => document.visibilityState === 'visible')
+  await sleep(2000)
+  const synced = await snapshot(anchors)
+  const syncedTop = synced.fields.find((item) => item.id === 'tf-Notiz-1').page.dy
+  console.log(`  external rewrite: box 1 top ${syncedTop.toFixed(1)} px, expected ${(0.2 * 2.5 * sheetWidth).toFixed(1)}`)
+  assert.ok(Math.abs(syncedTop - 0.2 * 2.5 * sheetWidth) <= 1, 'a box written by another device sits at y x basis sheet widths from the top')
+  const other = synced.fields.filter((item) => item.id !== 'tf-Notiz-1')
+  other.forEach((item) => { const was = written.fields.find((field) => field.id === item.id); assert.ok(Math.abs(item.page.dy - was.page.dy) <= 1, `box ${item.id} untouched by the rewrite`) })
+
+  // Split view: the second pane narrows the main pane; the boxes stay where they are.
+  const beforeSplit = await snapshot(anchors)
+  await page.locator('button[aria-label="Weitere Notizaktionen"]').first().click()
+  await page.locator('[role=menuitem]', { hasText: 'Geteilte Ansicht' }).click()
+  await page.waitForSelector('.split-pane', { timeout: 10_000 })
+  await sleep(1500)
+  await expectStay('split view opened', beforeSplit)
+  await page.locator('button[aria-label="Weitere Notizaktionen"]').first().click()
+  await page.locator('[role=menuitem]', { hasText: 'Teilung schließen' }).click()
+  await sleep(1500)
+  await expectStay('split view closed', beforeSplit)
+
   // The same after closing and starting the app again.
+  const written2 = await snapshot(anchors)
   await sleep(1500)
   await quit()
   await launch()
   await openNote('Notiz')
-  await expectStay('after a restart', written, 'line')
-  await expectStay('after a restart (page)', written)
+  await expectStay('after a restart', written2)
   await openNote('Zwei')
   await openNote('Notiz')
-  await expectStay('after a restart, switched', written)
+  await expectStay('after a restart, switched', written2)
 
-  // A note whose sheet is as tall as its text: typing changes the sheet's height, the boxes keep their place on the page.
+  // A note whose sheet is as tall as its text: typing changes the sheet's height (and adds room under the text), the boxes keep their place on the page, also after a restart.
   await openNote('Lang')
   const lang = await snapshot()
   await page.locator('.cm-line', { hasText: 'Absatz 20:' }).first().click({ position: { x: 4, y: 6 } })
@@ -303,6 +352,16 @@ try {
   for (let i = 0; i < 6; i += 1) { await page.keyboard.press('Enter'); await page.keyboard.type(`Ende ${i}`) }
   await sleep(1500)
   await expectStay('typing below the boxes', lang)
+  const typedLang = await snapshot()
+  await sleep(1500)
+  await quit()
+  await launch()
+  await openNote('Lang')
+  await expectStay('typed note after a restart', typedLang)
+  assert.ok(storedFields('Lang').every((item) => item.aspect > 0), 'the boxes of an old file got their basis when the owner started typing')
+  await openNote('Zwei')
+  await openNote('Lang')
+  await expectStay('typed note after a restart, switched', typedLang)
   assert.deepEqual(pageErrors, [], 'no page errors')
   console.log('text field position: ok')
 } catch (error) {
