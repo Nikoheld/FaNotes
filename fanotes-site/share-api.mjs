@@ -321,6 +321,19 @@ const sessionBody = (record) => ({
   present: freshPresent(record.present),
 })
 
+/**
+ * The poll answer. A client that already holds `since` (the revision it last adopted) gets the people but not
+ * the notes again: every poll used to carry every stroke of the share, once a second per open editor.
+ */
+export const sessionBodyFor = (record, since) => {
+  const body = sessionBody(record)
+  if (Number.isInteger(since) && since === body.revision) {
+    const { notes, ...rest } = body
+    return { ...rest, unchanged: true }
+  }
+  return body
+}
+
 const requireEditable = (record) => {
   if (!record) fail(404, 'Nicht gefunden.')
   if (record.stopped) fail(410, 'Diese Freigabe wurde beendet.')
@@ -413,7 +426,8 @@ export const handleShareRequest = async (request, response, url) => {
       rateLimit(`share-session:${clientAddress(request)}`, 240, 60_000)
       const record = requireEditable(await readRecord(id))
       record.present = freshPresent(record.present)
-      writeJson(response, 200, sessionBody(record))
+      const since = /^\d{1,9}$/u.test(url.searchParams.get('since') ?? '') ? Number(url.searchParams.get('since')) : null
+      writeJson(response, 200, sessionBodyFor(record, since))
       return true
     }
 

@@ -4,6 +4,7 @@
  * them. One document is processed at a time; units are committed in batches so
  * a pause, a crash or a closed window loses at most one batch.
  */
+import { trackActivity } from '../stallMonitor'
 import { DocIndex, type DocRecord, type IndexUnit, type UnitIssue } from './docIndex'
 
 /** Bump when extraction changes; every document is then read again. */
@@ -271,7 +272,7 @@ export class DocIndexer {
       if (stopped()) return false
       await this.options.gate?.()
       if (stopped()) return false
-      const outcome = await this.processOne(source, stopped)
+      const outcome = await trackActivity('index', this.processOne(source, stopped))
       if (outcome === 'partial') partialLeft = true
       this.pending = Math.max(0, this.pending - 1)
       this.emit()

@@ -151,6 +151,19 @@ export const validateDiagnosticsPayload = (body) => {
     record.perf = {}
     if (perf.startup && typeof perf.startup === 'object') record.perf.startup = { sessions: int(perf.startup.sessions, 1000), medianMs: int(perf.startup.medianMs, 600_000), maxMs: int(perf.startup.maxMs, 600_000) }
     if (perf.penLatency && typeof perf.penLatency === 'object') record.perf.penLatency = { samples: int(perf.penLatency.samples, 100_000), p50: int(perf.penLatency.p50 * 10, 1_000_000) / 10, p90: int(perf.penLatency.p90 * 10, 1_000_000) / 10, p99: int(perf.penLatency.p99 * 10, 1_000_000) / 10, max: int(perf.penLatency.max * 10, 1_000_000) / 10 }
+    // Stall statistics: fixed keys, bounded numbers, nothing else (no names, paths, text or stacks).
+    if (perf.stalls && typeof perf.stalls === 'object' && !Array.isArray(perf.stalls)) {
+      const stalls = perf.stalls
+      const phases = stalls.byPhase && typeof stalls.byPhase === 'object' ? stalls.byPhase : {}
+      const lag = stalls.mainLag && typeof stalls.mainLag === 'object' ? stalls.mainLag : {}
+      record.perf.stalls = {
+        count: int(stalls.count, 100_000),
+        maxMs: int(stalls.maxMs, 600_000),
+        p95Ms: int(stalls.p95Ms, 600_000),
+        byPhase: Object.fromEntries(['sync', 'save', 'index', 'open', 'other'].map((phase) => [phase, int(phases[phase], 100_000)])),
+        mainLag: { maxMs: int(lag.maxMs, 600_000), p95Ms: int(lag.p95Ms, 600_000) },
+      }
+    }
     if (perf.memory && typeof perf.memory === 'object') record.perf.memory = { processes: int(perf.memory.processes, 1000), totalMb: int(perf.memory.totalMb, 1_000_000), mainRssMb: int(perf.memory.mainRssMb, 1_000_000), ...(perf.memory.byType && typeof perf.memory.byType === 'object' ? { byType: Object.fromEntries(['main', 'renderer', 'gpu', 'utility', 'other'].map((kind) => [kind, int(perf.memory.byType[kind], 1_000_000)])) } : {}) }
   }
   if (typeof body.comment === 'string' && body.comment.trim()) record.comment = scrubText(body.comment, {}, 1000)

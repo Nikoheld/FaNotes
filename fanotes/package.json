@@ -41,6 +41,7 @@
     "check:motion": "node scripts/check-motion.cjs",
     "check:idle-wakeups": "node scripts/check-idle-wakeups.mjs",
     "check:desktop-latency": "node scripts/check-desktop-latency.mjs",
+    "check:share-poll-cost": "node scripts/check-share-poll-cost.mjs",
     "check:no-periodic-stalls": "node scripts/check-no-periodic-stalls.mjs",
     "check:desktop-memory": "node scripts/check-desktop-memory.mjs",
     "check:note-open-cost": "node scripts/check-note-open-cost.mjs",

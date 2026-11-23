@@ -15,6 +15,8 @@ export const aggregate = (records, sinceMs = 0) => {
   const logErrors = new Map()
   const crashes = new Map()
   const penP50 = []
+  const stallBatches = []
+  const stallPhases = new Map()
   const startups = []
   const notes = []
   let reports = 0
@@ -38,6 +40,10 @@ export const aggregate = (records, sinceMs = 0) => {
       bump(crashes, `${entry.type} ${entry.process}${entry.reason ? ` ${entry.reason}` : ''} ${entry.class} #${entry.hash}${frame ? ` @ ${frame.file}:${frame.line}` : ''}`, entry.count || 1)
     }
     if (record.perf?.penLatency?.p50) penP50.push(record.perf.penLatency.p50)
+    if (record.perf?.stalls) {
+      stallBatches.push(record.perf.stalls)
+      for (const [phase, count] of Object.entries(record.perf.stalls.byPhase ?? {})) if (count) bump(stallPhases, phase, count)
+    }
     if (record.perf?.startup?.medianMs) startups.push(record.perf.startup.medianMs)
     else if (record.usage?.perf?.startupMs) startups.push(record.usage.perf.startupMs)
     if (record.usage?.vault) notes.push(record.usage.vault.notes)
@@ -50,6 +56,7 @@ export const aggregate = (records, sinceMs = 0) => {
     reports, installs: installs.size, comments,
     versions: top(versions), platforms: top(platforms),
     topErrors: top(errors), topLogMessages: top(logErrors), topCrashes: top(crashes), penLatencyP50Ms: { p50: percentile(penP50, 0.5), p90: percentile(penP50, 0.9), samples: penP50.length }, features: top(features, 30),
+    stalls: { batches: stallBatches.length, count: stallBatches.reduce((sum, item) => sum + item.count, 0), worstMs: Math.max(0, ...stallBatches.map((item) => item.maxMs)), mainLagWorstMs: Math.max(0, ...stallBatches.map((item) => item.mainLag?.maxMs ?? 0)), byPhase: top(stallPhases) },
     startupMs: { p50: percentile(startups, 0.5), p90: percentile(startups, 0.9), p99: percentile(startups, 0.99), samples: startups.length },
     vaultNotes: { p50: percentile(notes, 0.5), p90: percentile(notes, 0.9), samples: notes.length },
   }
@@ -77,6 +84,8 @@ export const formatReport = (report, days) => {
     `vault notes p50 ${report.vaultNotes.p50 ?? '-'}  p90 ${report.vaultNotes.p90 ?? '-'}`,
     '', 'versions', rows(report.versions), '', 'platforms', rows(report.platforms),
     `pen latency (per-install p50, ms)  p50 ${report.penLatencyP50Ms.p50 ?? '-'}  p90 ${report.penLatencyP50Ms.p90 ?? '-'}  (n=${report.penLatencyP50Ms.samples})`,
+    `stalls >= 0.5 s: ${report.stalls.count} in ${report.stalls.batches} batches, worst ${report.stalls.worstMs} ms, main-process lag worst ${report.stalls.mainLagWorstMs} ms`,
+    rows(report.stalls.byPhase),
     '', 'top crashes', rows(report.topCrashes),
     '', 'top errors (class|code|hash)', rows(report.topErrors),
     '', 'top logged errors (class code #hash @ bundle:line)', rows(report.topLogMessages),

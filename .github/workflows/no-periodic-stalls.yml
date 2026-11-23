@@ -11,6 +11,8 @@ on:
       - 'fanotes/src/styles.css'
       - 'fanotes/electron/main.cjs'
       - 'fanotes/scripts/check-no-periodic-stalls.mjs'
+      - 'fanotes/scripts/check-share-poll-cost.mjs'
+      - 'fanotes/src/lib/sync/shareEdit.ts'
       - '.github/workflows/no-periodic-stalls.yml'
   workflow_dispatch:
 
@@ -46,6 +48,8 @@ jobs:
           test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
       # The check has its own 6-minute watchdog; one retry absorbs a stuck Electron start on the runner
       # while a real regression still fails twice.
+      - name: Share poll cost
+        run: npm run check:share-poll-cost
       - name: No periodic stalls
         timeout-minutes: 14
         run: npm run check:no-periodic-stalls || { echo "::warning::stall check failed once; retrying"; npm run check:no-periodic-stalls; }

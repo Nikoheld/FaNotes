@@ -13,7 +13,7 @@ One master switch and four categories. The master switch gates everything below 
 | Daten senden | `diagnosticsEnabled` | Master. Off: nothing is sent and the queue is deleted at once. |
 | Absturzberichte | `diagnosticsCrashes` | Crashes of the main process, the renderer and helper processes. |
 | Fehlerdiagnose | `diagnosticsLogs` | Errors shown in the app (class, code, code lines, hash). |
-| Leistungsdaten | `diagnosticsPerf` | Startup time, pen latency percentiles, memory. |
+| Leistungsdaten | `diagnosticsPerf` | Startup time, pen latency percentiles, memory, freeze counts and durations. |
 | Nutzungsstatistik | `diagnosticsUsage` | Feature counters, rough vault size, the anonymous launch counter. |
 
 Turning anything off removes that category's queued data from memory and from disk
@@ -46,7 +46,10 @@ One JSON document, gzipped, `POST https://fanotes.fasrv.ch/api/v1/diagnostics` (
   size, each rounded down to a coarse step.
 - `perf` (Leistungsdaten): startup time (median and maximum of the sessions since the last batch, rounded to
   50 ms), pen latency (sample count, median, 90th and 99th percentile, maximum, in ms, measured as event time
-  stamp to handler time), memory (process count and working set in steps of 10 MB).
+  stamp to handler time), memory (process count and working set in steps of 10 MB), `stalls` (main-thread tasks
+  of 500 ms or more since the last batch: count, longest and 95th percentile in ms, a count per fixed phase word
+  `sync`, `save`, `index`, `open`, `other` naming the background activity that was running, and the main
+  process's event-loop delay maximum and 95th percentile). No names, paths, text, stacks or timestamps.
 
 The in-app "Vorschau" shows the JSON of the next batch.
 

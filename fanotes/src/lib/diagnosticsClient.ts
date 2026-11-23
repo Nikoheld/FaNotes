@@ -59,6 +59,12 @@ const flushBuffers = () => {
   }
 }
 
+/** One main-thread stall (500 ms or more): its length and the fixed phase word. Nothing else. */
+export const recordStall = (ms: number, phase: string) => {
+  if (!consent.perf || !Number.isFinite(ms) || ms < 0) return
+  bridge()?.record({ k: 'stall', ms: Math.round(ms), phase })
+}
+
 export const recordFeature = (name: string) => {
   if (!consent.usage || !COUNTER_NAME.test(name)) return
   bridge()?.record({ k: 'feature', name })
