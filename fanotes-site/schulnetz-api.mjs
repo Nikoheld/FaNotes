@@ -13,7 +13,7 @@ import { credentialOr } from './credentials.mjs'
 import { CLASS_CODE, isAksaBase } from './class-timetables.mjs'
 import { createCommute } from './commute.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
-import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, tagErrorStage, latencyPercentile, describePollError, FETCH_TIMEOUT_MS, TRANSIENT_HTTP, retryBackoffMs, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, tagErrorStage, latencyPercentile, describePollError, FETCH_TIMEOUT_MS, TRANSIENT_HTTP, retryBackoffMs, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, teacherAbsenceField, newerTeacherAbsences, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
   alertAllowed,
   applyEventWindow,
@@ -99,6 +99,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   guessGrades: false,
 })
 const COOKIE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
+/** The server keeps a web sign-in for COOKIE_MAX_AGE_MS. This long before it ends, the phone is reminded once, so grade checks never lapse unnoticed. */
+export const COOKIE_REMIND_BEFORE_MS = 2 * 24 * 60 * 60 * 1000
 const SSO_HOSTS = new Set(['login.microsoftonline.com', 'login.microsoft.com', 'login.live.com', 'login.windows.net'])
 const SSO_COOKIE_NAMES = new Set(['ESTSAUTH', 'ESTSAUTHPERSISTENT', 'ESTSAUTHLIGHT', 'SignInStateCookie', 'x-ms-RefreshTokenCredential'])
 const LINK_LIMIT = 5
@@ -347,7 +349,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       // A saved school address that is not an allowed address must not be opened, or the next poll drops the session.
       && baseKnown(link)
       // A saved sign-in flag that is not a flag must not look set, or the next poll stays silent or sends another sign-in push.
-      && flagKnown(link.needsReauth) && flagKnown(link.loginPushSent)
+      && flagKnown(link.needsReauth) && flagKnown(link.loginPushSent) && flagKnown(link.expirySoonPushSent)
     if (!known) throw Object.assign(new Error('link'), { code: 'EBADMSG' })
     if (link.topic != null || link.pushEndpoints != null) {
       stripLegacyPush(link)
@@ -357,6 +359,11 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
   const saveLink = async (accountId, link) => writeJson(resolve(accountDir(accountId), 'link.json'), stripLegacyPush(link))
 
+  const signInExpiresAt = (link) => {
+    if (link?.mode !== 'web' || link.needsReauth === true) return ''
+    const savedAt = Date.parse(link.cookiesSavedAt || '')
+    return Number.isFinite(savedAt) ? new Date(savedAt + COOKIE_MAX_AGE_MS).toISOString() : ''
+  }
   const publicStatus = (link) => {
     if (!link) return { linked: false, settings: DEFAULT_SETTINGS }
     return {
@@ -370,6 +377,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       settings: { ...DEFAULT_SETTINGS, ...(link.settings || {}) },
       settingsUpdatedAt: link.settingsUpdatedAt || '',
       mode: link.mode || 'rest',
+      // When the server's web sign-in ends and grade checks stop until the next sign-in.
+      signInExpiresAt: signInExpiresAt(link),
       provider: link.provider || 'schulnetz',
       push: { endpoints: (link.fcmTokens || []).length },
     }
@@ -483,6 +492,11 @@ export const createSchulnetzRuntime = (options = {}) => {
     Array.isArray(existing?.fcmTokens) ? existing.fcmTokens.filter(isValidFcmToken).slice(-8) : []
   )
 
+  const teacherAbsencePart = (previous, next) => {
+    const kept = newerTeacherAbsences(previous?.teacherAbsences, next)
+    return kept ? { teacherAbsences: kept } : {}
+  }
+
   const acceptSnapshot = async (accountId, body) => {
     const link = await readLink(accountId)
     if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
@@ -500,6 +514,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       snapshot.deviceReadAt = snapshot.fetchedAt
       snapshot.readErrors = Array.isArray(previous?.readErrors) ? previous.readErrors : []
     }
+    // The newer day wins; an upload without the field keeps the stored one.
+    Object.assign(snapshot, teacherAbsencePart(previous, snapshot.teacherAbsences))
     // An app before the points parser uploads other ids; the server's own statement read stays.
     Object.assign(snapshot, absenceFields(keepAbsenceRead(previous || {}, snapshot)))
     // A device link's changes were already announced on the phone that read them: feed only, no push.
@@ -916,7 +932,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const ping = async (accountId, link, event, priority = 'HIGH', changes = []) => {
-    if (event !== 'sync' && event !== 'reauth' && event !== 'test' && event !== 'commute') return
+    if (event !== 'sync' && event !== 'reauth' && event !== 'reauth-soon' && event !== 'test' && event !== 'commute') return
     const tokens = (link.fcmTokens || []).filter(isValidFcmToken)
     if (!tokens.length) return []
     const results = []
@@ -1244,6 +1260,13 @@ export const createSchulnetzRuntime = (options = {}) => {
         await alertReauthOnce(accountId, link)
         return { needsReauth: true }
       }
+      if (now().getTime() - savedAt > COOKIE_MAX_AGE_MS - COOKIE_REMIND_BEFORE_MS && link.expirySoonPushSent !== true) {
+        // Once per sign-in: a new sign-in writes a fresh link without this flag.
+        link.expirySoonPushSent = true
+        await saveLink(accountId, link)
+        await ping(accountId, link, 'reauth-soon')
+        log('info', `Anmeldung läuft bald ab ${accountId.slice(0, 8)}: Erinnerung gesendet`)
+      }
       return pollWeb(accountId, link, material, { gradesOnly })
     }
     const baseUrl = normalizeSchoolBase(link.baseUrl)
@@ -1348,6 +1371,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     let snapshot
     try { snapshot = parseRawSnapshot(raw, now().toISOString()) } catch (error) { throw tagErrorStage('parse-rest', error) }
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
+    const keptTeachers = newerTeacherAbsences(previous?.teacherAbsences, snapshot.teacherAbsences)
+    if (keptTeachers) snapshot.teacherAbsences = keptTeachers
     // A missing or rejected Kontoauszug page is not an empty statement.
     if (!kontoStatementRead(raw.kontoHtml || '')) {
       snapshot.konto = previous?.konto || []
@@ -1485,6 +1510,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       konto: kontoFresh ? parseKontoauszug(kontoHtml) : (previous?.konto || []),
       kontoSaldo: kontoFresh ? parseKontoSaldo(kontoHtml) : (previous?.kontoSaldo || ''),
       startMessages: keepMessages ? (previous?.startMessages || []) : parseStartMessages(scraped.startHtml || ''),
+      // Same start page, no extra request. An unreadable page keeps the stored value.
+      ...teacherAbsencePart(previous, failed ? null : teacherAbsenceField(scraped.startHtml || '', now().toISOString())),
       readErrors: scraped.problem ? [`Schulnetz: ${scraped.problem}`] : [],
       weekFetched: failed ? (previous?.weekFetched || {}) : (scraped.weekFetched || {}),
       weekRead: failed ? (previous?.weekRead || {}) : (scraped.weekRead || {}),

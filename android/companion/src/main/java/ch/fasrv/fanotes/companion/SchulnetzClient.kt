@@ -165,6 +165,8 @@ data class SchulnetzLinkState(
     val settingsUpdatedAt: String = "",
     /** Browsers (Kanti+ im Browser) that can read this connection. */
     val webSessions: Int = 0,
+    /** When the server's web sign-in ends (ISO time); blank when unknown or not a web sign-in. */
+    val signInExpiresAt: String = "",
 )
 
 /** A request was started on the main thread (a bug: the caller must switch to Dispatchers.IO). */
@@ -682,6 +684,7 @@ class SchulnetzClient(
                 konto = parseKontoauszug(pages["21411"].orEmpty()),
                 kontoSaldo = parseKontoSaldo(pages["21411"].orEmpty()),
                 startMessages = parseStartMessages(pages["1"].orEmpty()),
+                teacherAbsences = ch.fasrv.fanotes.schulnetz.teacherAbsenceRead(pages["1"].orEmpty(), fetchedNow),
                 readErrors = errors,
                 weekFetched = stamps,
                 examWeekFetched = examStamps,
@@ -739,7 +742,13 @@ class SchulnetzClient(
         // Appointments merge by id; lessons reuse ids across weeks and are never deduplicated by id.
         "22108" -> snapshot.copy(events = mergeById(snapshot.events, readTerminliste(html).value))
         "21411" -> snapshot.copy(konto = parseKontoauszug(html).ifEmpty { snapshot.konto }, kontoSaldo = parseKontoSaldo(html).ifBlank { snapshot.kontoSaldo })
-        "1" -> snapshot.copy(startMessages = parseStartMessages(html).ifEmpty { snapshot.startMessages })
+        "1" -> snapshot.copy(
+            startMessages = parseStartMessages(html).ifEmpty { snapshot.startMessages },
+            teacherAbsences = ch.fasrv.fanotes.schulnetz.newerTeacherAbsences(
+                ch.fasrv.fanotes.schulnetz.teacherAbsenceRead(html, java.time.Instant.now().toString()),
+                snapshot.teacherAbsences,
+            ),
+        )
         else -> snapshot
     }
 
@@ -1157,6 +1166,7 @@ class SchulnetzClient(
             mode = obj.string("mode").orEmpty(),
             settingsUpdatedAt = obj.string("settingsUpdatedAt").orEmpty(),
             webSessions = obj.double("webSessions")?.toInt() ?: 0,
+            signInExpiresAt = obj.string("signInExpiresAt").orEmpty(),
         )
     }
 

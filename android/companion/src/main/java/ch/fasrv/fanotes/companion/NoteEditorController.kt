@@ -46,7 +46,8 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
                 session = InkSession(loaded.document)
                 document = loaded.document
                 protected = protected + ".fanotes/assets/${loaded.inkId}.json"
-                graph.busyPaths += protected
+                // Nothing is edited while the handwriting is missing, so sync may bring it in meanwhile.
+                if (loaded.inkPending) graph.busyPaths -= protected else graph.busyPaths += protected
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = failure.message?.takeIf { it.isNotBlank() }?.let(::shownText) ?: t(R.string.could_not_open_note) }
             finally { loading = false }
@@ -69,6 +70,8 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
     suspend fun save(): Boolean = mutex.withLock {
         val opened = note ?: return@withLock !loading
         if (savedRevision == revision) return@withLock true
+        // Never write a sidecar for a note whose handwriting has not arrived (see OpenNote.inkPending).
+        if (opened.inkPending) return@withLock true
         val target = revision
         val ink = document ?: return@withLock false
         val text = markdown

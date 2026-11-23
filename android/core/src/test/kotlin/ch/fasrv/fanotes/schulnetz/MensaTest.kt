@@ -53,4 +53,64 @@ class MensaTest {
         assertFalse(mensaRefreshDue(1_000_000, 1_000_000 + 3_600_000))
         assertTrue(mensaRefreshDue(1_000_000, 1_000_000 + 4 * 3_600_000))
     }
+
+    private fun day(date: String, closed: Boolean = false) = MensaDay(LocalDate.parse(date), closed, "", if (closed) emptyList() else listOf(MensaMenu("Dish", "", "Daily", 10.0, 8.0)))
+    private val twoWeeks = listOf("2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13", "2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20").map { day(it) }
+
+    @Test
+    fun weekSlotsCoverBothWeeksAndMarkNextWeek() {
+        val slots = mensaWeekSlots(twoWeeks, LocalDate.parse("2026-11-11"))
+        assertEquals(10, slots.size)
+        assertEquals(LocalDate.parse("2026-11-09"), slots.first().date)
+        assertEquals(5, slots.count { it.nextWeek })
+        assertTrue(slots.all { it.day != null })
+    }
+
+    @Test
+    fun missingNextWeekIsLeftOutAndMissingDaysStayAsEmptySlots() {
+        val slots = mensaWeekSlots(listOf(day("2026-11-09"), day("2026-11-11")), LocalDate.parse("2026-11-11"))
+        assertEquals(5, slots.size)
+        assertTrue(slots.none { it.nextWeek })
+        assertNull(slots[1].day)
+        assertNotNull(slots[2].day)
+    }
+
+    @Test
+    fun weekendKeepsTheFinishedWeekAndOldWeeksAreIgnored() {
+        val slots = mensaWeekSlots(listOf(day("2026-11-02")) + twoWeeks, LocalDate.parse("2026-11-14"))
+        assertEquals(LocalDate.parse("2026-11-09"), slots.first().date)
+        assertEquals(10, slots.size)
+    }
+
+    @Test
+    fun preselectsTodayOnAWeekdayMorning() {
+        val slots = mensaWeekSlots(twoWeeks, LocalDate.parse("2026-11-11"))
+        assertEquals(LocalDate.parse("2026-11-11"), mensaPreselectedDate(slots, LocalDateTime.parse("2026-11-11T09:30:00")))
+    }
+
+    @Test
+    fun preselectsTheNextSchoolDayAfterServingTimeAndOnWeekends() {
+        val slots = mensaWeekSlots(twoWeeks, LocalDate.parse("2026-11-13"))
+        assertEquals(LocalDate.parse("2026-11-12"), mensaPreselectedDate(mensaWeekSlots(twoWeeks, LocalDate.parse("2026-11-11")), LocalDateTime.parse("2026-11-11T14:00:00")))
+        assertEquals(LocalDate.parse("2026-11-16"), mensaPreselectedDate(slots, LocalDateTime.parse("2026-11-13T15:00:00")))
+        assertEquals(LocalDate.parse("2026-11-16"), mensaPreselectedDate(mensaWeekSlots(twoWeeks, LocalDate.parse("2026-11-14")), LocalDateTime.parse("2026-11-14T10:00:00")))
+        assertEquals(LocalDate.parse("2026-11-16"), mensaPreselectedDate(mensaWeekSlots(twoWeeks, LocalDate.parse("2026-11-15")), LocalDateTime.parse("2026-11-15T10:00:00")))
+        assertEquals(pickMensaDay(twoWeeks, LocalDateTime.parse("2026-11-14T10:00:00"))?.date, LocalDate.parse("2026-11-16"))
+    }
+
+    @Test
+    fun fallsBackWhenNextWeekIsMissing() {
+        val thisWeek = twoWeeks.take(5)
+        assertEquals(LocalDate.parse("2026-11-13"), mensaPreselectedDate(mensaWeekSlots(thisWeek, LocalDate.parse("2026-11-13")), LocalDateTime.parse("2026-11-13T15:00:00")))
+        assertEquals(LocalDate.parse("2026-11-13"), mensaPreselectedDate(mensaWeekSlots(thisWeek, LocalDate.parse("2026-11-14")), LocalDateTime.parse("2026-11-14T10:00:00")))
+        assertNull(mensaPreselectedDate(emptyList(), LocalDateTime.parse("2026-11-11T09:00:00")))
+    }
+
+    @Test
+    fun aClosedDayIsStillASlotAndCanBePreselected() {
+        val days = twoWeeks.map { if (it.date == LocalDate.parse("2026-11-11")) day("2026-11-11", closed = true) else it }
+        val slots = mensaWeekSlots(days, LocalDate.parse("2026-11-11"))
+        assertEquals(LocalDate.parse("2026-11-11"), mensaPreselectedDate(slots, LocalDateTime.parse("2026-11-11T08:00:00")))
+        assertTrue(slots[2].day!!.closed)
+    }
 }

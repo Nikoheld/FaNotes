@@ -82,6 +82,9 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var hidden by mutableStateOf(emptyList<ch.fasrv.fanotes.schulnetz.HiddenLesson>())
     /** Last known Mensa menu (only read while the start-page card is switched on). */
     var mensa by mutableStateOf<ch.fasrv.fanotes.schulnetz.MensaFeed?>(null)
+    /** True while a Mensa request runs (drives the pull-to-refresh indicator of the week screen). */
+    var mensaRefreshing by mutableStateOf(false)
+        private set
     var plannedAbsences by mutableStateOf(emptyList<ch.fasrv.fanotes.schulnetz.PlannedAbsence>())
     var route by mutableStateOf(CompanionRoute())
         private set
@@ -493,6 +496,22 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 
+    /** "Sync now" in a note whose handwriting has not arrived: one sync, then the note opens again. */
+    fun syncThenReopen(editor: NoteEditorController) {
+        busy = true
+        viewModelScope.launch {
+            try {
+                graph.engine.syncNow("phone")
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = error.message?.takeIf { it.isNotBlank() }?.let(::shownText) ?: t(R.string.could_not_refresh_school)
+            } finally {
+                busy = false
+                editor.load()
+            }
+        }
+    }
+
     fun sync() {
         busy = true
         viewModelScope.launch {
@@ -650,7 +669,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun refreshMensa(force: Boolean = false) {
         if (demo || !desk.showMensa) return
         viewModelScope.launch {
-            val feed = withContext(Dispatchers.IO) { runCatching { graph.mensaStore.refresh(force) }.getOrNull() }
+            mensaRefreshing = true
+            val feed = try { withContext(Dispatchers.IO) { runCatching { graph.mensaStore.refresh(force) }.getOrNull() } } finally { mensaRefreshing = false }
             if (feed != null) mensa = feed
         }
     }

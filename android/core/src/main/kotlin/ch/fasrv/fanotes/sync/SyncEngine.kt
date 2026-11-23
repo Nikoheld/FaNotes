@@ -604,14 +604,15 @@ class SyncEngine(
         throw memoryBudgetFailure
     } catch (error: SyncDocumentLimitException) {
         // Headroom can return. Skipping here would advance the cursor past a
-        // note that was never stored. The hard cap cannot fit, so that file
-        // is left behind and the rest of the cycle continues.
+        // note that was never stored, so the entry waits and holds the cursor.
+        // The rest of the pull continues: one large note must not stop every other file.
         if (error.transient) {
-            diagnostic("sync applyRemote rejected reason=budget deepCopyDepth=0")
-            throw error
+            diagnostic("sync applyRemote deferred reason=budget deepCopyDepth=0")
+            ApplyResult("deferred", null)
+        } else {
+            diagnostic("sync applyRemote skipped reason=budget deepCopyDepth=0")
+            ApplyResult("skipped", null)
         }
-        diagnostic("sync applyRemote skipped reason=budget deepCopyDepth=0")
-        ApplyResult("skipped", null)
     } catch (error: JsonLimitException) {
         diagnostic("sync applyRemote skipped depth=${error.depth} nodes=${error.nodes} deepCopyDepth=0")
         ApplyResult("skipped", null)
@@ -694,6 +695,9 @@ class SyncEngine(
         var result = "written"
         val response = try {
             api.download(active, entry.id)
+        } catch (error: SyncDocumentLimitException) {
+            // The download does not fit this device's memory now. Named in the log and retried on every sync.
+            throw RemoteEntryUnusable("size", path)
         } catch (error: SyncApiError) {
             // Sign-in, network, rate-limit, and server errors concern the whole cycle. Anything
             // else (a blob the server no longer has) concerns this file only.
@@ -847,8 +851,8 @@ class SyncEngine(
                     "conflict" -> conflicts += 1
                 }
             } catch (error: SyncDocumentLimitException) {
-                if (error.transient) throw error
-                diagnostic("sync upload skipped reason=budget deepCopyDepth=0")
+                // Transient: the file keeps its base, so the next scan uploads it. The other uploads go on.
+                diagnostic("sync upload ${if (error.transient) "deferred" else "skipped"} reason=budget deepCopyDepth=0")
             } catch (error: JsonLimitException) {
                 diagnostic("sync upload skipped depth=${error.depth} nodes=${error.nodes} deepCopyDepth=0")
             } finally {
@@ -1257,6 +1261,7 @@ class SyncEngine(
             "checksum" -> "its checksum did not match"
             "unreadable" -> "it could not be read as a note"
             "name" -> "its name is too long for this device; shorten it on the other device"
+            "size" -> "it is too large for this device's memory right now"
             else -> "the server could not provide it"
         }
     }

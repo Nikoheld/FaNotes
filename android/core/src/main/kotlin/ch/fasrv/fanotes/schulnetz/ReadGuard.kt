@@ -146,7 +146,8 @@ fun keepStoredRead(
     val grades = keepGradeRead(previous?.grades.orEmpty(), next.grades, trustedGrades)
     val guarded = (if (previous != null) keepAbsenceRead(previous, next) else next).copy(grades = grades, gradesReadComplete = trustedGrades)
     val prior = previous ?: return guarded
-    if (!blocked && okPages > 0 && !timetableFailed) return guarded
+    val teachers = newerTeacherAbsences(next.teacherAbsences, prior.teacherAbsences)
+    if (!blocked && okPages > 0 && !timetableFailed) return guarded.copy(teacherAbsences = teachers)
     var events = next.events
     var exams = next.exams
     var messages = next.messages
@@ -190,6 +191,7 @@ fun keepStoredRead(
         messages = messages,
         absences = absences,
         startMessages = startMessages,
+        teacherAbsences = teachers,
         konto = konto,
         kontoSaldo = kontoSaldo,
         weekFetched = weekFetched,

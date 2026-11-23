@@ -10,7 +10,11 @@ import ch.fasrv.fanotes.json.jsonString
 /** What a file is allowed to do on the next sync upload. */
 enum class NoteSyncKind { PRESENT, BLANK, UNREADABLE }
 
-/** Packed documents stay packed. Legacy JSON is bounded before building its DOM. */
+/**
+ * Largest note sync parses into a document (identity, blank check, page stats). A larger note is
+ * synced as opaque bytes, like a PDF: no document is built, so it costs one copy, and the download
+ * budget (`readSyncResponseBody`) still bounds it. It used to be skipped, so it never reached the phone.
+ */
 const val MAX_SYNC_DOCUMENT_BYTES = 16 * 1024 * 1024
 
 /** A normal note, including a short guest document, must not consult the live heap. */
@@ -40,11 +44,16 @@ fun syncDocumentBudget(bytes: Long, availableBytes: Long): SyncBudget {
     return SyncBudget.ALLOW
 }
 
+/** A note too large to parse during sync. It is compared and stored as opaque bytes. */
+fun isOpaqueSyncDocument(path: String, bytes: Long): Boolean = isFamdSyncPath(path) && bytes > MAX_SYNC_DOCUMENT_BYTES
+
 fun requireSyncDocumentBudget(path: String, bytes: Long) {
     if (!isFamdSyncPath(path)) return
     // Modest notes never read the live heap. Packed sync does not need spare copies of them.
     if (bytes >= 0L && bytes <= MODEST_SYNC_DOCUMENT_BYTES) return
-    if (bytes < 0L || bytes > MAX_SYNC_DOCUMENT_BYTES) throw SyncDocumentLimitException(transient = false)
+    if (bytes < 0L) throw SyncDocumentLimitException(transient = false)
+    // Opaque: no document is built, so no headroom is needed beyond the bytes themselves.
+    if (bytes > MAX_SYNC_DOCUMENT_BYTES) return
     val runtime = Runtime.getRuntime()
     fun available() = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
     if (syncDocumentBudget(bytes, available()) == SyncBudget.ALLOW) return
@@ -69,12 +78,15 @@ fun isFamdSyncPath(path: String): Boolean {
 fun noteSyncKind(path: String, bytes: ByteArray): NoteSyncKind {
     if (bytes.isEmpty()) return NoteSyncKind.BLANK
     if (!isFamdSyncPath(path)) return NoteSyncKind.PRESENT
+    // A note this large is not blank. It is not parsed, so it is not judged unreadable either.
+    if (isOpaqueSyncDocument(path, bytes.size.toLong())) return NoteSyncKind.PRESENT
     requireSyncDocumentBudget(path, bytes.size.toLong())
     val text = bytes.toString(Charsets.UTF_8)
     val parsed = try {
         storedDocument(path, bytes, text)
-    } catch (error: JsonLimitException) {
-        throw error
+    } catch (_: JsonLimitException) {
+        // Too deep or too many nodes to build safely: opaque, never blank.
+        return NoteSyncKind.PRESENT
     } catch (error: SyncDocumentLimitException) {
         throw error
     } catch (_: Exception) {
@@ -89,12 +101,13 @@ fun noteSyncKind(path: String, bytes: ByteArray): NoteSyncKind {
 /** Bytes compared for "did this note change": page statistics and timestamps are ignored. */
 fun identitySyncBytes(path: String, bytes: ByteArray, onShape: (JsonShape) -> Unit = {}): ByteArray? {
     if (!isFamdSyncPath(path)) return bytes
+    if (isOpaqueSyncDocument(path, bytes.size.toLong())) return bytes
     requireSyncDocumentBudget(path, bytes.size.toLong())
     val text = bytes.toString(Charsets.UTF_8)
     val parsed = try {
         storedDocument(path, bytes, text)
-    } catch (error: JsonLimitException) {
-        throw error
+    } catch (_: JsonLimitException) {
+        return bytes
     } catch (error: SyncDocumentLimitException) {
         throw error
     } catch (_: Exception) {
@@ -115,12 +128,13 @@ fun identitySyncBytes(path: String, bytes: ByteArray, onShape: (JsonShape) -> Un
 /** The bytes actually uploaded. Page statistics stay on the device. */
 fun canonicalSyncBytes(path: String, bytes: ByteArray): ByteArray {
     if (!isFamdSyncPath(path)) return bytes
+    if (isOpaqueSyncDocument(path, bytes.size.toLong())) return bytes
     requireSyncDocumentBudget(path, bytes.size.toLong())
     val text = bytes.toString(Charsets.UTF_8)
     val parsed = try {
         storedDocument(path, bytes, text)
-    } catch (error: JsonLimitException) {
-        throw error
+    } catch (_: JsonLimitException) {
+        return bytes
     } catch (error: SyncDocumentLimitException) {
         throw error
     } catch (_: Exception) {
@@ -135,10 +149,11 @@ fun canonicalSyncBytes(path: String, bytes: ByteArray): ByteArray {
 
 fun withLocalPageStats(downloaded: ByteArray, local: ByteArray, path: String): ByteArray {
     if (!isFamdSyncPath(path)) return downloaded
+    if (isOpaqueSyncDocument(path, downloaded.size.toLong()) || isOpaqueSyncDocument(path, local.size.toLong())) return downloaded
     val stats = try {
         storedDocument(path, local).payload?.obj("pageStats")
-    } catch (error: JsonLimitException) {
-        throw error
+    } catch (_: JsonLimitException) {
+        return downloaded
     } catch (error: SyncDocumentLimitException) {
         throw error
     } catch (_: Exception) {
@@ -146,8 +161,8 @@ fun withLocalPageStats(downloaded: ByteArray, local: ByteArray, path: String): B
     } ?: return downloaded
     val remote = try {
         storedDocument(path, downloaded)
-    } catch (error: JsonLimitException) {
-        throw error
+    } catch (_: JsonLimitException) {
+        return downloaded
     } catch (error: SyncDocumentLimitException) {
         throw error
     } catch (_: Exception) {

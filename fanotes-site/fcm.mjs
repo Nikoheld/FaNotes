@@ -58,6 +58,8 @@ export const serviceAccountJwt = (account, nowMs) => {
 
 const COLLAPSE_KEY = {
   reauth: 'kanti-reauth',
+  // The reminder shares the sign-in slot: a later "expired" replaces it.
+  'reauth-soon': 'kanti-reauth',
   test: 'kanti-test',
   sync: 'kanti-sync',
   // Live commute updates for the widget: their own slot, so they never replace a pending sync push.

@@ -33,13 +33,51 @@ fun parseMensaFeed(json: String): MensaFeed? {
     return MensaFeed(root.string("fetchedAt").orEmpty(), root.bool("stale") == true, days.sortedBy { it.date })
 }
 
-/** Today's menu; after 14:00 or on a weekend the next school day's. null when that day is not known. */
-fun pickMensaDay(days: List<MensaDay>, now: LocalDateTime): MensaDay? {
+/** The day [pickMensaDay] aims at: today, or the next school day after 14:00 and on weekends. */
+fun mensaTargetDate(now: LocalDateTime): LocalDate {
     var target = now.toLocalDate()
     if (target.dayOfWeek >= DayOfWeek.SATURDAY || now.hour >= 14) {
         do { target = target.plusDays(1) } while (target.dayOfWeek >= DayOfWeek.SATURDAY)
     }
+    return target
+}
+
+/** Today's menu; after 14:00 or on a weekend the next school day's. null when that day is not known. */
+fun pickMensaDay(days: List<MensaDay>, now: LocalDateTime): MensaDay? {
+    val target = mensaTargetDate(now)
     return days.firstOrNull { it.date == target }
+}
+
+/** One slot of the week screen. [day] is null when the feed has nothing for that school day. */
+data class MensaWeekSlot(val date: LocalDate, val day: MensaDay?, val nextWeek: Boolean)
+
+/**
+ * The school days (Monday to Friday) the week screen offers: all of the current week, then next week's
+ * when the feed knows at least one day of it. Days of other weeks are left out. On a weekend the
+ * "current" week is the one that just ended.
+ */
+fun mensaWeekSlots(days: List<MensaDay>, today: LocalDate): List<MensaWeekSlot> {
+    val monday = today.with(DayOfWeek.MONDAY)
+    val byDate = days.associateBy { it.date }
+    fun week(start: LocalDate, next: Boolean) = (0L..4L).map { start.plusDays(it) }.map { MensaWeekSlot(it, byDate[it], next) }
+    val nextMonday = monday.plusWeeks(1)
+    val nextWeek = week(nextMonday, true)
+    return week(monday, false) + if (nextWeek.any { it.day != null }) nextWeek else emptyList()
+}
+
+/**
+ * The date to select first: the one [pickMensaDay] would show. When the feed does not offer it (for example
+ * Friday afternoon without next week), today if listed, else the closest earlier listed day, else the first.
+ */
+fun mensaPreselectedDate(slots: List<MensaWeekSlot>, now: LocalDateTime): LocalDate? {
+    if (slots.isEmpty()) return null
+    val target = mensaTargetDate(now)
+    val dates = slots.map { it.date }
+    return when {
+        target in dates -> target
+        now.toLocalDate() in dates -> now.toLocalDate()
+        else -> dates.lastOrNull { it < target } ?: dates.first()
+    }
 }
 
 /** "13.50" style amount for the student price; whole francs keep two decimals too. */

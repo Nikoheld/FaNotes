@@ -193,8 +193,9 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                             IconTile(Icons.Outlined.School, StateTone.Accent, 44.dp)
                             Column {
                                 Text(model.connections.active?.label ?: t(R.string.schulnetz), style = MaterialTheme.typography.titleLarge)
-                                StatusLine(when { model.demo -> t(R.string.demo_active_title); model.link.needsReauth -> t(R.string.sign_in_again_to_refresh); model.link.linked -> t(R.string.connected); else -> t(R.string.not_connected) },
-                                    when { model.demo -> StateTone.Warning; model.link.needsReauth -> StateTone.Warning; model.link.linked -> StateTone.Accent; else -> StateTone.Neutral })
+                                val expiresSoon = signInExpiresSoon(model.link.signInExpiresAt, System.currentTimeMillis())
+                                StatusLine(when { model.demo -> t(R.string.demo_active_title); model.link.needsReauth -> t(R.string.sign_in_again_to_refresh); expiresSoon != null -> t(R.string.sign_in_expires_on, expiresSoon); model.link.linked -> t(R.string.connected); else -> t(R.string.not_connected) },
+                                    when { model.demo -> StateTone.Warning; model.link.needsReauth -> StateTone.Warning; expiresSoon != null -> StateTone.Warning; model.link.linked -> StateTone.Accent; else -> StateTone.Neutral })
                             }
                         }
                         Text(t(R.string.read_your_school_information_here_manage_officia), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 14.dp))
@@ -258,6 +259,8 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item(key = "mensa-toggle") {
                 Group(Modifier.padding(top = 8.dp)) {
                     ToggleRow(t(R.string.mensa_setting), t(R.string.mensa_setting_body), model.desk.showMensa) { model.updateDesk(model.desk.copy(showMensa = it)); if (it) model.refreshMensa() }
+                    FineDivider()
+                    ToggleRow(t(R.string.teacher_absences_setting), t(R.string.teacher_absences_setting_body), model.desk.showTeacherAbsences) { model.updateDesk(model.desk.copy(showTeacherAbsences = it)) }
                 }
             }
             item(key = "timetable-head") { SectionLabel(t(R.string.timetable)) }

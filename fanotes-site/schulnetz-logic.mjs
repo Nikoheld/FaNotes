@@ -117,6 +117,11 @@ const strings = (obj, ...keys) => {
   return []
 }
 
+const teacherAbsenceFieldOf = (html, readAt) => {
+  const field = teacherAbsenceField(html, readAt)
+  return field ? { teacherAbsences: field } : {}
+}
+
 export const parseRawSnapshot = (raw, fetchedAt = '') => ({
   revision: 0,
   fetchedAt,
@@ -131,6 +136,7 @@ export const parseRawSnapshot = (raw, fetchedAt = '') => ({
   konto: parseKontoauszug(raw.kontoHtml || ''),
   kontoSaldo: parseKontoSaldo(raw.kontoHtml || ''),
   startMessages: parseStartMessages(raw.startHtml || ''),
+  ...teacherAbsenceFieldOf(raw.startHtml, fetchedAt),
 })
 
 const parseProfile = (payload) => {
@@ -334,6 +340,72 @@ export const parseStartMessages = (html) => {
     if (line.length >= 3 && line.length <= 500 && !found.includes(line)) found.push(line)
   }
   return found.slice(0, 20)
+}
+
+const TEACHER_ABSENT_LABEL = /Abwesende(?:\s|&nbsp;|&#160;)+Lehrpersonen/iu
+const TEACHER_EXCURSION_LABEL = /Lehrpersonen(?:\s|&nbsp;|&#160;)+auf(?:\s|&nbsp;|&#160;)+Exkursion/iu
+const TEACHER_ENTITIES = { auml: 'ä', ouml: 'ö', uuml: 'ü', Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü', eacute: 'é', egrave: 'è', agrave: 'à', ccedil: 'ç', szlig: 'ß', apos: "'", lt: '<', gt: '>' }
+export const TEACHER_ABSENCE_MAX_ENTRIES = 40
+export const TEACHER_ABSENCE_MAX_CHARS = 120
+
+const teacherText = (raw) => htmlText(raw)
+  .replace(/&#(\d{1,5});/g, (_, code) => String.fromCodePoint(Number(code)))
+  .replace(/&([A-Za-z]+);/g, (whole, name) => TEACHER_ENTITIES[name] ?? whole)
+  .replace(/^[\s:\-–—]+|[\s:\-–—]+$/gu, '')
+
+/** One section of the card: text after the label up to the next label, a "---" marker or the end of the card. Entries split on <br> and paragraphs only. */
+const teacherSection = (html, label, other) => {
+  const start = label.exec(html)
+  if (!start) return []
+  let rest = html.slice(start.index + start[0].length)
+  const stops = [other.exec(rest)?.index, rest.search(/-{3}/), rest.search(/<\/div\b/i)].filter((index) => index != null && index >= 0)
+  if (stops.length) rest = rest.slice(0, Math.min(...stops))
+  const entries = []
+  for (const piece of rest.replace(/<br\s*\/?>|<\/?(?:p|li|div)\b[^>]*>/gi, '\n').split('\n')) {
+    const entry = teacherText(piece).slice(0, TEACHER_ABSENCE_MAX_CHARS).trim()
+    if (entry) entries.push(entry)
+    if (entries.length >= TEACHER_ABSENCE_MAX_ENTRIES) break
+  }
+  return entries
+}
+
+/**
+ * Absent teachers and teachers on an excursion from the information card of the start page.
+ * Null for a blank body, a sign-in wall or a page without page links; empty lists for a start page without the card.
+ */
+export const parseTeacherAbsences = (html) => {
+  const text = String(html || '')
+  if (!text.trim() || sessionProblem('', text) || !/pageid=\d/i.test(text)) return null
+  const cleaned = text.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+  return {
+    absent: teacherSection(cleaned, TEACHER_ABSENT_LABEL, TEACHER_EXCURSION_LABEL),
+    excursion: teacherSection(cleaned, TEACHER_EXCURSION_LABEL, TEACHER_ABSENT_LABEL),
+  }
+}
+
+/** The snapshot field: the parse with the Europe/Zurich day of the read, or null when the page was not a start page. */
+export const teacherAbsenceField = (html, readAt) => {
+  const parsed = parseTeacherAbsences(html)
+  if (!parsed) return null
+  const at = new Date(readAt)
+  return { day: zurichToday(Number.isFinite(at.getTime()) ? at : new Date()), ...parsed }
+}
+
+/** A stored or uploaded teacherAbsences value in its known shape, or null. */
+const cleanTeacherAbsences = (value) => {
+  if (!value || typeof value !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(String(value.day || ''))) return null
+  const list = (items) => (Array.isArray(items) ? items : []).filter((item) => typeof item === 'string')
+    .map((item) => item.trim().slice(0, TEACHER_ABSENCE_MAX_CHARS)).filter(Boolean).slice(0, TEACHER_ABSENCE_MAX_ENTRIES)
+  return { day: value.day, absent: list(value.absent), excursion: list(value.excursion) }
+}
+
+/** The entry with the newer day; on the same day the later argument wins. A missing or malformed one loses. */
+export const newerTeacherAbsences = (earlier, later) => {
+  const a = cleanTeacherAbsences(earlier)
+  const b = cleanTeacherAbsences(later)
+  if (!a) return b || undefined
+  if (!b) return a
+  return b.day >= a.day ? b : a
 }
 
 const cancelledBlob = (event) => `${event.status} ${event.eventType} ${event.text} ${event.comment} ${event.timetableText}`.toLowerCase()

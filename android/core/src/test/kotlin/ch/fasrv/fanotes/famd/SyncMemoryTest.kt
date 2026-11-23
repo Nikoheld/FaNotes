@@ -74,13 +74,23 @@ class SyncMemoryTest {
         assertEquals(1, attempts)
     }
 
-    @Test fun limitsAbortInsteadOfTreatingAnUnsafeDocumentAsMissingOrBlank() {
-        assertFailsWith<SyncDocumentLimitException> { requireSyncDocumentBudget("Synthetic.famd", MAX_SYNC_DOCUMENT_BYTES.toLong() + 1) }
+    @Test fun anUnsafeDocumentSyncsAsOpaqueBytesNeverAsMissingOrBlank() {
+        // Too deep to build safely: compared and stored byte for byte, never treated as blank.
         val json = "{\"schema\":\"fanotes-famd-v1\",\"ink\":" + "[".repeat(80) + "0" + "]".repeat(80) + "}"
         val source = "<!-- fanotes-famd:v1 chars=${json.length} -->\n$json\n".encodeToByteArray()
-        assertFailsWith<JsonLimitException> { identitySyncBytes("Synthetic.famd", source) }
-        assertFailsWith<JsonLimitException> { canonicalSyncBytes("Synthetic.famd", source) }
-        assertFailsWith<JsonLimitException> { noteSyncKind("Synthetic.famd", source) }
+        kotlin.test.assertContentEquals(source, identitySyncBytes("Synthetic.famd", source))
+        kotlin.test.assertContentEquals(source, canonicalSyncBytes("Synthetic.famd", source))
+        assertEquals(NoteSyncKind.PRESENT, noteSyncKind("Synthetic.famd", source))
+        kotlin.test.assertContentEquals(source, withLocalPageStats(source, source, "Synthetic.famd"))
+    }
+
+    @Test fun aNoteAboveTheParseCapIsOpaque() {
+        val big = ByteArray(MAX_SYNC_DOCUMENT_BYTES + 16) { 'a'.code.toByte() }
+        assertEquals(NoteSyncKind.PRESENT, noteSyncKind("Notes/big.famd", big))
+        kotlin.test.assertSame(big, identitySyncBytes("Notes/big.famd", big))
+        kotlin.test.assertSame(big, canonicalSyncBytes("Notes/big.famd", big))
+        val small = serializeFamd("Text", emptyFamdPayload("2026-11-06T00:00:00Z"), "v2").encodeToByteArray()
+        kotlin.test.assertSame(big, withLocalPageStats(big, small, "Notes/big.famd"))
     }
 
     @Test fun aModestDocumentIsAllowedWhenTheHeapHasNoRoom() {
@@ -95,9 +105,12 @@ class SyncMemoryTest {
         assertEquals(SyncBudget.REJECT, syncDocumentBudget(-1, Long.MAX_VALUE / 4))
         requireSyncDocumentBudget("Synthetic.famd", MODEST_SYNC_DOCUMENT_BYTES.toLong())
         requireSyncDocumentBudget("Notes/plain.txt", -1)
-        val hard = assertFailsWith<SyncDocumentLimitException> {
-            requireSyncDocumentBudget("Synthetic.famd", MAX_SYNC_DOCUMENT_BYTES.toLong() + 1)
-        }
+        // Above the parse cap a note is opaque: it needs no headroom, so the budget no longer rejects it.
+        requireSyncDocumentBudget("Synthetic.famd", MAX_SYNC_DOCUMENT_BYTES.toLong() + 1)
+        assertTrue(isOpaqueSyncDocument("Synthetic.famd", MAX_SYNC_DOCUMENT_BYTES.toLong() + 1))
+        assertFalse(isOpaqueSyncDocument("Synthetic.famd", MAX_SYNC_DOCUMENT_BYTES.toLong()))
+        assertFalse(isOpaqueSyncDocument("Synthetic.pdf", MAX_SYNC_DOCUMENT_BYTES.toLong() + 1))
+        val hard = assertFailsWith<SyncDocumentLimitException> { requireSyncDocumentBudget("Synthetic.famd", -1) }
         assertFalse(hard.transient)
     }
 
