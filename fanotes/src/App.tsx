@@ -7322,6 +7322,7 @@ export default function App({ startupBootstrap }: AppProps) {
                     onFinish={finishTextFieldEdit}
                     onRemove={removePlacedTextField}
                     onFocusHandled={clearTextFieldFocus}
+                    onRemap={remapPlacedTextFields}
                     onSelectedChange={setSelectedTextFieldId}
                   />
                   <StudyAnnotationLayer
