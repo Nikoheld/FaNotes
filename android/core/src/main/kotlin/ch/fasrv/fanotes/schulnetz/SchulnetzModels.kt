@@ -230,6 +230,8 @@ data class SchulnetzSnapshot(
     /** Final Saldo row of the Kontoauszug as Schulnetz prints it; empty when absent. */
     val kontoSaldo: String = "",
     val startMessages: List<String> = emptyList(),
+    /** Start-page card of absent teachers. Display only; the notification diff never reads it. */
+    val teacherAbsences: TeacherAbsenceDay? = null,
     val readErrors: List<String> = emptyList(),
     /** Monday (ISO date) to the instant that week was last read. */
     val weekFetched: Map<String, String> = emptyMap(),

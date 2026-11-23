@@ -1854,6 +1854,7 @@ class CompanionGraph(private val context: Context, val client: SchulnetzClient =
             konto = next.konto.ifEmpty { previous.konto },
             kontoSaldo = next.kontoSaldo.ifBlank { previous.kontoSaldo },
             startMessages = next.startMessages.ifEmpty { previous.startMessages },
+            teacherAbsences = ch.fasrv.fanotes.schulnetz.newerTeacherAbsences(next.teacherAbsences, previous.teacherAbsences),
             weekFetched = next.weekFetched.ifEmpty { previous.weekFetched },
             weekRead = next.weekRead.ifEmpty { previous.weekRead },
             weekSpanStart = next.weekSpanStart.ifBlank { previous.weekSpanStart },

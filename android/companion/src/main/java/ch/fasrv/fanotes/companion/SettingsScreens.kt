@@ -258,6 +258,8 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item(key = "mensa-toggle") {
                 Group(Modifier.padding(top = 8.dp)) {
                     ToggleRow(t(R.string.mensa_setting), t(R.string.mensa_setting_body), model.desk.showMensa) { model.updateDesk(model.desk.copy(showMensa = it)); if (it) model.refreshMensa() }
+                    FineDivider()
+                    ToggleRow(t(R.string.teacher_absences_setting), t(R.string.teacher_absences_setting_body), model.desk.showTeacherAbsences) { model.updateDesk(model.desk.copy(showTeacherAbsences = it)) }
                 }
             }
             item(key = "timetable-head") { SectionLabel(t(R.string.timetable)) }

@@ -682,6 +682,7 @@ class SchulnetzClient(
                 konto = parseKontoauszug(pages["21411"].orEmpty()),
                 kontoSaldo = parseKontoSaldo(pages["21411"].orEmpty()),
                 startMessages = parseStartMessages(pages["1"].orEmpty()),
+                teacherAbsences = ch.fasrv.fanotes.schulnetz.teacherAbsenceRead(pages["1"].orEmpty(), fetchedNow),
                 readErrors = errors,
                 weekFetched = stamps,
                 examWeekFetched = examStamps,
@@ -739,7 +740,13 @@ class SchulnetzClient(
         // Appointments merge by id; lessons reuse ids across weeks and are never deduplicated by id.
         "22108" -> snapshot.copy(events = mergeById(snapshot.events, readTerminliste(html).value))
         "21411" -> snapshot.copy(konto = parseKontoauszug(html).ifEmpty { snapshot.konto }, kontoSaldo = parseKontoSaldo(html).ifBlank { snapshot.kontoSaldo })
-        "1" -> snapshot.copy(startMessages = parseStartMessages(html).ifEmpty { snapshot.startMessages })
+        "1" -> snapshot.copy(
+            startMessages = parseStartMessages(html).ifEmpty { snapshot.startMessages },
+            teacherAbsences = ch.fasrv.fanotes.schulnetz.newerTeacherAbsences(
+                ch.fasrv.fanotes.schulnetz.teacherAbsenceRead(html, java.time.Instant.now().toString()),
+                snapshot.teacherAbsences,
+            ),
+        )
         else -> snapshot
     }
 

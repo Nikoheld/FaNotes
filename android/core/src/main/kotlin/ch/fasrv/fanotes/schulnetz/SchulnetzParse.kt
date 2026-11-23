@@ -24,6 +24,7 @@ fun parseRawSnapshot(raw: SchulnetzRaw, fetchedAt: String = ""): SchulnetzSnapsh
         konto = parseKontoauszug(raw.kontoHtml.orEmpty()),
         kontoSaldo = parseKontoSaldo(raw.kontoHtml.orEmpty()),
         startMessages = parseStartMessages(raw.startHtml.orEmpty()),
+        teacherAbsences = teacherAbsenceRead(raw.startHtml.orEmpty(), fetchedAt),
     )
 }
 
@@ -226,7 +227,9 @@ fun SchulnetzSnapshot.toNormalizedJson(): String = buildString {
         if (index > 0) append(',')
         append(escapeJson(line))
     }
-    append("],\"readErrors\":[")
+    append("]")
+    teacherAbsences?.let { append(",\"teacherAbsences\":").appendTeacherAbsences(it) }
+    append(",\"readErrors\":[")
     readErrors.forEachIndexed { index, line ->
         if (index > 0) append(',')
         append(escapeJson(line))
@@ -282,6 +285,7 @@ fun parseNormalizedSnapshot(json: String): SchulnetzSnapshot? {
         konto = obj.array("konto")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toKonto() },
         kontoSaldo = obj.flexString("kontoSaldo"),
         startMessages = obj.array("startMessages")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value },
+        teacherAbsences = obj.obj("teacherAbsences")?.toTeacherAbsences(),
         readErrors = obj.array("readErrors")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value },
         weekFetched = obj.obj("weekFetched")?.fields.orEmpty().mapNotNull { (key, value) ->
             val stamp = (value as? JsonValue.Str)?.value ?: return@mapNotNull null
@@ -580,4 +584,19 @@ internal fun stableId(prefix: String, vararg parts: String): String {
         hash *= 16777619u
     }
     return "$prefix-${hash.toString(16)}"
+}
+
+private fun StringBuilder.appendTeacherAbsences(value: TeacherAbsenceDay): StringBuilder {
+    fun list(items: List<String>) = items.joinToString(",", "[", "]") { escapeJson(it) }
+    return append("{\"day\":").append(escapeJson(value.day))
+        .append(",\"absent\":").append(list(value.absent))
+        .append(",\"excursion\":").append(list(value.excursion))
+        .append("}")
+}
+
+private fun JsonValue.Obj.toTeacherAbsences(): TeacherAbsenceDay? {
+    val day = flexString("day")
+    if (!Regex("""\d{4}-\d{2}-\d{2}""").matches(day)) return null
+    fun list(key: String) = array(key)?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value?.trim()?.take(TEACHER_ABSENCE_MAX_CHARS)?.takeIf { text -> text.isNotEmpty() } }.take(TEACHER_ABSENCE_MAX_ENTRIES)
+    return TeacherAbsenceDay(day, list("absent"), list("excursion"))
 }

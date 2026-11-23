@@ -90,6 +90,8 @@ data class DeskPrefs(
     val revealLongPress: Boolean = false,
     /** Optional: today's Mensa menu card on the start page. */
     val showMensa: Boolean = false,
+    /** Optional: absent teachers from the start page, on Today. */
+    val showTeacherAbsences: Boolean = false,
 )
 
 fun lessonClock(event: AgendaEvent, zone: java.time.ZoneId = java.time.ZoneId.of("Europe/Zurich")): String {
@@ -261,6 +263,7 @@ fun parseDeskPrefs(json: String): DeskPrefs {
         navBar = validateNavBar(obj.array("navBar")?.items?.mapNotNull { (it as? ch.fasrv.fanotes.json.JsonValue.Str)?.value }),
         revealLongPress = obj.bool("revealLongPress") == true,
         showMensa = obj.bool("showMensa") == true,
+        showTeacherAbsences = obj.bool("showTeacherAbsences") == true,
     )
 }
 
@@ -300,5 +303,6 @@ fun serializeDeskPrefs(prefs: DeskPrefs): String = buildString {
     append("]")
     append(",\"revealLongPress\":").append(prefs.revealLongPress)
     append(",\"showMensa\":").append(prefs.showMensa)
+    append(",\"showTeacherAbsences\":").append(prefs.showTeacherAbsences)
     append('}')
 }
