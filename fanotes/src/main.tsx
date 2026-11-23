@@ -7,12 +7,15 @@ import '@fontsource/dm-sans/latin-400.css'
 import '@fontsource/dm-sans/latin-600.css'
 import './styles.css'
 import './touch.css'
+import './motion.css'
 import App from './App'
 import { initializeUiLocalization, translateUiText } from './i18n'
 import type { BootstrapData } from './types'
 import { installTouchInput } from './lib/touchInput'
+import { installExitMotion } from './lib/motion'
 
 installTouchInput()
+installExitMotion()
 
 const renderApp = (startupBootstrap?: Promise<BootstrapData>) => createRoot(document.getElementById('root')!).render(
   <StrictMode>

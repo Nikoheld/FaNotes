@@ -1550,7 +1550,7 @@ export function SettingsModal({
             {active === 'accessibility' && (
               <div id="settings-comfort" className="setting-card">
                 <div className="setting-card-title"><Accessibility size={16} /><span>Komfort & Fokus</span></div>
-                <SettingRow title="Bewegung reduzieren" description="Deaktiviert dekorative Übergänge und Animationen."><Toggle label="Bewegung reduzieren" checked={settings.reduceMotion} onChange={(value) => update('reduceMotion', value)} /></SettingRow>
+                <SettingRow title="Bewegung reduzieren" description="Deaktiviert dekorative Übergänge und Animationen. Ohne Haken gilt die Einstellung des Betriebssystems."><Toggle label="Bewegung reduzieren" checked={settings.reduceMotion} onChange={(value) => update('reduceMotion', value)} /></SettingRow>
                 <SettingRow title="Seitenleiste"><Range value={settings.sidebarWidth} min={210} max={430} step={10} suffix=" px" onChange={(value) => update('sidebarWidth', value)} /></SettingRow>
                 <SettingRow title="Informationsleiste"><Range value={settings.rightPanelWidth} min={220} max={430} step={10} suffix=" px" onChange={(value) => update('rightPanelWidth', value)} /></SettingRow>
               </div>

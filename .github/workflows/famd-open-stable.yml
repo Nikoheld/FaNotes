@@ -22,8 +22,12 @@ on:
       - 'fanotes/src/lib/pdfOpenCamera.ts'
       - 'fanotes/src/styles.css'
       - 'fanotes/electron/famd*'
+      - 'fanotes/src/components/FormattingToolbar.tsx'
+      - 'fanotes/src/components/NoteTextFieldMarkdown.tsx'
+      - 'fanotes/src/lib/noteTextFieldFormat.ts'
       - 'fanotes/scripts/check-famd-open-stable.mjs'
       - 'fanotes/scripts/check-text-field-position.mjs'
+      - 'fanotes/scripts/check-text-field-toolbar.mjs'
       - '.github/workflows/famd-open-stable.yml'
   workflow_dispatch:
 
@@ -63,3 +67,5 @@ jobs:
         run: npm run check:famd-open-stable
       - name: Text boxes never select text and stay put
         run: npm run check:text-field-position
+      - name: Text boxes use the document formatting toolbar
+        run: npm run check:text-field-toolbar

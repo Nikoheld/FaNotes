@@ -6579,6 +6579,12 @@ export default function App({ startupBootstrap }: AppProps) {
     try { localStorage.setItem('fanotes.theme', settings.theme) } catch { /* private mode */ }
   }, [settings.theme])
 
+  // The reduce-motion setting zeroes the shared motion tokens on <html>, which also covers portaled overlays.
+  useEffect(() => {
+    document.documentElement.classList.toggle('motion-off', settings.reduceMotion)
+    return () => document.documentElement.classList.remove('motion-off')
+  }, [settings.reduceMotion])
+
   // Portaled popovers, menus and dialogs render under document.body, outside .app-shell,
   // so mirror the theme class and tokens there to keep them themed.
   useEffect(() => {
@@ -6909,7 +6915,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 // The PDF slot element must outlive every swap (text box selected, pen mode): PdfNoteView portals
                 // its bar into it once, and a re-created slot left the bar attached to a detached node (empty top bar).
                 const pdfSlot = isPdfActive ? <div key="pdf-slot" id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" hidden={Boolean(selectedTextField) || slot !== 'pdf'} /> : null
-                if (selectedTextField) return <>{pdfSlot}<NoteTextFieldToolbar key="field-bar" field={selectedTextField} hideTypeable={Boolean(settings.hideMarkdownKeyButtons)} onStyle={changeTextFieldStyle} onText={changeTextFieldText} onRemove={removePlacedTextField} /></>
+                if (selectedTextField) return <>{pdfSlot}<NoteTextFieldToolbar key="field-bar" field={selectedTextField} hideTypeable={Boolean(settings.hideMarkdownKeyButtons)} onStyle={changeTextFieldStyle} onText={changeTextFieldText} onRemove={removePlacedTextField} onLatexError={(message) => toast(message, 'error')} /></>
                 if (slot === 'ink') return <>{pdfSlot}<div id={INK_TOOLBAR_SLOT_ID} className="ink-toolbar-slot" /></>
                 if (slot === 'pdf') return <>{pdfSlot}</>
                 return <>{pdfSlot}<FormattingToolbar hideTypeable={Boolean(settings.hideMarkdownKeyButtons)} disabled={!activeTab || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen || activeEntryMutating || activeHeld} onFormat={formatMarkdown} onInsertLatex={insertSimpleLatex} onLatexError={(message) => toast(message, 'error')} /></>
