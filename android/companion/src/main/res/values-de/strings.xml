@@ -536,6 +536,9 @@
     <string name="recently_deleted">Zuletzt gelöscht</string>
     <string name="recently_deleted_unavailable">Zuletzt gelöscht ist nicht verfügbar</string>
     <string name="recently_edited">Zuletzt bearbeitet</string>
+    <string name="reauth_soon_title">Schulnetz-Anmeldung läuft bald ab</string>
+    <string name="reauth_soon_body">In 2 Tagen prüft Kanti+ deine Noten nicht mehr im Hintergrund. Jetzt neu anmelden, damit die Meldungen pünktlich bleiben.</string>
+    <string name="sign_in_expires_on">Bis %1$s neu anmelden</string>
     <string name="reconnect_your_school">Schule neu verbinden</string>
     <string name="recurrence_daily">täglich</string>
     <string name="recurrence_monthly">monatlich</string>

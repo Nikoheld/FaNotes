@@ -153,6 +153,17 @@ object CompanionAlerts {
         ))
     }
 
+    /** Two days before the server's sign-in ends: renewing now keeps grade alerts on time. */
+    fun showReauthSoon(context: Context, scope: AlertScope = AlertScope.PRIMARY) {
+        show(scope, context, ch.fasrv.fanotes.schulnetz.linkedChange(
+            "schulnetz-login-required",
+            "event",
+            t(R.string.reauth_soon_title),
+            t(R.string.reauth_soon_body),
+            targetId = "settings",
+        ))
+    }
+
     fun showTest(context: Context) {
         show(context, ch.fasrv.fanotes.schulnetz.linkedChange(
             "push-test",
@@ -744,6 +755,7 @@ class CompanionFcmService : FirebaseMessagingService() {
                 }
             }
             "reauth" -> CompanionAlerts.showReauth(applicationContext, runBlocking { app.graph.alertScopeForRoute(message.data["route"]) })
+            "reauth-soon" -> CompanionAlerts.showReauthSoon(applicationContext, runBlocking { app.graph.alertScopeForRoute(message.data["route"]) })
             "test" -> CompanionAlerts.showTest(applicationContext)
         }
     }
