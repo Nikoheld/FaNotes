@@ -3,7 +3,9 @@ name: Handwriting note opens stable
 # Opening a .famd note in the desktop app (Electron under Xvfb): the first
 # painted frame already has the final layout - typed text, page box, text
 # boxes - and opening never moves a stored text box
-# (fanotes/scripts/check-famd-open-stable.mjs, under a minute). Never builds
+# (fanotes/scripts/check-famd-open-stable.mjs, under a minute). A second step
+# drives text boxes (fanotes/scripts/check-text-field-position.mjs, about a
+# minute): dragging never selects text, and boxes stay where they were left. Never builds
 # or publishes a release.
 on:
   pull_request:
@@ -24,6 +26,7 @@ on:
       - 'fanotes/src/components/NoteTextFieldMarkdown.tsx'
       - 'fanotes/src/lib/noteTextFieldFormat.ts'
       - 'fanotes/scripts/check-famd-open-stable.mjs'
+      - 'fanotes/scripts/check-text-field-position.mjs'
       - 'fanotes/scripts/check-text-field-toolbar.mjs'
       - '.github/workflows/famd-open-stable.yml'
   workflow_dispatch:
@@ -62,5 +65,7 @@ jobs:
           test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
       - name: Every frame of a note opening
         run: npm run check:famd-open-stable
+      - name: Text boxes never select text and stay put
+        run: npm run check:text-field-position
       - name: Text boxes use the document formatting toolbar
         run: npm run check:text-field-toolbar

@@ -221,6 +221,33 @@ export const noteTextFieldsAfterOriginGrow = (
   return changed ? remapped : fields
 }
 
+/**
+ * Stored y is a fraction of the sheet's height, and that height follows the
+ * typed text (the sheet is as tall as its text or its ink page, whichever is
+ * larger), while the ink and the box's place on the page do not. Typing below
+ * a box grew the sheet and slid the box down with it. When the sheet's
+ * height/width ratio changes, the fractions change by the inverse, so a box
+ * stays at the same distance from the sheet's top, in units of its width (the
+ * unit the ink page scales in). x is a fraction of the width and needs no
+ * change.
+ */
+export const noteTextFieldsAfterSheetAspect = (
+  fields: readonly NoteTextField[],
+  prevAspect: number,
+  nextAspect: number,
+): readonly NoteTextField[] => {
+  if (!(prevAspect > 0) || !(nextAspect > 0) || Math.abs(prevAspect - nextAspect) < 1e-6) return fields
+  const scale = prevAspect / nextAspect
+  let changed = false
+  const remapped = fields.map((field) => {
+    const y = Math.max(0, Math.min(0.97, field.y * scale))
+    if (Math.abs(y - field.y) < 1e-6) return field
+    changed = true
+    return { ...field, y }
+  })
+  return changed ? remapped : fields
+}
+
 /** Next/previous step of the font-size ladder; unknown sizes snap to the nearest rung first. */
 export const stepNoteTextFieldFontSize = (size: number, direction: 1 | -1): number => {
   const sizes = NOTE_TEXT_FIELD_FONT_SIZES

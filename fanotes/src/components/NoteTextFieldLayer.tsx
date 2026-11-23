@@ -8,6 +8,7 @@ import { applySimpleLatexButton, type SimpleLatexButton, type SimpleLatexOperand
 import { formatTextFieldText, type TextFieldEdit } from '../lib/noteTextFieldFormat'
 import { noteLinkMarkerCss } from '../lib/noteLink'
 import {
+  noteTextFieldsAfterSheetAspect,
   NOTE_TEXT_FIELD_COLORS,
   NOTE_TEXT_FIELD_MAX_CHARS,
   NOTE_TEXT_FIELD_REFERENCE_PAGE_WIDTH,
@@ -46,12 +47,35 @@ type NoteTextFieldLayerProps = {
   onFinish?: () => void
   onRemove: (id: string) => void
   onFocusHandled?: () => void
+  /** Boxes moved along with the sheet (not by the owner): same page position, new fractions. */
+  onRemap?: (fields: readonly NoteTextField[]) => void
   onSelectedChange?: (id: string | null) => void
 }
 
 type Gesture =
   | { kind: 'move'; id: string; dx: number; dy: number; width: number; moved: boolean }
   | { kind: 'resize'; id: string; startX: number; startWidth: number; pageWidth: number }
+
+/**
+ * While a box is moved or resized nothing under the pointer may be selected.
+ * The press is taken over (preventDefault on pointerdown, pointer capture), which
+ * also suppresses the mousedown whose preventDefault used to stop the browser
+ * from starting a selection - so dragging over typed text selected it. This
+ * stops the selection from starting at all, drops one that already exists and
+ * ends with the gesture.
+ */
+const lockTextSelection = (): (() => void) => {
+  const stop = (event: Event) => event.preventDefault()
+  document.addEventListener('selectstart', stop, true)
+  document.addEventListener('dragstart', stop, true)
+  document.documentElement.classList.add('is-text-field-gesture')
+  try { window.getSelection()?.removeAllRanges() } catch { /* no selection API */ }
+  return () => {
+    document.removeEventListener('selectstart', stop, true)
+    document.removeEventListener('dragstart', stop, true)
+    document.documentElement.classList.remove('is-text-field-gesture')
+  }
+}
 
 const MIN_BOX_HEIGHT = 1.9 // em
 
@@ -190,10 +214,21 @@ export function NoteTextFieldLayer({
   onFinish,
   onRemove,
   onFocusHandled,
+  onRemap,
   onSelectedChange,
 }: NoteTextFieldLayerProps) {
   const layerRef = useRef<HTMLDivElement>(null)
   const gestureRef = useRef<Gesture | null>(null)
+  const unlockSelectionRef = useRef<(() => void) | null>(null)
+  const beginSelectionLock = () => {
+    unlockSelectionRef.current?.()
+    unlockSelectionRef.current = lockTextSelection()
+  }
+  const endSelectionLock = () => {
+    unlockSelectionRef.current?.()
+    unlockSelectionRef.current = null
+  }
+  useEffect(() => () => { unlockSelectionRef.current?.(); unlockSelectionRef.current = null }, [])
   const fieldsRef = useRef(fields)
   fieldsRef.current = fields
   const [layout, setLayout] = useState<FieldLayout[]>([])
@@ -206,6 +241,10 @@ export function NoteTextFieldLayer({
   onTextRef.current = onText
   const onFinishRef = useRef(onFinish)
   onFinishRef.current = onFinish
+  const onRemapRef = useRef(onRemap)
+  onRemapRef.current = onRemap
+  const sheetAnchorRef = useRef<{ aspect: number; signature: string } | null>(null)
+  const lastEditAtRef = useRef(-Infinity)
 
   // The rendered Markdown is memoised on its text, so these read the current props.
   const toggleTask = useCallback((id: string, line: number) => {
@@ -246,7 +285,26 @@ export function NoteTextFieldLayer({
       visualWidth: layoutWidth * zoom,
       visualHeight: layoutHeight * zoom,
     }
-    const next = fields.map((field) => {
+    // The sheet's height follows the typed text. A box keeps its place on the
+    // page when the owner's typing changes it; any other change of the sheet
+    // (a note that is still loading, a synced edit) is not ours to compensate.
+    let placed: readonly NoteTextField[] = fields
+    if (!pdf && layoutWidth > 1 && layoutHeight > 1) {
+      const aspect = layoutHeight / layoutWidth
+      const signature = fields.map((field) => `${field.id}:${field.page}:${field.x}:${field.y}:${field.width}`).join('|')
+      const anchor = sheetAnchorRef.current
+      if (anchor && anchor.signature === signature && Math.abs(anchor.aspect - aspect) > 1e-6) {
+        if (performance.now() - lastEditAtRef.current < 1500) {
+          const remapped = noteTextFieldsAfterSheetAspect(fields, anchor.aspect, aspect)
+          if (remapped !== fields) {
+            placed = remapped
+            sheetAnchorRef.current = { aspect, signature: remapped.map((field) => `${field.id}:${field.page}:${field.x}:${field.y}:${field.width}`).join('|') }
+            onRemapRef.current?.(remapped)
+          } else sheetAnchorRef.current = { aspect, signature }
+        } else sheetAnchorRef.current = { aspect, signature }
+      } else if (!anchor || anchor.signature !== signature) sheetAnchorRef.current = { aspect, signature }
+    }
+    const next = placed.map((field) => {
       const page = pdf
         ? paper?.querySelector<HTMLElement>(`[data-pdf-page="${field.page}"]`)
         : null
@@ -302,6 +360,19 @@ export function NoteTextFieldLayer({
       window.removeEventListener('resize', measure)
     }
   }, [measure])
+
+  // Only typing, pasting or dropping into the note itself counts as the owner changing its height.
+  useEffect(() => {
+    const view = layerRef.current?.closest('.unified-note-view, .paper-view') ?? layerRef.current?.closest('.unified-paper')
+    if (!view) return
+    const stamp = (event: Event) => {
+      if (event.target instanceof Element && event.target.closest('.note-text-field')) return
+      lastEditAtRef.current = performance.now()
+    }
+    const events = ['keydown', 'beforeinput', 'paste', 'cut', 'drop']
+    for (const name of events) view.addEventListener(name, stamp, true)
+    return () => { for (const name of events) view.removeEventListener(name, stamp, true) }
+  }, [])
 
   useLayoutEffect(() => {
     const layer = layerRef.current
@@ -402,6 +473,7 @@ export function NoteTextFieldLayer({
     event.preventDefault()
     event.stopPropagation()
     setSelectedId(field.id)
+    beginSelectionLock()
     gestureRef.current = { kind: 'move', id: field.id, dx: point.x - field.x, dy: point.y - field.y, width: field.width, moved: false }
     event.currentTarget.setPointerCapture(event.pointerId)
   }
@@ -412,6 +484,7 @@ export function NoteTextFieldLayer({
     event.preventDefault()
     event.stopPropagation()
     setSelectedId(field.id)
+    beginSelectionLock()
     gestureRef.current = {
       kind: 'resize',
       id: field.id,
@@ -448,6 +521,7 @@ export function NoteTextFieldLayer({
     applyGesture(event, true)
     const gesture = gestureRef.current
     gestureRef.current = null
+    endSelectionLock()
     if (!gesture) return
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     layerRef.current

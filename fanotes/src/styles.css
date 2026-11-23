@@ -927,6 +927,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   border-bottom: 2px dotted var(--text-muted, #747887);
 }
 .note-text-field-move:active { cursor: grabbing; }
+/* Moving or resizing a box never selects what is under the pointer. */
+html.is-text-field-gesture, html.is-text-field-gesture * { -webkit-user-select: none !important; user-select: none !important; }
 .note-text-field.is-selected .note-text-field-move,
 .note-text-field:hover .note-text-field-move { display: grid; }
 .note-text-field-resize {
