@@ -1,5 +1,22 @@
 # Änderungsverlauf
 
+## 2026.11.3
+
+- **Android-Tablet.** Neu gestaltete Oberfläche für Tablets: grössere Bedienflächen, Hoch- und Querformat, OLED-Theme, Stift-Werkzeugleiste mit Zeichenstudio, PDF-Textauswahl und Markierungen, Handschrift-Erkennung, Lernwerkzeuge und vollständige englische Oberfläche.
+- **Android-Editor.** Lange Notizen öffnen und tippen ohne Hänger; Tabellen und Bilder erscheinen im Tastatur-Editor, Bilder auch mit Pfaden relativ zur Notiz.
+- **Live-Zusammenarbeit.** Geteilte Notizen gemeinsam gleichzeitig bearbeiten, auch Handschrift; Teilen direkt an einen Benutzernamen, Konten ohne E-Mail.
+- **Sync.** Uploads laufen parallel mit sichtbarem Fortschritt; eine Speicherung während eines Downloads und Konfliktkopien in geteilten Notizen gehen nicht mehr verloren; „Aus“ für Cloud-Sync bleibt nach einem Neustart aus.
+- **Updates.** Notizen werden vor dem Neustart gespeichert, Updates installieren auf Wunsch beim Beenden, Downloads werden wiederholt, und Startoptionen (z. B. GPU- und Skalierungs-Flags) bleiben nach einem Update erhalten.
+- **Zirkel.** Neu gestalteter Zirkel mit Nadel, Gelenk, Bleistiftschenkel und gut lesbarer Radiusanzeige.
+- **Handschrift-Notizen.** Kein Flackern des Textes mehr, wenn direkt nach dem Zoomen gescrollt wird.
+- **Tempo.** Schnellerer Start, flüssiges Tippen auch in sehr langen Notizen, grosse Einfügungen in Sekundenbruchteilen, weniger Speicher bei Texterkennung und Suche.
+- **Editor.** Formatierung aus Word und Webseiten bleibt beim Einfügen erhalten, Überschriften bis H6, Windows-Zeilenenden bleiben erhalten, Ordner duplizieren, neue Notizen direkt benennen.
+- **Windows.** Von Defender oder OneDrive gesperrte Dateien werden erneut versucht, ungültige Dateinamen sicher behandelt, Notepad-Dateien mit BOM korrekt gelesen.
+- **Englisch.** Die englische Oberfläche zeigt keine halb übersetzten Sätze mehr, und eigene Ordner- und Notiznamen werden nie übersetzt.
+- **Barrierefreiheit.** Dialoge sind per Tastatur bedienbar, alle Schaltflächen haben lesbare Namen, bessere Kontraste.
+- **PDF.** Export eines PDFs speichert das PDF selbst, ein PDF im zweiten Teilbereich hat seine Werkzeugleiste, „Wiederholen“ bei fehlgeschlagener Texterkennung funktioniert.
+- **Datenschutz.** Gesendete Diagnosedaten enthalten keine Dateipfade oder Notiznamen mehr.
+
 ## 2026.11.3-beta.9
 
 - i18n: keep en.json sorted so pull requests stop conflicting on it
