@@ -493,6 +493,22 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 
+    /** "Sync now" in a note whose handwriting has not arrived: one sync, then the note opens again. */
+    fun syncThenReopen(editor: NoteEditorController) {
+        busy = true
+        viewModelScope.launch {
+            try {
+                graph.engine.syncNow("phone")
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = error.message?.takeIf { it.isNotBlank() }?.let(::shownText) ?: t(R.string.could_not_refresh_school)
+            } finally {
+                busy = false
+                editor.load()
+            }
+        }
+    }
+
     fun sync() {
         busy = true
         viewModelScope.launch {

@@ -381,6 +381,9 @@
     <string name="note">Notiz</string>
     <string name="note_duplicated">Notiz dupliziert</string>
     <string name="note_needs_attention">Die Notiz braucht Aufmerksamkeit</string>
+    <string name="note_ink_pending_title">Handschrift noch unterwegs</string>
+    <string name="note_ink_pending_body">Die Handschrift dieser Notiz ist noch nicht auf diesem Handy. Sie öffnet sich, sobald der Sync sie geholt hat.</string>
+    <string name="note_ink_pending_saved">Die Handschrift dieser Notiz ist noch nicht auf diesem Handy. Es wurde nichts geändert.</string>
     <string name="note_noun">Notiz</string>
     <string name="note_restored">Notiz wiederhergestellt</string>
     <string name="note_search_needs_attention">Die Notizsuche braucht Aufmerksamkeit</string>

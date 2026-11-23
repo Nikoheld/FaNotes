@@ -38,6 +38,27 @@ class NoteStoreTest {
     }
 
     @Test
+    fun aNoteWhoseHandwritingHasNotArrivedIsPendingAndCannotBeSaved() {
+        val root = Files.createTempDirectory("fanotes-ink-pending")
+        val vault = DirectoryVault(root)
+        val store = NoteStore(vault)
+        // The desktop's small .md arrived; its large .famd did not (yet).
+        vault.write("Chemie/Heft.md", "<!-- fanotes-ink:synthetic-ink -->\n".encodeToByteArray())
+        val opened = store.readNote("Chemie/Heft.md")
+        assertTrue(opened.inkPending)
+        val failure = kotlin.test.assertFailsWith<IllegalStateException> { store.save(opened, opened.document, "Typed on the phone") }
+        assertEquals(INK_PENDING_MESSAGE, failure.message)
+        assertFalse(vault.exists("Chemie/Heft.famd"))
+        assertEquals("<!-- fanotes-ink:synthetic-ink -->\n", vault.read("Chemie/Heft.md")!!.decodeToString())
+        // Once sync has brought the sidecar, the note is normal again.
+        val withInk = store.save(store.readNote("Chemie/Neu.md").copy(markdown = ""), opened.document, "Fresh")
+        assertFalse(store.readNote(withInk.path).inkPending)
+        // A plain note without a marker is never pending.
+        vault.write("Chemie/Plain.md", "Just text\n".encodeToByteArray())
+        assertFalse(store.readNote("Chemie/Plain.md").inkPending)
+    }
+
+    @Test
     fun markdownAndInkSurviveAReload() {
         val root = Files.createTempDirectory("fanotes-vault")
         val vault = DirectoryVault(root)
