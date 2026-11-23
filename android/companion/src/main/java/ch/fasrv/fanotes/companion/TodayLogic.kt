@@ -63,7 +63,7 @@ fun upNext(tasks: List<HomeworkTask>, exams: List<AgendaEntry>, today: LocalDate
         if (classifyHomeworkTask(task, today) == "undated" || due > today.plusDays(1)) null else UpNextItem.Task(task, due)
     }
     val examItems = if (showExams) exams.map { UpNextItem.Exam(it) } else emptyList()
-    return (examItems + taskItems).sortedWith(
+    val sorted = (examItems + taskItems).sortedWith(
         compareBy<UpNextItem> { it.day }
             .thenBy { if (it is UpNextItem.Exam) 0 else 1 }
             .thenBy { item ->
@@ -73,7 +73,12 @@ fun upNext(tasks: List<HomeworkTask>, exams: List<AgendaEntry>, today: LocalDate
                 }
             }
             .thenBy { (it as? UpNextItem.Task)?.task?.title.orEmpty().lowercase() },
-    ).take(limit)
+    )
+    val shown = sorted.take(limit)
+    // Many tasks due soon must not hide every exam: the nearest exam keeps the last row.
+    val nearestExam = sorted.firstOrNull { it is UpNextItem.Exam }
+    if (limit < 1 || nearestExam == null || nearestExam in shown) return shown
+    return (shown.dropLast(1) + nearestExam).sortedBy { sorted.indexOf(it) }
 }
 
 enum class GlanceTile { Grades, Points, Absences, Updates }

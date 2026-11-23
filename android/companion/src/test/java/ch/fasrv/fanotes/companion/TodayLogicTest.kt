@@ -51,6 +51,13 @@ class TodayLogicTest {
         assertEquals("exam:e", upNext(tasks, listOf(exam("e", "2026-11-23")), today, true, true).first().key)
     }
 
+    @Test fun manyTasksDueSoonNeverHideTheNearestExam() {
+        val tasks = (1..6).map { task("t$it", "2026-11-23") }
+        val exams = listOf(exam("later", "2026-12-03"), exam("next", "2026-11-27"))
+        val rows = upNext(tasks, exams, today, true, true)
+        assertEquals(listOf("task:t1", "task:t2", "task:t3", "exam:next"), rows.map { it.key })
+    }
+
     @Test fun upNextRespectsTheTasksAndExamCards() {
         val tasks = listOf(task("t", "2026-11-23"))
         val exams = listOf(exam("e", "2026-11-25"))
