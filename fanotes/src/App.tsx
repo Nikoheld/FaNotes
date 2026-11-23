@@ -1105,7 +1105,6 @@ export default function App({ startupBootstrap }: AppProps) {
 
   useEffect(() => { tabsRef.current = tabs }, [tabs])
   useEffect(() => { pruneTabState(new Set(tabs.map((tab) => tab.path))) }, [pruneTabState, tabs])
-  useEffect(() => { drawingSessionRef.current = drawingSession }, [drawingSession])
   useEffect(() => { activePathRef.current = activePath }, [activePath])
   useEffect(() => { splitPathRef.current = splitPath }, [splitPath])
   useEffect(() => { saveSplitLayout(splitLayout) }, [splitLayout])
@@ -1297,6 +1296,11 @@ export default function App({ startupBootstrap }: AppProps) {
   // The overlay renders only the session loaded for the active note; the
   // switch effect below replaces a previous note's session one commit later.
   const noteDrawingSession = overlaySessionForNote(drawingSession, activeTab?.path ?? null)
+  // Closures below read these instead of `drawingSession` / `noteDrawingSession`: a variable that any closure
+  // captures lives in the render's context, and the stale contexts that memoized callbacks keep alive
+  // would then hold every earlier session's whole drawing JSON (one copy per note open, for good).
+  const noteDrawingKey = noteDrawingSession.key
+  drawingSessionRef.current = drawingSession
   // The dirty flag belongs to the mounted board. A board that just unmounted
   // still reports (its unmount save, a resize during teardown); those reports
   // must not describe the next note's page.
@@ -5023,12 +5027,12 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [drawingOpen, homeworkOpen, overviewOpen, toast])
 
   const handleDrawingDirtyChange = useMemo(() => {
-    const session = noteDrawingSession.key
+    const session = noteDrawingKey
     return (dirty: boolean) => {
       if (session !== drawingSessionKeyRef.current) return
       drawingDirtyRef.current = dirty
     }
-  }, [noteDrawingSession.key])
+  }, [noteDrawingKey])
 
   const handleInkActivity = useCallback((activity: InkActivity) => {
     const path = activePathRef.current
@@ -5141,7 +5145,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setDrawingOpen(true)
     // A mounted session already shows this note's saved ink (keyboard mode
     // keeps one for notes with handwriting); the pen just becomes the input.
-    if (noteDrawingSession.key > 0) return
+    if (noteDrawingKey > 0) return
     // Same FAMD-first read as the note switch. Reading only the library
     // record here resumed the pen on a stale copy of the page whenever the
     // `.famd` companion was newer, and the next save then overwrote the
@@ -5152,7 +5156,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
       setDrawingSession({ ...drawingSessionFromLoad(requestId, document), path })
     })
-  }, [activeTab, noteDrawingSession.key, toast])
+  }, [activeTab, noteDrawingKey, toast])
 
   const toggleDrawing = useCallback(() => {
     if (drawingOpenRef.current) closeDrawing()
@@ -5187,7 +5191,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     pump()
     return () => { cancelled = true }
-  }, [drawingOpen, noteDrawingSession.key])
+  }, [drawingOpen, noteDrawingKey])
 
   useEffect(() => {
     if (!settings.experimentalRemoteSupport || !remoteSupportSession) return
