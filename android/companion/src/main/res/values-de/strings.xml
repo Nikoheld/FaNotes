@@ -1182,6 +1182,16 @@
     <string name="mensa_title">Mensa</string>
     <string name="mensa_closed">Mensa geschlossen</string>
     <string name="mensa_student_price">Schüler CHF %1$s</string>
+    <string name="mensa_week_action">Woche</string>
+    <string name="mensa_this_week">Diese Woche</string>
+    <string name="mensa_next_week">Nächste Woche</string>
+    <string name="mensa_no_menu_day">Für diesen Tag wurde kein Menü veröffentlicht.</string>
+    <string name="mensa_empty_title">Noch kein Menü</string>
+    <string name="mensa_empty_body">Das Mensa-Menü erscheint hier, sobald es veröffentlicht ist. Zum Erneuern nach unten ziehen.</string>
+    <string name="mensa_offline_body">Es besteht keine Verbindung und kein Menü ist gespeichert. Ziehe nach unten, sobald du wieder online bist.</string>
+    <string name="mensa_stale_note">Dieses Menü konnte nicht erneuert werden und ist eventuell nicht mehr aktuell.</string>
+    <string name="mensa_updated">Menü aktualisiert %1$s</string>
+    <string name="mensa_day_chip">%1$s, %2$s</string>
     <string name="planned_absence">Geplante Absenz</string>
     <string name="planned_absences">Geplante Absenzen</string>
     <string name="planned_absence_tag">geplant</string>
