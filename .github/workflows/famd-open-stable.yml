@@ -3,10 +3,13 @@ name: Handwriting note opens stable
 # Opening a .famd note in the desktop app (Electron under Xvfb): the first
 # painted frame already has the final layout - typed text, page box, text
 # boxes - and opening never moves a stored text box
-# (fanotes/scripts/check-famd-open-stable.mjs, under a minute). A second step
-# drives text boxes (fanotes/scripts/check-text-field-position.mjs, about a
-# minute): dragging never selects text, and boxes stay where they were left. Never builds
-# or publishes a release.
+# (fanotes/scripts/check-famd-open-stable.mjs, under a minute). The handwriting
+# is complete from that first frame too - no blank, partial, flashing or moved
+# ink frame on any open, opening writes no note, and opens stay inside their
+# time budget (fanotes/scripts/check-ink-open-flicker.mjs, about a minute).
+# Another step drives text boxes (fanotes/scripts/check-text-field-position.mjs,
+# about a minute): dragging never selects text, and boxes stay where they were
+# left. Never builds or publishes a release.
 on:
   pull_request:
     paths:
@@ -16,6 +19,9 @@ on:
       - 'fanotes/src/components/MarkdownEditor.tsx'
       - 'fanotes/src/components/NoteTextFieldLayer.tsx'
       - 'fanotes/src/components/NoteLinkLayer.tsx'
+      - 'fanotes/src/components/InkPreviewLayer.tsx'
+      - 'fanotes/src/lib/packedInk.ts'
+      - 'fanotes/src/lib/inkBitmapCache.ts'
       - 'fanotes/src/lib/paper*.ts'
       - 'fanotes/src/lib/noteCanvas.ts'
       - 'fanotes/src/lib/noteTextField.ts'
@@ -26,6 +32,7 @@ on:
       - 'fanotes/src/components/NoteTextFieldMarkdown.tsx'
       - 'fanotes/src/lib/noteTextFieldFormat.ts'
       - 'fanotes/scripts/check-famd-open-stable.mjs'
+      - 'fanotes/scripts/check-ink-open-flicker.mjs'
       - 'fanotes/scripts/check-text-field-position.mjs'
       - 'fanotes/scripts/check-text-field-toolbar.mjs'
       - '.github/workflows/famd-open-stable.yml'
@@ -65,6 +72,8 @@ jobs:
           test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
       - name: Every frame of a note opening
         run: npm run check:famd-open-stable
+      - name: Handwriting complete from the first frame of every open
+        run: npm run check:ink-open-flicker
       - name: Text boxes never select text and stay put
         run: npm run check:text-field-position
       - name: Text boxes use the document formatting toolbar

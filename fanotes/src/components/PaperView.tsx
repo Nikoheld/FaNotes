@@ -161,9 +161,17 @@ type PaperViewProps = {
   globalShortcuts?: boolean
   /** One-finger swipe from the left or right screen edge steps through notes. */
   onEdgeSwipe?: (direction: 'back' | 'forward') => void
+  /**
+   * Zoom a note without a remembered view opens at, from the pane width (the
+   * split pane's fit). Applied before the open camera, so the pane's first
+   * frame already shows it.
+   */
+  openZoom?: (paneWidth: number) => number
 }
 
-export function PaperView({ children, className = '', viewKey, showHud = true, onPointerDownCapture, onFocusCapture, store = sharedPaperViewStore, globalShortcuts = true, onEdgeSwipe }: PaperViewProps) {
+export function PaperView({ children, className = '', viewKey, showHud = true, onPointerDownCapture, onFocusCapture, store = sharedPaperViewStore, globalShortcuts = true, onEdgeSwipe, openZoom }: PaperViewProps) {
+  const openZoomRef = useRef(openZoom)
+  openZoomRef.current = openZoom
   const noteViewRef = useRef<HTMLDivElement>(null)
   const storeRef = useRef(store)
   storeRef.current = store
@@ -206,9 +214,12 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     storeRef.current.write(next)
   }, [])
 
-  useEffect(() => store.subscribe(paint), [paint, store])
+  // Layout effects, before the open below: a zoom written while the pane
+  // mounts (its fit, openZoom) is on the sheet, and under its camera, in the
+  // pane's first frame instead of one frame later.
+  useLayoutEffect(() => store.subscribe(paint), [paint, store])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     paint(store.read())
   }, [paint, store])
 
@@ -221,9 +232,12 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     // The plane element survives a note switch. An in-flight pinch must not
     // commit its CSS zoom onto the note that just opened.
     cancelZoomGestureRef.current()
-    const remembered = recallPaperViewForWidth(loadPaperViewMemory(), paperViewMemoryKey(viewKey), noteViewRef.current?.clientWidth ?? 0)
+    const paneWidth = noteViewRef.current?.clientWidth ?? 0
+    const remembered = recallPaperViewForWidth(loadPaperViewMemory(), paperViewMemoryKey(viewKey), paneWidth)
     setRecalled(remembered !== null)
-    storeRef.current.write(paperViewFromMemory(remembered))
+    const view = paperViewFromMemory(remembered)
+    const fitted = !remembered && paneWidth > 0 ? openZoomRef.current?.(paneWidth) : undefined
+    storeRef.current.write(fitted && Number.isFinite(fitted) && fitted > 0 ? { ...view, zoom: fitted } : view)
   }, [viewKey])
 
   useLayoutEffect(() => {
@@ -521,9 +535,18 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     const applyOpenCamera = (force = false) => {
       const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
       const paper = scroller.querySelector<HTMLElement>('.unified-paper')
-      const room = Number.parseFloat(plane?.style.getPropertyValue('--paper-scroll-room') || '') || SCROLL_ROOM
-      const pageWidth = paper?.offsetWidth || Math.max(0, (plane?.offsetWidth || 0) - room * 2)
-      const pageHeight = paper?.offsetHeight || Math.max(0, (plane?.offsetHeight || 0) - room * 2)
+      let room = Number.parseFloat(plane?.style.getPropertyValue('--paper-scroll-room') || '') || SCROLL_ROOM
+      let pageWidth = paper?.offsetWidth || Math.max(0, (plane?.offsetWidth || 0) - room * 2)
+      let pageHeight = paper?.offsetHeight || Math.max(0, (plane?.offsetHeight || 0) - room * 2)
+      if (paper && plane && Math.abs(viewRef.current.zoom - 1) > 0.001) {
+        // A pane that opens at its fit zoom (openZoom): the sheet, its room and
+        // the scroll offsets are all screen px there.
+        const paperBox = paper.getBoundingClientRect()
+        const planeBox = plane.getBoundingClientRect()
+        pageWidth = paperBox.width
+        pageHeight = paperBox.height
+        room = Math.max(0, paperBox.left - planeBox.left)
+      }
       // The scroller element is reused. The previous note's offset is not
       // this note's camera, and a non-zero scroll makes the helper refuse —
       // a shorter note stayed clamped to the bottom. The retry still reads

@@ -427,6 +427,67 @@ class TextWidget extends WidgetType {
   }
 }
 
+/**
+ * Vault pictures already read, by note and source. A data URL loads at once,
+ * so a picture in this cache has its size in the note's first frame; read
+ * later, it grew its line a frame or two after the note showed and the sheet
+ * with all its handwriting jumped by the picture's height.
+ */
+const imageUrlCache = new Map<string, string>()
+const IMAGE_URL_CACHE_CHARS = 32 * 1024 * 1024
+let imageUrlCacheChars = 0
+const imageCacheKey = (notePath: string, source: string) => `${notePath}\n${source}`
+const rememberImageUrl = (key: string, url: string) => {
+  const held = imageUrlCache.get(key)
+  if (held !== undefined) {
+    imageUrlCacheChars -= held.length
+    imageUrlCache.delete(key)
+  }
+  if (url.length > IMAGE_URL_CACHE_CHARS / 4) return
+  imageUrlCache.set(key, url)
+  imageUrlCacheChars += url.length
+  for (const [oldest, value] of imageUrlCache) {
+    if (imageUrlCacheChars <= IMAGE_URL_CACHE_CHARS) break
+    imageUrlCache.delete(oldest)
+    imageUrlCacheChars -= value.length
+  }
+}
+const readVaultImageUrl = async (source: string, notePath: string) => {
+  let relative = source
+  try { relative = decodeURIComponent(relative) } catch { /* keep the raw path */ }
+  for (const candidate of imageCandidates(relative, notePath)) {
+    try {
+      return await window.fanotes.readAssetDataUrl(candidate)
+    } catch {
+      // The next candidate.
+    }
+  }
+  throw new Error('Bild nicht gefunden')
+}
+
+/**
+ * Reads the pictures of a note that is about to open (the open waits for
+ * this, capped), so its first frame lays them out at their size.
+ */
+export const prepareNoteImages = async (notePath: string, markdown: string) => {
+  if (typeof window === 'undefined' || typeof window.fanotes?.readAssetDataUrl !== 'function' || !markdown.includes('![')) return
+  const sources = new Set<string>()
+  for (const line of markdown.split('\n')) {
+    const image = vaultImageLine(line)
+    if (image) sources.add(image.source)
+    if (sources.size >= 12) break
+  }
+  await Promise.all([...sources].map(async (source) => {
+    const key = imageCacheKey(notePath, source)
+    if (imageUrlCache.has(key)) return
+    try {
+      rememberImageUrl(key, await readVaultImageUrl(source, notePath))
+    } catch {
+      // Shown as missing by the editor, as before.
+    }
+  }))
+}
+
 /** A whole-line `![alt](vault/path.png)` drawn as the picture itself; the source shows while the caret is on the line. */
 class ImageWidget extends WidgetType {
   constructor(readonly alt: string, readonly source: string, readonly notePath: string) { super() }
@@ -437,18 +498,22 @@ class ImageWidget extends WidgetType {
     const image = document.createElement('img')
     image.alt = this.alt
     image.draggable = false
-    image.decoding = 'async'
     image.addEventListener('load', () => view.requestMeasure())
     image.addEventListener('error', () => { frame.textContent = this.alt || 'Bild nicht gefunden'; frame.classList.add('is-missing'); view.requestMeasure() })
     frame.append(image)
-    let relative = this.source
-    try { relative = decodeURIComponent(relative) } catch { /* keep the raw path */ }
-    const candidates = imageCandidates(relative, this.notePath)
-    const tryNext = (index: number) => {
-      if (index >= candidates.length) { image.dispatchEvent(new Event('error')); return }
-      void window.fanotes.readAssetDataUrl(candidates[index]).then((url) => { image.src = url }).catch(() => tryNext(index + 1))
+    const key = imageCacheKey(this.notePath, this.source)
+    const cached = imageUrlCache.get(key)
+    if (cached !== undefined) {
+      // Painted in the frame that lays it out.
+      image.decoding = 'sync'
+      image.src = cached
+      return frame
     }
-    tryNext(0)
+    image.decoding = 'async'
+    void readVaultImageUrl(this.source, this.notePath).then((url) => {
+      rememberImageUrl(key, url)
+      image.src = url
+    }, () => image.dispatchEvent(new Event('error')))
     return frame
   }
   ignoreEvent() { return false }

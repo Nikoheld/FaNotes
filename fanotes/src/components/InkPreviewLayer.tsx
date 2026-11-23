@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createMarkerCoverage, drawInkStroke, type InkPaintStroke } from '../lib/inkStrokePaint'
-import { expandPackedStroke, frameBudgetOpen } from '../lib/packedInk'
+import { expandPackedStroke, frameBudgetOpen, INK_OPEN_ONE_PASS_POINTS, packedInkPoints } from '../lib/packedInk'
 import { readFunctionGraphStamp } from '../lib/functionGraph'
 import { clampFigureLineWidth, clampFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths } from '../lib/mathFigures'
 import { textOriginCssPx } from '../lib/noteCanvas'
@@ -120,24 +120,48 @@ export const inkPreviewScale = (width: number, height: number, devicePixelRatio:
   return Math.max(0.25, Math.min(wanted, affordable))
 }
 
-export function InkPreviewLayer({ load, smoothing, reloadKey }: {
+const samePreviewDocument = (a: InkPreviewDocument | null, b: InkPreviewDocument | null) => {
+  if (!a || !b) return a === b
+  if (a.drawingJson !== b.drawingJson) return false
+  const left = a.packedInk
+  const right = b.packedInk
+  if (!left?.columns || !right?.columns) return !left?.columns && !right?.columns
+  if (left.stride !== right.stride || left.columns.length !== right.columns.length) return false
+  for (let index = 0; index < left.columns.length; index += 1) if (left.columns[index] !== right.columns[index]) return false
+  return true
+}
+
+/**
+ * Mount it per note (a `key`): `initial` is the page read before the pane
+ * showed, so the pane's first frame has its ink; a reload keeps the shown
+ * page until the new one is read, and keeps it when nothing changed.
+ */
+export function InkPreviewLayer({ load, smoothing, reloadKey, initial }: {
   load: () => Promise<InkPreviewDocument | null>
   smoothing: number
   /** Changing this re-reads the page (the note's ink was saved elsewhere). */
   reloadKey?: string | number
+  /** The note's page as read before the pane mounted (undefined: not read yet). */
+  initial?: InkPreviewDocument | null
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [page, setPage] = useState<ParsedInkPage | null>(null)
+  const [page, setPage] = useState<ParsedInkPage | null>(() => (
+    initial ? parseInkPreviewPage(initial.drawingJson, initial.packedInk) : null
+  ))
+  const shownRef = useRef<InkPreviewDocument | null | undefined>(initial)
   const paperView = usePaperViewController()
 
   useEffect(() => {
     let alive = true
-    setPage(null)
     void load().then((document) => {
       if (!alive) return
+      if (shownRef.current !== undefined && samePreviewDocument(shownRef.current, document)) return
+      shownRef.current = document
       setPage(document ? parseInkPreviewPage(document.drawingJson, document.packedInk) : null)
     }).catch(() => {
-      if (alive) setPage(null)
+      if (!alive) return
+      shownRef.current = null
+      setPage(null)
     })
     return () => { alive = false }
   }, [load, reloadKey])
@@ -145,7 +169,8 @@ export function InkPreviewLayer({ load, smoothing, reloadKey }: {
   // The paper grows to the saved page so the ink below the text stays reachable
   // by scrolling, and the text sits at the same origin pad as under the live
   // board: a page that grew at the top keeps its text next to the ink here too.
-  useEffect(() => {
+  // Before paint, so the first frame with the page has its size.
+  useLayoutEffect(() => {
     const paper = canvasRef.current?.parentElement
     if (!paper || !page) return
     const origin = textOriginCssPx(page.originX, page.originY)
@@ -165,7 +190,8 @@ export function InkPreviewLayer({ load, smoothing, reloadKey }: {
     }
   }, [page])
 
-  useEffect(() => {
+  // Painted before the frame that shows the canvas: no blank or half-drawn frame.
+  useLayoutEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !page) return
     let paintedScale = 0
@@ -187,12 +213,14 @@ export function InkPreviewLayer({ load, smoothing, reloadKey }: {
       const packed = page.packedInk?.columns ? page.packedStrokes : null
       if (packed && page.packedInk) {
         const columns = page.packedInk
+        // A page of usual size is painted whole now; only a huge one goes a slice per frame.
+        const onePass = packedInkPoints(columns) <= INK_OPEN_ONE_PASS_POINTS
         const paintPacked = (from: number) => {
           if (!alive || paintedScale !== scale) return
           const started = performance.now()
           let painted = 0
           let cursor = from
-          while (cursor < packed.length && frameBudgetOpen(started, performance.now(), painted)) {
+          while (cursor < packed.length && (onePass || frameBudgetOpen(started, performance.now(), painted))) {
             const entry = packed[cursor]
             cursor += 1
             painted += 1
@@ -216,9 +244,17 @@ export function InkPreviewLayer({ load, smoothing, reloadKey }: {
     }
     paint()
     // During a zoom gesture the CSS camera scales the existing bitmap; the
-    // sharp re-raster happens once the wheel/pinch burst has settled.
+    // sharp re-raster happens once the wheel/pinch burst has settled. The
+    // pane's own open zoom (its fit) lands in the commit that mounts this
+    // layer: painted at it right away, the first frame is the final picture.
     let settleTimer = 0
+    let mounting = true
+    queueMicrotask(() => { mounting = false })
     const unsubscribeZoom = paperView?.subscribe(() => {
+      if (mounting) {
+        paint()
+        return
+      }
       if (settleTimer) window.clearTimeout(settleTimer)
       settleTimer = window.setTimeout(() => {
         settleTimer = 0
