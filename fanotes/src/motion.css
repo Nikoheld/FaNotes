@@ -1,0 +1,56 @@
+/* Shared motion system. Tokens (--dur-1..3, --ease-standard/decel/accel) live in styles.css :root.
+   Rules: animate opacity and transform only, never layout properties; nothing delays content (the final
+   state is the layout state, the animation only eases the first paint); no animation on the note sheet,
+   ink canvas or the note open path. Exits use .motion-ghost clones made by src/lib/motion.ts. */
+
+@keyframes motion-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes motion-rise-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes motion-drop-in { from { opacity: 0; transform: translateY(-4px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes motion-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes motion-dialog-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(4px) scale(.992); } }
+@keyframes motion-tab-line { from { transform: scaleX(.2); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Hover, press and selection feedback on chrome (zero specificity: components that set their own transition win). */
+:where(.sidebar button, .ribbon button, .note-tab, .tab-close, .settings-nav nav button, .segmented button, .file-tree__row, .file-tree__context-menu button, .ftb-popover .ftb-row, .command-palette li, .split-pane-head button, .icon-button) {
+  transition: background-color var(--dur-1) var(--ease-standard), color var(--dur-1) var(--ease-standard), border-color var(--dur-1) var(--ease-standard), opacity var(--dur-1) var(--ease-standard);
+}
+
+/* Sidebar: panel swaps (file tree / search / tools) and expanding folders fade in. The content is laid out at
+   once, so nothing shifts while the fade runs. */
+.sidebar > .search-panel, aside.search-panel, .sidebar-tools-list:not([hidden]) { animation: motion-fade-in var(--dur-2) var(--ease-decel) both; }
+.file-tree__group { animation: motion-fade-in var(--dur-2) var(--ease-decel) both; }
+.sidebar.is-hidden { transition: opacity var(--dur-2) var(--ease-standard); }
+
+/* Tabs: a new tab fades in, the active indicator grows from the center. */
+.tabs-bar .note-tab { animation: motion-fade-in var(--dur-2) var(--ease-decel) both; }
+.note-tab.active::after { transform-origin: 50% 50%; animation: motion-tab-line var(--dur-2) var(--ease-decel) both; }
+.note-tab.in-split:not(.active)::after { animation: motion-fade-in var(--dur-2) var(--ease-decel) both; }
+
+/* Menus and popovers open from their anchor. */
+.file-tree__context-menu, .ftb-popover { transform-origin: top left; animation: motion-drop-in var(--dur-2) var(--ease-decel) both; }
+
+/* Settings: switching sections fades the new section in; the dialog itself already eases in via modal-in. */
+.settings-scroll > * { animation: motion-fade-in var(--dur-3) var(--ease-decel) both; }
+
+/* Split view and in-flow banners. The note views inside the split are not animated. */
+.editor-split.is-split > .split-divider, .split-pane-head { animation: motion-fade-in var(--dur-2) var(--ease-decel) both; }
+.external-banner, .ribbon-status .update-ready-button { animation: motion-fade-in var(--dur-2) var(--ease-decel) both; }
+
+/* Exit ghosts: inert clones of removed overlays (see src/lib/motion.ts). */
+.motion-ghost { pointer-events: none !important; animation: motion-out var(--dur-1) var(--ease-accel) both !important; }
+.motion-ghost.modal-backdrop > * { animation: motion-dialog-out var(--dur-1) var(--ease-accel) both !important; }
+.motion-ghost.modal-backdrop { backdrop-filter: none; }
+.motion-ghost.toast { animation: motion-out var(--dur-1) var(--ease-accel) both !important; }
+
+/* Skeleton placeholder for content that loads after the shell (e.g. lists with nothing yet). */
+.motion-skeleton { position: relative; overflow: hidden; border-radius: 6px; background: color-mix(in srgb, var(--text) 7%, transparent); }
+.motion-skeleton::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 9%, transparent), transparent); transform: translateX(-100%); animation: motion-skeleton-sweep 1.2s var(--ease-standard) infinite; }
+@keyframes motion-skeleton-sweep { to { transform: translateX(100%); } }
+
+/* Reduced motion: the OS preference and the app setting (html.motion-off, .no-motion) end every animation at once. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-1: .001ms; --dur-2: .001ms; --dur-3: .001ms; --motion-fast: .001ms; --motion-med: .001ms; --motion-slow: .001ms; }
+  *, *::before, *::after { animation-duration: .001ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+}
+:root.motion-off { --dur-1: .001ms; --dur-2: .001ms; --dur-3: .001ms; --motion-fast: .001ms; --motion-med: .001ms; --motion-slow: .001ms; }
+:root.motion-off *, :root.motion-off *::before, :root.motion-off *::after { animation-duration: .001ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }

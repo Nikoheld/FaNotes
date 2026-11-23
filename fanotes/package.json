@@ -38,6 +38,7 @@
     "check:famd": "node scripts/check-famd.cjs && node scripts/check-famd-v2.cjs && node scripts/check-famd-open.cjs",
     "check:famd-v2": "node scripts/check-famd-v2.cjs",
     "check:a11y": "node scripts/check-a11y.mjs",
+    "check:motion": "node scripts/check-motion.cjs",
     "check:idle-wakeups": "node scripts/check-idle-wakeups.mjs",
     "check:desktop-latency": "node scripts/check-desktop-latency.mjs",
     "check:desktop-memory": "node scripts/check-desktop-memory.mjs",
