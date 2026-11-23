@@ -43,6 +43,8 @@
     "check:desktop-memory": "node scripts/check-desktop-memory.mjs",
     "check:note-open-cost": "node scripts/check-note-open-cost.mjs",
     "check:pdf-side-pages": "node scripts/check-pdf-side-pages.mjs",
+    "check:desktop-flows": "cross-env FANOTES_FLOW_ONLY=pdf,split,export,history,trash node scripts/check-desktop-untested-flows.mjs",
+    "check:desktop-flows:account": "cross-env FANOTES_FLOW_ONLY=account,share,attachments node scripts/check-desktop-untested-flows.mjs",
     "check:study-annotations": "node scripts/check-study-annotations.cjs",
     "check:packaged-i18n": "node scripts/check-packaged-i18n.cjs",
     "check:markdown": "node scripts/check-markdown.mjs",

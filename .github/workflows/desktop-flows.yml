@@ -1,0 +1,50 @@
+name: Desktop flows
+
+# Desktop features the QA reports could not cover, driven in the real app (Electron under Xvfb, temp profile,
+# synthetic vault) and verified on disk: PDF annotate/highlight/erase/undo and text fields, split view with a PDF
+# in either pane, Export as PDF/LaTeX and PDF import, version history restore, trash restore.
+# About two minutes. The account, share and "Sync attachments" flows (npm run check:desktop-flows:account) run a
+# local fanotes-site and take longer; run them locally when touching sync or shares.
+on:
+  pull_request:
+    paths:
+      - 'fanotes/src/**'
+      - 'fanotes/electron/**'
+      - 'fanotes/scripts/check-desktop-untested-flows.mjs'
+      - 'fanotes/scripts/electron-test-stub.cjs'
+      - 'fanotes/scripts/lib/desktop-flow.mjs'
+      - '.github/workflows/desktop-flows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flows:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: fanotes
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:spelling
+      - run: node scripts/stage-main-i18n.cjs
+      - name: Root packages the renderer imports (hershey)
+        working-directory: .
+        run: npm ci --no-audit --no-fund
+      - name: Renderer
+        run: npx vite build
+      - name: Xvfb and playwright-core
+        run: |
+          command -v xvfb-run || (sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 xvfb)
+          npm install --no-save --no-audit --no-fund playwright-core@1.65.0
+          test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
+      - name: Desktop flows
+        run: npm run check:desktop-flows || { echo "::warning::desktop flows failed once; retrying"; npm run check:desktop-flows; }

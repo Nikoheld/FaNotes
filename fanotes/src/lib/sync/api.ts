@@ -103,6 +103,10 @@ export class SyncApi {
   private async request(path: string, init: RequestInit & { session?: SyncSession | null; retry?: boolean } = {}): Promise<Response> {
     const { session, retry, ...fetchInit } = init
     const headers = new Headers(fetchInit.headers)
+    // The desktop app translates the server's German messages itself, in the language of its own UI. Without this the
+    // server follows the system locale and mixes languages (word-level fallback) for messages it has no catalog entry for.
+    const platform = typeof window !== 'undefined' ? window.fanotes?.platform : undefined
+    if (platform && platform !== 'web' && platform !== 'browser-preview' && !headers.has('Accept-Language')) headers.set('Accept-Language', 'de')
     if (session) {
       headers.set('Authorization', `Bearer ${session.token}`)
       headers.set('X-FaNotes-Account', session.accountId)
