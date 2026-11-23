@@ -13,7 +13,7 @@ type CategoryKey = 'diagnosticsCrashes' | 'diagnosticsLogs' | 'diagnosticsPerf' 
 const CATEGORIES: Array<{ key: CategoryKey; title: string; detail: string }> = [
   { key: 'diagnosticsCrashes', title: 'Absturzberichte', detail: 'Wenn FaNotes oder ein Teil davon abstürzt: Art des Absturzes, Fehlercode und die betroffenen Code-Zeilen der App.' },
   { key: 'diagnosticsLogs', title: 'Fehlerdiagnose', detail: 'Fehlerart, Fehlercode und Code-Zeilen bei Fehlern in der App, plus ein Kürzel zum Gruppieren. Der Text der Fehlermeldung wird nie gesendet.' },
-  { key: 'diagnosticsPerf', title: 'Leistungsdaten', detail: 'Startzeit, Stift-Latenz (Median und obere Perzentile) und Speicherverbrauch, höchstens einmal am Tag.' },
+  { key: 'diagnosticsPerf', title: 'Leistungsdaten', detail: 'Startzeit, Stift-Latenz (Median und obere Perzentile), Speicherverbrauch und Hänger (Anzahl, Dauer, grobe Art), höchstens einmal am Tag.' },
   { key: 'diagnosticsUsage', title: 'Nutzungsstatistik', detail: 'Version, Betriebssystem, wie oft Werkzeuge und Ansichten genutzt werden und die ungefähre Vault-Größe in Stufen.' },
 ]
 
@@ -73,7 +73,7 @@ export function DiagnosticsCard({ settings, update }: { settings: AppSettings; u
           <ul>
             <li>Absturzberichte: Art (z. B. unbehandelte Ausnahme, Renderer oder Hilfsprozess beendet), Fehlerklasse, Fehlercode, Beendigungsgrund und bis zu vier Code-Zeilen der App (Dateiname der App und Zeilennummer, ohne Pfad), Anzahl.</li>
             <li>Fehlerdiagnose: Fehlerklasse, Fehlercode, Code-Zeilen der App und ein Kürzel; nie der Text der Meldung.</li>
-            <li>Leistungsdaten: Startzeit, Stift-Latenz (Median, 90. und 99. Perzentil), Speicherverbrauch in Stufen von 10 MB.</li>
+            <li>Leistungsdaten: Startzeit, Stift-Latenz (Median, 90. und 99. Perzentil), Speicherverbrauch in Stufen von 10 MB, Hänger über 0,5 s (Anzahl, längste Dauer, 95. Perzentil, Verteilung auf Sync, Speichern, Index, Öffnen und Sonstiges, Verzögerung des Hauptprozesses; keine Namen, Pfade oder Inhalte).</li>
             <li>Nutzungsstatistik: Zähler für Werkzeuge und Ansichten, Anzahl Notizen und Vault-Größe in groben Stufen, ein anonymer Start-Zähler.</li>
             <li>Immer dabei: zufällige Installations-ID (nicht mit Sync-Konto oder E-Mail verbunden, jederzeit erneuerbar), App-Version, Betriebssystem, Architektur und Sprache.</li>
           </ul>

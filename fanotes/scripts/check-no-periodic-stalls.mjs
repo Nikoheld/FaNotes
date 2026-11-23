@@ -56,7 +56,7 @@ buildVault(vault, { notes: 300 })
 fs.writeFileSync(path.join(userData, 'config.json'), `${JSON.stringify({
   version: 3,
   vaultPath: vault,
-  settings: { uiLanguage: 'de', autoCheckUpdates: false, autoDownloadUpdates: false },
+  settings: { uiLanguage: 'de', autoCheckUpdates: false, autoDownloadUpdates: false, diagnosticsEnabled: true, diagnosticsCrashes: true, diagnosticsLogs: true, diagnosticsPerf: true, diagnosticsUsage: true, diagnosticsSettingsVersion: 1, diagnosticsNoticeSeen: true },
   onboarding: { version: 1, completed: true },
 }, null, 2)}\n`, { mode: 0o600 })
 
@@ -159,7 +159,15 @@ while (Date.now() - started < USE_S * 1000 || cycle < warmCycles + 6) {
 await sleep(1500)
 await sample()
 await phase('done')
-const stalls = await page.evaluate(() => window.__stalls.slice())
+// The anonymous stall statistics: a deliberate 700 ms task shows up as counts and durations only.
+// (a timer task: code run by the debugger's evaluate is not a page task and is never reported)
+await page.evaluate(() => new Promise((resolve) => setTimeout(() => { const end = performance.now() + 700; while (performance.now() < end) { /* busy */ } resolve(null) }, 0)))
+await sleep(1500)
+const preview = await page.evaluate(() => window.fanotes?.diagnostics?.preview?.().catch(() => null))
+const reported = preview?.perf?.stalls
+assert.ok(reported && reported.count >= 1 && reported.maxMs >= 600, `the stall statistics did not record a 700 ms task: ${JSON.stringify(preview?.perf)}`)
+assert.deepEqual(Object.keys(reported).sort(), ['byPhase', 'count', 'mainLag', 'maxMs', 'p95Ms'])
+const stalls = (await page.evaluate(() => window.__stalls.slice())).filter((entry) => entry.phase !== 'done')
 clearTimeout(watchdog)
 cleanup()
 

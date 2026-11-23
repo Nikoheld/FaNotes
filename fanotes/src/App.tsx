@@ -257,6 +257,7 @@ import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZ
 import { flushPaperViewMemory, loadPaperViewMemory, paperViewMemoryKey, recallPaperView, recallPaperViewForWidth } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
 import { configureDiagnostics, recordFeature, setDiagnosticsVault } from './lib/diagnosticsClient'
+import { startStallMonitor, trackActivity } from './lib/stallMonitor'
 import { SendDataNotice } from './components/SendDataNotice'
 import {
   collectSendDataNutzerdaten,
@@ -2094,7 +2095,7 @@ export default function App({ startupBootstrap }: AppProps) {
     window.clearTimeout(timer)
   }, [])
 
-  const openNote = useCallback(async (path: string): Promise<boolean> => {
+  const openNoteUntracked = useCallback(async (path: string): Promise<boolean> => {
     if (activePathRef.current && activePathRef.current !== path) {
       // Book the last keystrokes under the note that is leaving before its editor unmounts.
       editorRef.current?.flushChanges()
@@ -2165,6 +2166,7 @@ export default function App({ startupBootstrap }: AppProps) {
       openingNotesRef.current.delete(requestKey)
     }
   }, [flushDocumentLayers, prepareDocumentOpen, readNoteTab, revealOpenedNote, toast])
+  const openNote = useCallback((path: string) => trackActivity('open', openNoteUntracked(path)), [openNoteUntracked])
 
   /**
    * Bring back the tabs, pins and split the vault was left with. The active
@@ -2396,7 +2398,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }).catch(() => undefined)
   }, [])
 
-  const saveContent = useCallback(async (path: string, content: string, options?: { quiet?: boolean }): Promise<boolean> => {
+  const saveContentUntracked = useCallback(async (path: string, content: string, options?: { quiet?: boolean }): Promise<boolean> => {
     const timer = saveTimers.current.get(path)
     if (timer) window.clearTimeout(timer)
     saveTimers.current.delete(path)
@@ -2501,6 +2503,7 @@ export default function App({ startupBootstrap }: AppProps) {
       return false
     }
   }, [flushPageStats, noteOwnWrite, pushEditableShare, tabHoldsRef, toast])
+  const saveContent = useCallback((path: string, content: string, options?: { quiet?: boolean }) => trackActivity('save', saveContentUntracked(path, content, options)), [saveContentUntracked])
   saveContentRef.current = (path, content) => saveContent(path, content)
 
   /** Writes statistics that moved on without any typing, without touching the save indicator. */
@@ -4541,11 +4544,19 @@ export default function App({ startupBootstrap }: AppProps) {
     let stopped = false
     let shownFieldSignature = ''
     let shownInkSignature = ''
+    // The ink pass below parses and serialises the whole drawing; when neither the share nor the open
+    // drawing changed since it last ran, it would only repeat itself (once a second, for as long as the note is open).
+    let inkPassKey = ''
+    let inkPassJson: string | null = null
     const tick = async () => {
       if (stopped || shareEditRef.current !== session) return
       await session.pull().catch(() => undefined)
       if (stopped || shareEditRef.current !== session) return
-      setSharePeople({ editors: session.peopleWhoCanEdit(), present: session.peopleEditing() })
+      // Same people as a second ago: no new state, or the whole app renders once a second for nothing.
+      const nextPeople = { editors: session.peopleWhoCanEdit(), present: session.peopleEditing() }
+      setSharePeople((current) => (current
+        && current.editors.join('\n') === nextPeople.editors.join('\n')
+        && current.present.join('\n') === nextPeople.present.join('\n') ? current : nextPeople))
       const owned = tabsRef.current.filter((candidate) => session.owns(candidate.path))
       const tab = owned.find((candidate) => candidate.path === activePathRef.current)
         ?? owned.find((candidate) => candidate.path === splitPathRef.current)
@@ -4625,6 +4636,8 @@ export default function App({ startupBootstrap }: AppProps) {
       }
       const remoteInk = session.noteInk(sharePath)
       const openDrawing = drawingSessionRef.current
+      const inkKeyOf = (current: typeof openDrawing) => `${sharePath}|${tab.path}|${session.version()}|${current.key}|${current.path}`
+      if (!drawingDirtyRef.current && openDrawing.document && inkKeyOf(openDrawing) === inkPassKey && openDrawing.document.drawingJson === inkPassJson) return
       if (!drawingDirtyRef.current && openDrawing.path === tab.path && openDrawing.document) {
         const nextJson = drawingJsonWithRemoteInk(openDrawing.document.drawingJson, remoteInk)
         const wroteInk = nextJson !== openDrawing.document.drawingJson
@@ -4649,9 +4662,12 @@ export default function App({ startupBootstrap }: AppProps) {
             /* The open drawing stays as it is when its ink cannot be read. */
           }
         }
+        const settled = drawingSessionRef.current
+        inkPassKey = inkKeyOf(settled)
+        inkPassJson = settled.document?.drawingJson ?? null
       }
     }
-    const timer = window.setInterval(() => { void tick() }, 1000)
+    const timer = window.setInterval(() => { void trackActivity('sync', tick()) }, 1000)
     return () => {
       stopped = true
       window.clearInterval(timer)
@@ -5278,6 +5294,7 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => {
     const on = settings.diagnosticsEnabled
     configureDiagnostics({ crashes: on && settings.diagnosticsCrashes, errors: on && settings.diagnosticsLogs, perf: on && settings.diagnosticsPerf, usage: on && settings.diagnosticsUsage }, { vaultPath: bootstrap?.vaultPath })
+    startStallMonitor(on && settings.diagnosticsPerf)
   }, [settings.diagnosticsEnabled, settings.diagnosticsCrashes, settings.diagnosticsLogs, settings.diagnosticsPerf, settings.diagnosticsUsage, bootstrap?.vaultPath])
 
   useEffect(() => {
@@ -5458,7 +5475,7 @@ export default function App({ startupBootstrap }: AppProps) {
     return true
   }, [toast, updateContent])
 
-  const saveDrawingAsset = useCallback(async (payload: DrawingSavePayload, notePathOverride?: string | null) => {
+  const saveDrawingAssetUntracked = useCallback(async (payload: DrawingSavePayload, notePathOverride?: string | null) => {
     const session = vaultSessionGenerationRef.current
     const notePath = notePathOverride ?? activePath
     // The note's file is gone: saving the strokes would create its handwriting file again as a note of its own.
@@ -5523,6 +5540,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setDrawingSession((current) => current.path === notePath ? { ...current, document } : current)
     return result
   }, [activePath, editableShareOwns, pushEditableShare, recordInkSnapshotFor, saveContent, tabHoldsRef])
+  const saveDrawingAsset = useCallback((payload: DrawingSavePayload, notePathOverride?: string | null) => trackActivity('save', saveDrawingAssetUntracked(payload, notePathOverride)), [saveDrawingAssetUntracked])
 
   // "Leere Seiten daneben" on PDF notes (desktop): while on, the ink board covers the side pages too.
   const reloadNoteInk = useCallback((path: string) => {

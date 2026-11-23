@@ -117,6 +117,24 @@ const main = async () => {
   assert.equal(d.policyFromSettings(undefined).any, false)
 }
 
+// ---- 3b. Stall statistics: counts and durations with fixed phase words, nothing else ---------------------
+{
+  const s = makeService({ ...ON })
+  s.service.applySettings(ON)
+  for (const [ms, phase] of [[620, 'sync'], [900, 'sync'], [2104, 'save'], [800, 'open'], [700, 'secret note.md'], [80, 'sync']]) s.service.recordRenderer({ k: 'stall', ms, phase })
+  const stalls = JSON.parse(JSON.stringify(s.service.preview())).perf?.stalls
+  assert.ok(stalls, 'stall statistics are part of the batch')
+  assert.equal(stalls.count, 4, 'an unknown phase word and a stall under 100 ms are dropped')
+  assert.equal(stalls.maxMs, 2100)
+  assert.deepEqual(stalls.byPhase, { sync: 2, save: 1, index: 0, open: 1, other: 0 })
+  assert.deepEqual(Object.keys(stalls).sort(), ['byPhase', 'count', 'mainLag', 'maxMs', 'p95Ms'], 'exactly the documented fields')
+  assert.doesNotMatch(JSON.stringify(stalls), /secret|\.md/u)
+  s.service.applySettings({ ...ON, diagnosticsPerf: false })
+  s.service.recordRenderer({ k: 'stall', ms: 900, phase: 'sync' })
+  assert.equal(s.service.preview()?.perf?.stalls, undefined, 'with the performance switch off nothing is kept')
+  fs.rmSync(s.dir, { recursive: true, force: true })
+}
+
 // ---- 4. The off switch stops everything at once and deletes the queue --------------------------------------
 {
   const s = makeService({ ...ON })

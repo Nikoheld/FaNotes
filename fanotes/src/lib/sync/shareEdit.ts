@@ -205,6 +205,8 @@ export type ShareEditClient = {
   editNote: (sharePath: string, patch: ShareEditPatch) => Promise<void>
   absorb: (sharePath: string, applied: ShareEditApplied) => void
   pull: () => Promise<void>
+  /** Changes whenever the remote copy or the basis changes; equal values mean the notes are the same objects. */
+  version: () => number
   leave: () => Promise<void>
   owns: (path: string) => boolean
   sharePathFor: (path: string) => string
@@ -416,15 +418,21 @@ export async function openShareEditor(input: {
   let remote = cloneNotes(input.share.notes)
   let basisRevision = Number.isInteger(input.share.revision) ? input.share.revision as number : 1
   let remoteRevision = basisRevision
+  let version = 0
   let editors = editorNames(readJson(joined.body)?.editors)
   let present: string[] = []
   let left = false
   let editChain: Promise<unknown> = Promise.resolve()
   const vaultPaths = input.vaultPaths ?? {}
 
-  const adoptRemote = (body: Record<string, unknown> | null) => {
+  const adoptRemote = (body: Record<string, unknown> | null, unchangedRevisionKeepsNotes = false) => {
     if (!body) return
-    if (Array.isArray(body.notes)) remote = cloneNotes(body.notes as ShareNoteSnapshot[])
+    // A poll that finds the revision it already holds would clone every note (all strokes) for nothing.
+    const sameNotes = unchangedRevisionKeepsNotes && Number.isInteger(body.revision) && body.revision === remoteRevision
+    if (Array.isArray(body.notes) && !sameNotes) {
+      remote = cloneNotes(body.notes as ShareNoteSnapshot[])
+      version += 1
+    }
     if (Number.isInteger(body.revision)) remoteRevision = body.revision as number
     if (body.editors) editors = editorNames(body.editors)
     if (Array.isArray(body.present)) present = editorNames(body.present.map((item) => (
@@ -484,6 +492,7 @@ export async function openShareEditor(input: {
     }
     adoptRemote(readJson(response.body))
     basis = local
+    version += 1
     syncBasisRevision()
   }
 
@@ -524,6 +533,7 @@ export async function openShareEditor(input: {
     basis = basis.some((note) => note.path === sharePath)
       ? basis.map((note) => note.path === sharePath ? next : note)
       : [...basis, next]
+    version += 1
     syncBasisRevision()
   }
 
@@ -531,7 +541,8 @@ export async function openShareEditor(input: {
     if (left) return
     const response = await input.port.exchange({
       method: 'GET',
-      url: `${shareApiUrl(input.share.id, input.origin)}/session`,
+      // `since`: a server that knows it leaves the notes out when the revision has not moved (older ones ignore it).
+      url: `${shareApiUrl(input.share.id, input.origin)}/session?since=${remoteRevision}`,
       headers: { Accept: 'application/json', 'X-FaNotes-Share': '1' },
       body: '',
     })
@@ -539,7 +550,7 @@ export async function openShareEditor(input: {
     const body = readJson(response.body)
     const seen = Number(body?.revision)
     if (!body || !Number.isInteger(seen) || seen < remoteRevision) return
-    adoptRemote(body)
+    adoptRemote(body, true)
   }
 
   await input.port.exchange(postShare(input.share.id, 'presence', { clientId, name, present: true }, input.origin))
@@ -559,6 +570,7 @@ export async function openShareEditor(input: {
     prepareLocalEdit,
     editNote,
     absorb,
+    version: () => version,
     pull,
     leave: async () => {
       left = true

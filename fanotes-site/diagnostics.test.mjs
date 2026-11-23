@@ -204,7 +204,7 @@ const batch = (extra = {}) => ({
     { type: 'made-up', process: 'main', class: 'Error', hash: '0123456789ab' },
     { type: 'uncaughtException', process: 'main', class: 'Error', hash: 'not-a-hash' },
   ],
-  perf: { startup: { sessions: 3, medianMs: 1800, maxMs: 2600 }, penLatency: { samples: 400, p50: 6.5, p90: 11, p99: 20.4, max: 33 }, memory: { processes: 6, totalMb: 900, mainRssMb: 150 }, note: 'ignored' },
+  perf: { startup: { sessions: 3, medianMs: 1800, maxMs: 2600 }, penLatency: { samples: 400, p50: 6.5, p90: 11, p99: 20.4, max: 33 }, memory: { processes: 6, totalMb: 900, mainRssMb: 150 }, stalls: { count: 4, maxMs: 2100, p95Ms: 1900, byPhase: { sync: 3, save: 1, 'secret note.md': 9, other: -2 }, mainLag: { maxMs: 800, p95Ms: 120, path: '/home/anna/x' }, note: 'ignored' }, note: 'ignored' },
   ...extra,
 })
 
@@ -216,6 +216,9 @@ test('a batch keeps crashes and perf, and only keeps frames of the app itself', 
   assert.equal(result.record.crashes[1].reason, 'crashed')
   assert.deepEqual(result.record.perf.penLatency, { samples: 400, p50: 6.5, p90: 11, p99: 20.4, max: 33 })
   assert.equal('note' in result.record.perf, false)
+  assert.deepEqual(result.record.perf.stalls, { count: 4, maxMs: 2100, p95Ms: 1900, byPhase: { sync: 3, save: 1, index: 0, open: 0, other: 0 }, mainLag: { maxMs: 800, p95Ms: 120 } }, 'only the fixed stall fields pass, bounded')
+  const huge = validateDiagnosticsPayload(batch({ perf: { stalls: { count: 1e12, maxMs: 1e12, p95Ms: 'x', byPhase: { sync: 1e12 }, mainLag: null } } }))
+  assert.deepEqual(huge.record.perf.stalls, { count: 100000, maxMs: 600000, p95Ms: 0, byPhase: { sync: 100000, save: 0, index: 0, open: 0, other: 0 }, mainLag: { maxMs: 0, p95Ms: 0 } })
   assert.equal(validateDiagnosticsPayload(batch({ kind: 'daily' })).ok, false)
   assert.equal(validateDiagnosticsPayload(batch({ crashes: 'x' })).ok, false)
   assert.equal(validateDiagnosticsPayload({ schemaVersion: 2, kind: 'batch', installId: ID, app: {} }).ok, false, 'empty batch')

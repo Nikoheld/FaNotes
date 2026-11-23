@@ -27,6 +27,9 @@ const MAX_ERROR_KEYS = 40
 const MAX_LOGS = 60
 const MAX_PEN_SAMPLES = 1000
 const MAX_STARTUPS = 20
+const MAX_STALLS = 200
+const STALL_PHASES = ['sync', 'save', 'index', 'open', 'other']
+const STALL_LAG_MIN_MS = 500
 const MAX_QUEUE_BYTES = 256 * 1024
 const MAX_BODY_BYTES = 48 * 1024
 
@@ -154,12 +157,30 @@ const cleanFrames = (frames, pattern) => (Array.isArray(frames) ? frames : [])
   .slice(0, 4)
   .map((frame) => ({ file: frame.file, line: frame.line, ...(typeof frame.fn === 'string' && FUNCTION_NAME.test(frame.fn) ? { fn: frame.fn } : {}) }))
 
-const emptyQueue = () => ({ v: 1, crashes: {}, counters: {}, errors: {}, logs: [], pen: [], startups: [], vault: null })
+const emptyQueue = () => ({ v: 1, crashes: {}, counters: {}, errors: {}, logs: [], pen: [], startups: [], stalls: [], lag: { maxMs: 0, p95Ms: 0 }, vault: null })
 
 const percentile = (sorted, fraction) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))]
 
+const buildStalls = (queue) => {
+  const stalls = Array.isArray(queue.stalls) ? queue.stalls : []
+  const lag = queue.lag && typeof queue.lag === 'object' ? queue.lag : { maxMs: 0, p95Ms: 0 }
+  const lagMax = clampNumber(Number(lag.maxMs), 600_000)
+  if (!stalls.length && lagMax < STALL_LAG_MIN_MS) return null
+  const sorted = stalls.map((entry) => entry.ms).sort((a, b) => a - b)
+  const byPhase = Object.fromEntries(STALL_PHASES.map((phase) => [phase, stalls.filter((entry) => entry.phase === phase).length]))
+  return {
+    count: stalls.length,
+    maxMs: sorted.length ? sorted[sorted.length - 1] : 0,
+    p95Ms: sorted.length ? percentile(sorted, 0.95) : 0,
+    byPhase,
+    mainLag: { maxMs: lagMax, p95Ms: clampNumber(Number(lag.p95Ms), 600_000) },
+  }
+}
+
 const buildPerf = (queue, memory) => {
   const out = {}
+  const stalls = buildStalls(queue)
+  if (stalls) out.stalls = stalls
   const startups = [...queue.startups].sort((a, b) => a - b)
   if (startups.length) out.startup = { sessions: startups.length, medianMs: percentile(startups, 0.5), maxMs: startups[startups.length - 1] }
   const pen = [...queue.pen].sort((a, b) => a - b)
@@ -205,7 +226,7 @@ const buildBatch = ({ queue, policy, installId, app, now, includeRoutine = true,
     if (policy.errors && queue.logs.length) payload.logs = queue.logs.slice(-MAX_LOGS)
     if (policy.perf) {
       const perf = buildPerf(queue, memory)
-      if (perf.startup || perf.penLatency) payload.perf = perf
+      if (perf.startup || perf.penLatency || perf.stalls) payload.perf = perf
     }
   }
   if (!payload.crashes && !payload.usage && !payload.logs && !payload.perf) return null
@@ -215,7 +236,7 @@ const buildBatch = ({ queue, policy, installId, app, now, includeRoutine = true,
 const hasRoutineData = (queue, policy) => (
   (policy.usage && (Object.keys(queue.counters).length > 0 || queue.vault))
   || (policy.errors && (Object.keys(queue.errors).length > 0 || queue.logs.length > 0))
-  || (policy.perf && (queue.startups.length > 0 || queue.pen.length >= 10))
+  || (policy.perf && (queue.startups.length > 0 || queue.pen.length >= 10 || (queue.stalls?.length ?? 0) > 0 || (queue.lag?.maxMs ?? 0) >= STALL_LAG_MIN_MS))
 )
 
 // ---------------------------------------------------------------- service
@@ -257,6 +278,27 @@ const createDiagnosticsService = (options) => {
     return state
   }
   const saveState = () => writeJson(statePath, state)
+  // Main-process event-loop delay (a blocked main process freezes the window too): a native histogram,
+  // 100 ms resolution, read and reset at every batch. Only runs while the performance switch is on.
+  let lagHistogram = null
+  const lagMonitor = (on) => {
+    try {
+      if (on && !lagHistogram) { lagHistogram = require('node:perf_hooks').monitorEventLoopDelay({ resolution: 100 }); lagHistogram.enable() }
+      else if (!on && lagHistogram) { lagHistogram.disable(); lagHistogram = null }
+    } catch { lagHistogram = null }
+  }
+  const takeLag = () => {
+    if (!lagHistogram || !lagHistogram.count) return null
+    const ns = (value) => Math.round(value / 1e6)
+    const result = { maxMs: ns(lagHistogram.max), p95Ms: ns(lagHistogram.percentile(95)) }
+    lagHistogram.reset()
+    return result
+  }
+  const foldLag = (data) => {
+    const lag = takeLag()
+    if (lag) data.lag = { maxMs: Math.max(data.lag?.maxMs ?? 0, lag.maxMs), p95Ms: Math.max(data.lag?.p95Ms ?? 0, lag.p95Ms) }
+  }
+
   const loadQueue = () => {
     if (queue) return queue
     const saved = readJson(queuePath)
@@ -266,6 +308,7 @@ const createDiagnosticsService = (options) => {
   const persistNow = () => {
     if (persistTimer) { clearTimer(persistTimer); persistTimer = null }
     if (!queue || !policy.any) return
+    if (policy.perf) foldLag(queue)
     const text = JSON.stringify(queue)
     if (text.length > MAX_QUEUE_BYTES) { queue.logs = queue.logs.slice(-10); queue.pen = queue.pen.slice(-200) }
     writeJson(queuePath, queue)
@@ -319,6 +362,7 @@ const createDiagnosticsService = (options) => {
     if (!(options.isOnline?.() ?? true)) return { sent: false, reason: 'offline' }
     if (!ignoreIdle && !due.forced && !(options.isIdle?.() ?? true)) return { sent: false, reason: 'busy-user' }
     const taken = loadQueue()
+    if (policy.perf) foldLag(taken)
     const payload = buildBatch({ queue: taken, policy, installId: installId(), app: options.appInfo?.() ?? {}, now: at, includeRoutine: due.routine, memory: memory() })
     if (!payload) return { sent: false, reason: 'empty' }
     const body = zlib.gzipSync(Buffer.from(JSON.stringify(payload), 'utf8'), { level: 9 })
@@ -330,8 +374,8 @@ const createDiagnosticsService = (options) => {
     // What went into this payload leaves the live queue now; a retryable failure puts it back.
     const sentCrashes = payload.crashes ? taken.crashes : {}
     if (payload.crashes) taken.crashes = {}
-    const routineTaken = due.routine ? { counters: taken.counters, errors: taken.errors, logs: taken.logs, pen: taken.pen, startups: taken.startups, vault: taken.vault } : null
-    if (routineTaken) Object.assign(taken, { counters: {}, errors: {}, logs: [], pen: [], startups: [], vault: null })
+    const routineTaken = due.routine ? { counters: taken.counters, errors: taken.errors, logs: taken.logs, pen: taken.pen, startups: taken.startups, stalls: taken.stalls, lag: taken.lag, vault: taken.vault } : null
+    if (routineTaken) Object.assign(taken, { counters: {}, errors: {}, logs: [], pen: [], startups: [], stalls: [], lag: { maxMs: 0, p95Ms: 0 }, vault: null })
     try {
       const response = await options.post(ENDPOINT, body, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' }, controller.signal)
       if (generation !== startedGeneration) return { sent: false, reason: 'off' }
@@ -356,6 +400,8 @@ const createDiagnosticsService = (options) => {
           merged.logs = [...routineTaken.logs, ...merged.logs].slice(-MAX_LOGS)
           merged.pen = [...routineTaken.pen, ...merged.pen].slice(-MAX_PEN_SAMPLES)
           merged.startups = [...routineTaken.startups, ...merged.startups].slice(-MAX_STARTUPS)
+          merged.stalls = [...(routineTaken.stalls ?? []), ...(merged.stalls ?? [])].slice(-MAX_STALLS)
+          merged.lag = { maxMs: Math.max(routineTaken.lag?.maxMs ?? 0, merged.lag?.maxMs ?? 0), p95Ms: Math.max(routineTaken.lag?.p95Ms ?? 0, merged.lag?.p95Ms ?? 0) }
           merged.vault = merged.vault ?? routineTaken.vault
         }
         persistLater()
@@ -391,7 +437,8 @@ const createDiagnosticsService = (options) => {
       if (!policy.crashes && queue) queue.crashes = {}
       if (!policy.usage && queue) { queue.counters = {}; queue.vault = null }
       if (!policy.errors && queue) { queue.errors = {}; queue.logs = [] }
-      if (!policy.perf && queue) { queue.pen = []; queue.startups = [] }
+      if (!policy.perf && queue) { queue.pen = []; queue.startups = []; queue.stalls = []; queue.lag = { maxMs: 0, p95Ms: 0 } }
+      lagMonitor(policy.perf)
       schedule()
     },
     policy: () => policy,
@@ -440,6 +487,11 @@ const createDiagnosticsService = (options) => {
             if (Number.isFinite(value) && value >= 0 && value < 10_000) data.pen.push(Math.round(value * 10) / 10)
           }
           if (data.pen.length > MAX_PEN_SAMPLES) data.pen = data.pen.slice(-MAX_PEN_SAMPLES)
+          break
+        }
+        case 'stall': {
+          if (!policy.perf || !STALL_PHASES.includes(event.phase) || !Number.isFinite(event.ms) || event.ms < 100 || event.ms > 600_000) return
+          data.stalls = [...(data.stalls ?? []), { ms: Math.round(event.ms / 10) * 10, phase: event.phase }].slice(-MAX_STALLS)
           break
         }
         case 'vault': {

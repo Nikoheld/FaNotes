@@ -11,6 +11,7 @@
 // the remote version takes the path and the local version is kept next to it
 // as "Name (Konflikt <Gerät> <Datum>).ext", which is then uploaded as a new
 // file so every device ends up with both.
+import { trackActivity } from '../stallMonitor'
 import type { SyncHostApi, SyncScanEntry } from '../../types'
 import { HOMEWORK_NOTE_PATH, mergeHomeworkMarkdownBytes } from '../homeworkStore'
 import { canonicalSyncBytes, identitySyncBytes, isFamdSyncPath, noteSyncKind, withLocalPageStats, type NoteSyncKind } from '../famd'
@@ -957,7 +958,7 @@ export class SyncEngine {
       this.queued = true
       return this.waitIdle()
     }
-    this.inFlight = this.runCycle(reason).finally(() => {
+    this.inFlight = trackActivity('sync', this.runCycle(reason)).finally(() => {
       this.inFlight = null
       if (this.queued && !this.disposed) {
         this.queued = false
