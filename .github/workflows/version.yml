@@ -37,6 +37,9 @@ jobs:
           node-version: 22
       - name: Check the calendar version
         working-directory: fanotes
+        env:
+          # Unauthenticated GitHub API calls from shared runners hit the rate limit (HTTP 403).
+          GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/check-release-policy.mjs --version "${{ inputs.version }}"
       - name: Update the version files
         working-directory: fanotes
