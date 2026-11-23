@@ -76,7 +76,10 @@ assert.doesNotMatch(app, /overlayInkLoadOnNoteSwitch/)
 assert.match(switchEffect, /readNoteInk\(path, content\)/)
 assert.match(switchEffect, /\.\.\.overlaySessionAfterInkReady\(drawingOpenRef\.current, drawingSessionFromLoad\(requestId, document\)\),\s*path,/)
 assert.match(switchEffect, /setDrawingSession\(\{ \.\.\.overlaySessionAfterNoteSwitch\(switched\), path \}\)/)
-assert.match(switchEffect, /requestIdleCallback\(load/, 'the read stays off the switch itself')
+// Prepared ink (prepareDocumentOpen) mounts in the switch commit, the start note's too;
+// an unprepared read starts at once instead of when the window is next idle.
+assert.doesNotMatch(switchEffect, /initialNoteLoad|requestIdleCallback\(load/, 'the ink read never waits for idle time')
+assert.match(switchEffect, /\n    load\(\)\n/, 'an unprepared read starts with the switch')
 
 // 4. A session renders only for the note it was loaded for.
 const docA = { id: 'a1', drawingJson: '{}' }
@@ -140,8 +143,12 @@ assert.doesNotMatch(board, /absorbOneCanvasRef/, 'no one-shot flag that a churni
 assert.match(board, /useEffect\(\(\) => \{\s*fitLoadedPageRef\.current\(\)\s*\}, \[drawingId, initialDrawingJson\]\)/, 'fit-to-ink runs once per loaded document')
 // Both the JSON and the packed (chunked) open go through applyLoaded.
 const load = section(board, 'const applyPageBox = (', 'loadedDrawingIdRef.current = sourceId', 'document load')
-// A packed page takes its saved page box before its strokes hydrate over several frames.
-assert.match(board, /applyPageBox\(packedRaw\)\s*void \(async \(\) => \{/, 'the page box lands before the packed hydration')
+// A packed page takes its saved page box before its strokes are restored.
+assert.match(board, /applyPageBox\(packedRaw\)\s*const restore = restorePacked\(packedRaw\)/, 'the page box lands before the packed restore')
+// A board that shows nothing yet restores the page in one pass, before the note's first frame
+// (check-ink-open-flicker); only a page above the one-pass limit still restores across frames.
+assert.match(board, /const openInOnePass = loadedDrawingIdRef\.current === undefined[\s\S]*?packedInkPoints\(columns\) <= INK_OPEN_ONE_PASS_POINTS/, 'an opening board restores a packed page in one pass')
+assert.match(board, /if \(openInOnePass\) \{\s*try \{\s*while \(!restore\.next\(\)\.done\)/, 'the one-pass restore runs without waiting for frames')
 assert.match(load, /const applyLoaded = \([\s\S]*?applyPageBox\(raw\)/, 'applyLoaded re-applies the page box')
 assert.ok((board.match(/applyLoaded\(raw, /g) ?? []).length >= 2, 'JSON and packed opens share applyLoaded')
 assert.match(load, /paintedLayoutRef\.current = \{ w: sourceWidthRef\.current, h: sourceHeightRef\.current \}/, 'loaded 0–1 ink is relative to the saved page')
