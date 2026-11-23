@@ -311,7 +311,12 @@ import { snowLayerActive } from './lib/snowTheme'
 import { SnowLayer } from './components/SnowLayer'
 import type { AppSettings, BootstrapData, CreateResult, DrawingLibraryDocument, NoteHistorySnapshot, NoteTab, OneNoteImportResult, PaperStyle, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
 
-const loadDrawingBoardModule = () => import('./components/DrawingBoard')
+/** Set once the ink board module is loaded (see InkBoardComponent). */
+let loadedDrawingBoard: typeof import('./components/DrawingBoard').DrawingBoard | null = null
+const loadDrawingBoardModule = () => import('./components/DrawingBoard').then((module) => {
+  loadedDrawingBoard = module.DrawingBoard
+  return module
+})
 const DrawingBoard = lazy(() => loadDrawingBoardModule().then((module) => ({ default: module.DrawingBoard })))
 const FirstRunOnboarding = lazy(() => import('./components/FirstRunOnboarding').then((module) => ({ default: module.FirstRunOnboarding })))
 const GlyphenWerkWorkspace = lazy(() => import('./components/GlyphenWerkWorkspace').then((module) => ({ default: module.GlyphenWerkWorkspace })))
@@ -1058,6 +1063,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const worksheetLoadRequestRef = useRef(0)
   const initialDrawingLoadRef = useRef(true)
   const preparedInkRef = useRef<PreparedNoteInk | null>(null)
+  /** The companion read during prepareDocumentOpen: text boxes, links and paper are in the note's first frame. */
+  const preparedCompanionRef = useRef<{ path: string; fields: NoteCompanionFields | null; at: number } | null>(null)
   const openSequenceRef = useRef(0)
   const initialWorksheetLoadRef = useRef(true)
   const worksheetDirtyIdsRef = useRef(new Set<string>())
@@ -1462,7 +1469,10 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [activeTab?.path])
 
-  useEffect(() => {
+  // A layout effect: with the companion read before the switch, the text
+  // boxes, note links and paper are in the note's first frame instead of
+  // appearing (laid out on a sheet without its page) a read later.
+  useLayoutEffect(() => {
     const path = activePath
     const previousFieldPath = textFieldSavePathRef.current
     if (previousFieldPath && previousFieldPath !== path) void flushNoteTextFieldsRef.current()
@@ -1486,8 +1496,7 @@ export default function App({ startupBootstrap }: AppProps) {
       return
     }
     let alive = true
-    const pending = noteCompanionLoads.get(path) ?? loadNoteCompanionRef.current(path)
-    void pending.then((fields) => {
+    const applyCompanion = (fields: NoteCompanionFields | null) => {
       if (!alive) return
       const style = fields?.paperStyle
       if (style) setNotePaperByPath((current) => current[path] === style ? current : { ...current, [path]: style })
@@ -1521,7 +1530,12 @@ export default function App({ startupBootstrap }: AppProps) {
       const backups = listNoteBackups(fields?.noteBackups ?? [], path)
       noteBackupsRef.current = backups
       setNoteBackups(backups)
-    }).catch(() => {
+    }
+    const prepared = preparedCompanionRef.current
+    preparedCompanionRef.current = null
+    if (prepared && prepared.path === path && Date.now() - prepared.at <= PREPARED_INK_TTL_MS) applyCompanion(prepared.fields)
+    const pending = noteCompanionLoads.get(path) ?? loadNoteCompanionRef.current(path)
+    void pending.then(applyCompanion).catch(() => {
       if (!alive) return
       noteLinksRef.current = []
       setNoteLinks([])
@@ -2059,6 +2073,13 @@ export default function App({ startupBootstrap }: AppProps) {
    */
   const prepareDocumentOpen = useCallback(async (path: string, content: string) => {
     const work: Promise<unknown>[] = []
+    // Started first: the ink read below shares this one file read.
+    preparedCompanionRef.current = null
+    if (!isPdfNotePath(path)) {
+      work.push(loadNoteCompanionRef.current(path).then((fields) => {
+        preparedCompanionRef.current = { path, fields, at: Date.now() }
+      }))
+    }
     if (isPdfNotePath(path)) {
       work.push(Promise.all([loadPdfNoteViewModule(), import('./lib/pdfPrepare')])
         .then(([, prepare]) => prepare.preparePdfDocument(path)))
@@ -5524,6 +5545,11 @@ export default function App({ startupBootstrap }: AppProps) {
     onError: (message) => toast(message, 'error'),
   })
   const inkBoard = pdfSide.board ?? noteDrawingSession
+  // A board mounts with the component itself once the module is loaded (the
+  // open prepares it): the lazy wrapper suspends its first render for a turn
+  // even then, and the note's first frames showed without its page. Picked
+  // per board key, so a mounted board never changes its component type.
+  const InkBoardComponent = useMemo(() => loadedDrawingBoard ?? DrawingBoard, [inkBoard.key])
 
   const saveWorksheetDocument = useCallback(async (document: WorksheetDocument) => {
     const session = vaultSessionGenerationRef.current
@@ -7235,7 +7261,7 @@ export default function App({ startupBootstrap }: AppProps) {
                       name="Handschrift"
                       fallbackTitle={INK_OVERLAY_CRASH_TITLE}
                     >
-                      <DrawingBoard
+                      <InkBoardComponent
                         ref={drawingBoardRef}
                         key={inkBoard.key}
                         settings={settings}

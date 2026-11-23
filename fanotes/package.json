@@ -190,6 +190,7 @@
     "dist:dir": "npm run build:web && npm run stage:enhanced-math-runtime && electron-builder --linux dir --x64",
     "check:qwen-vision": "node scripts/check-qwen-vision.cjs",
     "check:famd-zoom-scroll": "node scripts/check-famd-zoom-scroll.mjs",
+    "check:famd-open-stable": "node scripts/check-famd-open-stable.mjs",
     "check:paper-zoom": "node scripts/check-paper-zoom.mjs",
     "check:note-canvas": "node scripts/check-note-canvas.mjs",
     "check:paper-grow": "node scripts/check-paper-grow.mjs",

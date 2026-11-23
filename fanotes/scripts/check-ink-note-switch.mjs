@@ -139,7 +139,10 @@ assert.doesNotMatch(absorb, /setSourceWidth\(|setSourceHeight\(/, 'no raw source
 assert.doesNotMatch(board, /absorbOneCanvasRef/, 'no one-shot flag that a churning effect can re-arm')
 assert.match(board, /useEffect\(\(\) => \{\s*fitLoadedPageRef\.current\(\)\s*\}, \[drawingId, initialDrawingJson\]\)/, 'fit-to-ink runs once per loaded document')
 // Both the JSON and the packed (chunked) open go through applyLoaded.
-const load = section(board, 'const applyLoaded = (', 'loadedDrawingIdRef.current = sourceId', 'document load')
+const load = section(board, 'const applyPageBox = (', 'loadedDrawingIdRef.current = sourceId', 'document load')
+// A packed page takes its saved page box before its strokes hydrate over several frames.
+assert.match(board, /applyPageBox\(packedRaw\)\s*void \(async \(\) => \{/, 'the page box lands before the packed hydration')
+assert.match(load, /const applyLoaded = \([\s\S]*?applyPageBox\(raw\)/, 'applyLoaded re-applies the page box')
 assert.ok((board.match(/applyLoaded\(raw, /g) ?? []).length >= 2, 'JSON and packed opens share applyLoaded')
 assert.match(load, /paintedLayoutRef\.current = \{ w: sourceWidthRef\.current, h: sourceHeightRef\.current \}/, 'loaded 0–1 ink is relative to the saved page')
 assert.match(load, /applyInkExtentStylesRef\.current\(sourceHeightRef\.current, sourceWidthRef\.current\)/, 'the sheet takes the saved page before the first redraw')

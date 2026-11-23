@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { flushSync } from 'react-dom'
 import { Link2, X } from 'lucide-react'
 import {
   noteLinkAppearanceToken,
@@ -83,7 +84,10 @@ export function NoteLinkLayer({
     const layer = layerRef.current
     const paper = layer?.closest('.unified-paper')
     if (!paper || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(() => measure())
+    // The observer runs after layout and before paint. Rendering the new
+    // positions right there keeps a sheet that just took its page (a note
+    // opening) from painting one frame of the old layout.
+    const observer = new ResizeObserver(() => flushSync(measure))
     observer.observe(paper)
     paper.querySelectorAll('[data-pdf-page]').forEach((page) => observer.observe(page))
     window.addEventListener('resize', measure)
