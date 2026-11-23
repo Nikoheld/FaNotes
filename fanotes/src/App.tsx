@@ -7456,7 +7456,7 @@ export default function App({ startupBootstrap }: AppProps) {
                       </SafeBoundary>
                     ) : loadSplitInk && (
                       <SafeBoundary name="Handschrift (zweite Spalte)" fallbackTitle="Die Handschrift-Vorschau ist abgestürzt">
-                        <InkPreviewLayer key={splitTab.path} load={loadSplitInk} initial={splitInkInitial} smoothing={settings.smoothing} reloadKey={drawingSession.key} />
+                        <InkPreviewLayer load={loadSplitInk} key={splitTab.path} initial={splitInkInitial} smoothing={settings.smoothing} reloadKey={drawingSession.key} />
                       </SafeBoundary>
                     )}
                   </article>
