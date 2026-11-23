@@ -20,6 +20,15 @@ export type NoteTextField = {
    * builds have none, and older builds drop it again when they save.
    */
   updatedAt?: number
+  /**
+   * Height/width of the sheet that `y` is a fraction of (the sheet's height
+   * follows the typed text, so the same fraction means different places on
+   * different days). A box with a basis sits `y * aspect` sheet widths from
+   * the top, whatever the sheet's height is now. Additive: older builds drop
+   * it and read `y` against the current sheet, as they always did. Boxes on a
+   * PDF page have none.
+   */
+  aspect?: number
 }
 
 /** A deleted box. Kept in the payload next to `textFields`, never inside it. */
@@ -66,6 +75,12 @@ const clampWidth = (value: unknown) => {
   return number
 }
 
+/** Sheet height/width a box's `y` was written against; anything implausible is "unknown". */
+export const clampAspect = (value: unknown): number | undefined => {
+  const number = typeof value === 'number' ? value : Number(value)
+  return isFiniteNumber(number) && number >= 0.05 && number <= 200 ? Math.round(number * 1e6) / 1e6 : undefined
+}
+
 const clampPage = (value: unknown) => {
   const page = typeof value === 'number' ? value : Number(value)
   if (!Number.isSafeInteger(page) || page < 1 || page > 10_000) return 1
@@ -96,6 +111,7 @@ export const sanitizeNoteTextField = (value: unknown): NoteTextField | null => {
   const text = typeof raw.text === 'string' ? raw.text.slice(0, NOTE_TEXT_FIELD_MAX_CHARS) : ''
   const color = typeof raw.color === 'string' && COLOR_PATTERN.test(raw.color) ? raw.color.toLowerCase() : undefined
   const updatedAt = sanitizeStamp(raw.updatedAt)
+  const aspect = clampAspect(raw.aspect)
   return {
     id,
     page: clampPage(raw.page),
@@ -107,6 +123,7 @@ export const sanitizeNoteTextField = (value: unknown): NoteTextField | null => {
     ...(color ? { color } : {}),
     ...(raw.bold === true ? { bold: true } : {}),
     ...(updatedAt ? { updatedAt } : {}),
+    ...(aspect !== undefined ? { aspect } : {}),
   }
 }
 
@@ -162,7 +179,7 @@ export const rememberNoteTextFieldFontSize = (size: number): void => {
 }
 
 /** Click point becomes the top-left of a new empty field, kept on the page. */
-export const placeNoteTextField = (point: { page: number; x: number; y: number }): NoteTextField => {
+export const placeNoteTextField = (point: { page: number; x: number; y: number; aspect?: number }): NoteTextField => {
   const width = DEFAULT_WIDTH
   const field = sanitizeNoteTextField({
     id: newNoteTextFieldId(),
@@ -173,6 +190,7 @@ export const placeNoteTextField = (point: { page: number; x: number; y: number }
     fontSize: readLastNoteTextFieldFontSize(),
     text: '',
     updatedAt: Date.now(),
+    aspect: point.aspect,
   })
   if (!field) throw new Error('Das Textfeld konnte nicht gesetzt werden.')
   return field
@@ -182,7 +200,7 @@ export const placeNoteTextField = (point: { page: number; x: number; y: number }
 export const patchNoteTextField = (
   fields: readonly NoteTextField[],
   id: string,
-  patch: Partial<Pick<NoteTextField, 'page' | 'x' | 'y' | 'width' | 'text' | 'fontSize'>> & { color?: string | undefined; bold?: boolean | undefined },
+  patch: Partial<Pick<NoteTextField, 'page' | 'x' | 'y' | 'width' | 'text' | 'fontSize' | 'aspect'>> & { color?: string | undefined; bold?: boolean | undefined },
   now: number = Date.now(),
 ): NoteTextField[] => {
   if (patch.fontSize !== undefined) rememberNoteTextFieldFontSize(patch.fontSize)
@@ -209,43 +227,38 @@ export const noteTextFieldsAfterOriginGrow = (
   const prevW = prev.width > 0 ? prev.width : 1
   const nextW = next.width > 0 ? next.width : prevW
   const widthScale = prevW / nextW
+  const prevAspect = prev.width > 0 && prev.height > 0 ? prev.height / prev.width : 0
+  const nextAspect = clampAspect(next.width > 0 && next.height > 0 ? next.height / next.width : 0)
   let changed = false
   const remapped = fields.map((field) => {
+    // y against the sheet as it was laid out before the grow, then against the new one.
+    const baseY = noteTextFieldYOnSheet(field, prevAspect)
     const x = keepMarkOnPage(field.x, prev.width, next.width, padX)
-    const y = keepMarkOnPage(field.y, prev.height, next.height, padY)
+    const y = keepMarkOnPage(baseY, prev.height, next.height, padY)
     const width = clampWidth(field.width * widthScale)
-    if (x === field.x && y === field.y && width === field.width) return field
+    const aspect = nextAspect !== undefined && (field.aspect !== undefined || y !== field.y) ? nextAspect : field.aspect
+    if (x === field.x && y === field.y && width === field.width && aspect === field.aspect) return field
     changed = true
-    return { ...field, x, y, width }
+    return { ...field, x, y, width, ...(aspect !== undefined ? { aspect } : {}) }
   })
   return changed ? remapped : fields
 }
 
+/** The y a box has against a sheet of this height/width ratio: its place on the page does not depend on that ratio. */
+export const noteTextFieldYOnSheet = (field: Pick<NoteTextField, 'y' | 'aspect'>, sheetAspect: number): number => {
+  if (field.aspect === undefined || !(sheetAspect > 0)) return field.y
+  return Math.max(0, Math.min(1, field.y * field.aspect / sheetAspect))
+}
+
 /**
- * Stored y is a fraction of the sheet's height, and that height follows the
- * typed text (the sheet is as tall as its text or its ink page, whichever is
- * larger), while the ink and the box's place on the page do not. Typing below
- * a box grew the sheet and slid the box down with it. When the sheet's
- * height/width ratio changes, the fractions change by the inverse, so a box
- * stays at the same distance from the sheet's top, in units of its width (the
- * unit the ink page scales in). x is a fraction of the width and needs no
- * change.
+ * Give boxes without a basis the one of the sheet they are on now (y is a
+ * fraction of it). Called before the sheet can change, so old files get
+ * their basis as soon as the owner starts to edit.
  */
-export const noteTextFieldsAfterSheetAspect = (
-  fields: readonly NoteTextField[],
-  prevAspect: number,
-  nextAspect: number,
-): readonly NoteTextField[] => {
-  if (!(prevAspect > 0) || !(nextAspect > 0) || Math.abs(prevAspect - nextAspect) < 1e-6) return fields
-  const scale = prevAspect / nextAspect
-  let changed = false
-  const remapped = fields.map((field) => {
-    const y = Math.max(0, Math.min(0.97, field.y * scale))
-    if (Math.abs(y - field.y) < 1e-6) return field
-    changed = true
-    return { ...field, y }
-  })
-  return changed ? remapped : fields
+export const noteTextFieldsWithBasis = (fields: readonly NoteTextField[], sheetAspect: number): readonly NoteTextField[] => {
+  const aspect = clampAspect(sheetAspect)
+  if (aspect === undefined || fields.every((field) => field.aspect !== undefined)) return fields
+  return fields.map((field) => (field.aspect === undefined ? { ...field, aspect } : field))
 }
 
 /** Next/previous step of the font-size ladder; unknown sizes snap to the nearest rung first. */

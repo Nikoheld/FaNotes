@@ -8,7 +8,9 @@ import { applySimpleLatexButton, type SimpleLatexButton, type SimpleLatexOperand
 import { formatTextFieldText, type TextFieldEdit } from '../lib/noteTextFieldFormat'
 import { noteLinkMarkerCss } from '../lib/noteLink'
 import {
-  noteTextFieldsAfterSheetAspect,
+  noteTextFieldYOnSheet,
+  noteTextFieldsWithBasis,
+  clampAspect,
   NOTE_TEXT_FIELD_COLORS,
   NOTE_TEXT_FIELD_MAX_CHARS,
   NOTE_TEXT_FIELD_REFERENCE_PAGE_WIDTH,
@@ -32,7 +34,7 @@ type FieldLayout = {
   inverse: number
 }
 
-type GeometryPatch = { page?: number; x?: number; y?: number; width?: number }
+type GeometryPatch = { page?: number; x?: number; y?: number; width?: number; aspect?: number }
 type StylePatch = { fontSize?: number; color?: string | undefined; bold?: boolean | undefined }
 
 type NoteTextFieldLayerProps = {
@@ -40,7 +42,7 @@ type NoteTextFieldLayerProps = {
   placing: boolean
   pdf: boolean
   focusId?: string | null
-  onPlace: (point: { page: number; x: number; y: number }) => void
+  onPlace: (point: { page: number; x: number; y: number; aspect?: number }) => void
   onText: (id: string, text: string) => void
   onGeometry: (id: string, patch: GeometryPatch, commit: boolean) => void
   onStyle: (id: string, patch: StylePatch) => void
@@ -243,8 +245,6 @@ export function NoteTextFieldLayer({
   onFinishRef.current = onFinish
   const onRemapRef = useRef(onRemap)
   onRemapRef.current = onRemap
-  const sheetAnchorRef = useRef<{ aspect: number; signature: string } | null>(null)
-  const lastEditAtRef = useRef(-Infinity)
 
   // The rendered Markdown is memoised on its text, so these read the current props.
   const toggleTask = useCallback((id: string, line: number) => {
@@ -285,32 +285,17 @@ export function NoteTextFieldLayer({
       visualWidth: layoutWidth * zoom,
       visualHeight: layoutHeight * zoom,
     }
-    // The sheet's height follows the typed text. A box keeps its place on the
-    // page when the owner's typing changes it; any other change of the sheet
-    // (a note that is still loading, a synced edit) is not ours to compensate.
-    let placed: readonly NoteTextField[] = fields
-    if (!pdf && layoutWidth > 1 && layoutHeight > 1) {
-      const aspect = layoutHeight / layoutWidth
-      const signature = fields.map((field) => `${field.id}:${field.page}:${field.x}:${field.y}:${field.width}`).join('|')
-      const anchor = sheetAnchorRef.current
-      if (anchor && anchor.signature === signature && Math.abs(anchor.aspect - aspect) > 1e-6) {
-        if (performance.now() - lastEditAtRef.current < 1500) {
-          const remapped = noteTextFieldsAfterSheetAspect(fields, anchor.aspect, aspect)
-          if (remapped !== fields) {
-            placed = remapped
-            sheetAnchorRef.current = { aspect, signature: remapped.map((field) => `${field.id}:${field.page}:${field.x}:${field.y}:${field.width}`).join('|') }
-            onRemapRef.current?.(remapped)
-          } else sheetAnchorRef.current = { aspect, signature }
-        } else sheetAnchorRef.current = { aspect, signature }
-      } else if (!anchor || anchor.signature !== signature) sheetAnchorRef.current = { aspect, signature }
-    }
-    const next = placed.map((field) => {
+    // `y` is a fraction of the sheet's height at the time it was written, and that
+    // height follows the typed text: a box with a basis (`aspect`) is placed from it
+    // instead, so it stays at the same distance from the top however tall the sheet is.
+    const sheetAspect = !pdf && layoutWidth > 1 && layoutHeight > 1 ? layoutHeight / layoutWidth : 0
+    const next = fields.map((field) => {
       const page = pdf
         ? paper?.querySelector<HTMLElement>(`[data-pdf-page="${field.page}"]`)
         : null
       const pageRect = page?.getBoundingClientRect()
       const css = noteLinkMarkerCss(
-        field,
+        sheetAspect > 0 && field.aspect !== undefined ? { x: field.x, y: noteTextFieldYOnSheet(field, sheetAspect) } : field,
         paperBox,
         pageRect
           ? { left: pageRect.left, top: pageRect.top, width: pageRect.width, height: pageRect.height }
@@ -361,18 +346,26 @@ export function NoteTextFieldLayer({
     }
   }, [measure])
 
-  // Only typing, pasting or dropping into the note itself counts as the owner changing its height.
+  // A box from an older file has no basis yet. It gets the sheet's the moment the owner starts to edit
+  // the note (before the typing can change the sheet's height), and it is saved with it.
   useEffect(() => {
+    if (pdf) return
     const view = layerRef.current?.closest('.unified-note-view, .paper-view') ?? layerRef.current?.closest('.unified-paper')
     if (!view) return
     const stamp = (event: Event) => {
       if (event.target instanceof Element && event.target.closest('.note-text-field')) return
-      lastEditAtRef.current = performance.now()
+      const current = fieldsRef.current
+      if (!current.length || current.every((field) => field.aspect !== undefined)) return
+      const sheet = layerRef.current?.closest('.unified-paper') as HTMLElement | null
+      const aspect = sheet && sheet.offsetWidth > 1 ? clampAspect(sheet.offsetHeight / sheet.offsetWidth) : undefined
+      if (aspect === undefined) return
+      const next = noteTextFieldsWithBasis(current, aspect)
+      if (next !== current) onRemapRef.current?.(next)
     }
     const events = ['keydown', 'beforeinput', 'paste', 'cut', 'drop']
     for (const name of events) view.addEventListener(name, stamp, true)
     return () => { for (const name of events) view.removeEventListener(name, stamp, true) }
-  }, [])
+  }, [pdf])
 
   useLayoutEffect(() => {
     const layer = layerRef.current
@@ -453,7 +446,14 @@ export function NoteTextFieldLayer({
     event.preventDefault()
     event.stopPropagation()
     const point = pointAt(event.clientX, event.clientY)
-    if (point) onPlace(point)
+    if (point) onPlace({ ...point, aspect: sheetAspectNow() })
+  }
+
+  /** Height/width of the sheet as laid out now; undefined on a PDF, whose boxes sit on pages. */
+  const sheetAspectNow = () => {
+    if (pdf) return undefined
+    const sheet = layerRef.current?.closest('.unified-paper') as HTMLElement | null
+    return sheet && sheet.offsetWidth > 1 ? clampAspect(sheet.offsetHeight / sheet.offsetWidth) : undefined
   }
 
   const clampMove = (field: NoteTextField | undefined, gesture: Extract<Gesture, { kind: 'move' }>, clientX: number, clientY: number) => {
@@ -463,6 +463,7 @@ export function NoteTextFieldLayer({
       page: point.page,
       x: Math.max(0, Math.min(1 - gesture.width, point.x - gesture.dx)),
       y: Math.max(0, Math.min(0.97, point.y - gesture.dy)),
+      aspect: sheetAspectNow(),
     }
   }
 

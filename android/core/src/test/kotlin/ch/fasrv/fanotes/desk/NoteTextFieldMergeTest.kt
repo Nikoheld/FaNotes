@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes.desk
 
+import ch.fasrv.fanotes.famd.emptyFamdPayload
 import ch.fasrv.fanotes.famd.parseFamd
 import ch.fasrv.fanotes.famd.serializeFamd
 import ch.fasrv.fanotes.json.JsonValue
@@ -163,5 +164,24 @@ class NoteTextFieldMergeTest {
             """[{"id":"ok","deletedAt":5},{"id":"ok","deletedAt":9},{"id":"bad id!","deletedAt":5},{"id":"z","deletedAt":-1},{"id":"y"},"x"]""",
         ) as JsonValue.Arr
         assertEquals(listOf(NoteTextFieldTombstone("ok", 9)), parseNoteTextFieldTombstones(array))
+    }
+
+    @Test
+    fun desktopsSheetBasisSurvivesAnAndroidRoundTripAndIsDroppedWhenAndroidMovesTheBox() {
+        val basis = box("tf-basis", "Text", stamp = 1763368200000L).copy(aspect = 2.25)
+        val plain = box("tf-plain", "Alt", stamp = 1763368200000L)
+        val payload = writeNoteTextFields(emptyFamdPayload("2026-11-01T00:00:00.000Z"), listOf(basis, plain))
+        for (encoding in listOf("v1", "v2")) {
+            val back = parseNoteTextFields(parseFamd(serializeFamd("# x", payload, encoding)).payload!!.array("textFields"))
+            assertEquals(2.25, back.first { it.id == "tf-basis" }.aspect, encoding)
+            assertNull(back.first { it.id == "tf-plain" }.aspect, "an old box stays without a basis")
+        }
+        val texted = patchNoteTextField(listOf(basis), "tf-basis", text = "neu", now = 1763368300000L)
+        assertEquals(2.25, texted.single().aspect, "editing the text keeps the basis of y")
+        val moved = patchNoteTextField(listOf(basis), "tf-basis", y = 0.5, now = 1763368300000L)
+        assertNull(moved.single().aspect, "y is a fraction of this device's sheet after Android moved the box")
+        assertFalse(sameNoteTextFieldContent(basis, basis.copy(aspect = 2.5)), "a changed basis is a change that gets saved")
+        assertEquals(2.25, parseNoteTextFieldList(listOf(basis.copy(aspect = 2.25))).single().aspect)
+        assertNull(parseNoteTextFieldList(listOf(basis.copy(aspect = 0.0))).single().aspect, "an implausible basis is ignored")
     }
 }
