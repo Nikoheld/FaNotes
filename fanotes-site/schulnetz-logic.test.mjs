@@ -1835,7 +1835,8 @@ test('moved exams and cancelled lessons show each own German event date, includi
 test('snapshot upload stores week baselines before push and emits one actual later move', async () => {
   const root = await mkdtemp(join(tmpdir(), 'schulnetz-exam-baseline-'))
   let account, pushes = 0
-  const runtime = createSchulnetzRuntime({ root, key: randomBytes(32), autostart: false,
+  // The fixture reads happen on 2026-11-06, before the baseline week: a real clock made the exam past from that week on.
+  const runtime = createSchulnetzRuntime({ root, key: randomBytes(32), autostart: false, now: () => new Date('2026-11-06T12:00:00Z'),
     fcmSend: async () => {
       const baseline = JSON.parse(await readFile(join(root, 'accounts', account, 'notification-baseline.json'), 'utf8'))
       assert.equal(baseline.weeks[baselineWeek].exams[0].start, `${baselineWeek}T12:00:00`)
