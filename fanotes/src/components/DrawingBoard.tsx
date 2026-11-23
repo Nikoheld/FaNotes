@@ -3328,9 +3328,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   useEffect(() => () => {
     // The board is gone: no job may swap into it, and the offscreen page (a
     // second page-sized bitmap) goes back to the browser with it.
-    cancelInkPaint()
     if (openPaintFrameRef.current) cancelAnimationFrame(openPaintFrameRef.current)
     openPaintFrameRef.current = 0
+    cancelInkPaint()
     inkBufferRef.current?.release()
   }, [cancelInkPaint])
 
