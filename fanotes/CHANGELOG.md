@@ -1,5 +1,23 @@
 # Änderungsverlauf
 
+## 2026.11.4-beta.1
+
+- Desktop: no freezes from the share poll; anonymous stall statistics (#1459)
+- Desktop: no periodic freezes; memory stays bounded (#1458)
+- Desktop: notes open fast with no handwriting flicker (#1457)
+- Desktop: text boxes keep their place after restart and sync (#1456)
+- Desktop: text boxes never select text while dragged and stay where you leave them (#1455)
+- Desktop: smoother transitions for files, menus, dialogs and settings (#1453)
+- Desktop: text boxes use the same formatting toolbar as documents (#1452)
+- Site tests: pin the exam baseline test to its fixture date (#1454)
+- Desktop: no squished or moving text when opening a handwriting note (#1450)
+- Today: the nearest exam keeps a row in Up next when many tasks are due
+- Redesign the Today page: one banner, hero with lesson strip, Up next, glance tiles
+- Remind two days before the server's Schulnetz sign-in ends
+- Android sync: large handwriting notes arrive; missing handwriting is never shown as an empty note
+- Add whole-week Mensa page to the Kanti+ app
+- Show absent teachers from the Schulnetz start page on Today
+
 ## 2026.11.3
 
 - **Android-Tablet.** Neu gestaltete Oberfläche für Tablets: grössere Bedienflächen, Hoch- und Querformat, OLED-Theme, Stift-Werkzeugleiste mit Zeichenstudio, PDF-Textauswahl und Markierungen, Handschrift-Erkennung, Lernwerkzeuge und vollständige englische Oberfläche.
