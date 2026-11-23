@@ -1061,7 +1061,6 @@ export default function App({ startupBootstrap }: AppProps) {
   const drawingSessionKeyRef = useRef(0)
   const drawingLoadRequestRef = useRef(0)
   const worksheetLoadRequestRef = useRef(0)
-  const initialDrawingLoadRef = useRef(true)
   const preparedInkRef = useRef<PreparedNoteInk | null>(null)
   /** The companion read during prepareDocumentOpen: text boxes, links and paper are in the note's first frame. */
   const preparedCompanionRef = useRef<{ path: string; fields: NoteCompanionFields | null; at: number } | null>(null)
@@ -1407,8 +1406,6 @@ export default function App({ startupBootstrap }: AppProps) {
     drawingDirtyRef.current = false
     const path = activeTab?.path
     const content = activeTab?.content ?? ''
-    const initialNoteLoad = Boolean(path && initialDrawingLoadRef.current)
-    if (path) initialDrawingLoadRef.current = false
     if (!path) {
       if (modePathRef.current) writeDocInputMode(modePathRef.current, drawingOpenRef.current)
       modePathRef.current = null
@@ -1432,8 +1429,10 @@ export default function App({ startupBootstrap }: AppProps) {
     setDrawingOpen(switched.drawingOpen)
     const prepared = preparedInkRef.current
     preparedInkRef.current = null
+    // The note open at start takes its prepared ink as well: deferred, it
+    // came a quarter of a second after the note's text.
     if (
-      !initialNoteLoad && prepared && prepared.path === path && prepared.content === content
+      prepared && prepared.path === path && prepared.content === content
       && Date.now() - prepared.at <= PREPARED_INK_TTL_MS
     ) {
       setDrawingSession({
@@ -1446,8 +1445,6 @@ export default function App({ startupBootstrap }: AppProps) {
 
     // Saved handwriting loads in both input modes; keyboard mode mounts it
     // inert and only when the note has ink (overlaySessionAfterInkReady).
-    let idleId: number | null = null
-    let startTimer: number | null = null
     const load = () => {
       void readNoteInk(path, content).then((document) => {
         if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
@@ -1457,16 +1454,9 @@ export default function App({ startupBootstrap }: AppProps) {
         })
       })
     }
-    const schedule = () => {
-      startTimer = null
-      idleId = window.requestIdleCallback(load, { timeout: 1_500 })
-    }
-    if (initialNoteLoad) startTimer = window.setTimeout(schedule, STARTUP_DOCUMENT_LAYER_DELAY_MS)
-    else schedule()
-    return () => {
-      if (startTimer !== null) window.clearTimeout(startTimer)
-      if (idleId !== null) window.cancelIdleCallback(idleId)
-    }
+    // Not prepared in time (a slow read): the ink is read now, not when the
+    // window is next idle, so it follows the text as closely as it can.
+    load()
   }, [activeTab?.path])
 
   // A layout effect: with the companion read before the switch, the text
@@ -2083,6 +2073,9 @@ export default function App({ startupBootstrap }: AppProps) {
     if (isPdfNotePath(path)) {
       work.push(Promise.all([loadPdfNoteViewModule(), import('./lib/pdfPrepare')])
         .then(([, prepare]) => prepare.preparePdfDocument(path)))
+    } else if (content.includes('![')) {
+      // Pictures with their size in the first frame: the sheet and its ink stay put.
+      work.push(import('./components/MarkdownEditor').then((editor) => editor.prepareNoteImages(path, content)))
     }
     work.push(readNoteInk(path, content).then((document) => {
       preparedInkRef.current = { path, content, at: Date.now(), document }
@@ -2231,7 +2224,9 @@ export default function App({ startupBootstrap }: AppProps) {
         // later React.lazy render from scheduling a duplicate module request.
         editorWarmupFrame = window.requestAnimationFrame(() => {
           void loadMarkdownEditor()
-          window.requestIdleCallback(() => { void import('./components/DrawingBoard') }, { timeout: 4_000 })
+          // Through the board loader: a board mounted after this renders
+          // directly instead of suspending its first frame (InkBoardComponent).
+          window.requestIdleCallback(() => { void loadDrawingBoardModule() }, { timeout: 4_000 })
         })
         try {
           const sync = treeSyncRef.current!
@@ -5669,6 +5664,30 @@ export default function App({ startupBootstrap }: AppProps) {
     await attachImportedWorksheet(document)
   }, [attachImportedWorksheet, toast])
 
+  // The second pane's handwriting, read right before the pane shows it
+  // (capped), so the pane's first frame has its ink. Like the main pane's
+  // prepared ink it is trusted only for PREPARED_INK_TTL_MS: the page can be
+  // written elsewhere (its pen editor, the main pane) without its text changing.
+  const splitInkReadsRef = useRef(new Map<string, { content: string; at: number; document: DrawingLibraryDocument | null }>())
+  const readSplitInk = useCallback(async (path: string, content: string) => {
+    const document = await readNoteInk(path, content)
+    const reads = splitInkReadsRef.current
+    reads.delete(path)
+    reads.set(path, { content, at: Date.now(), document })
+    while (reads.size > 3) reads.delete(reads.keys().next().value as string)
+    return document
+  }, [])
+  const prepareSplitInk = useCallback(async (path: string) => {
+    const tab = tabsRef.current.find((candidate) => candidate.path === path)
+    if (!tab || tab.kind === 'pdf' || isPdfNotePath(path)) return
+    let timer = 0
+    await Promise.race([
+      readSplitInk(path, tab.savedContent).catch(() => null),
+      new Promise<void>((resolve) => { timer = window.setTimeout(resolve, DOCUMENT_OPEN_PREPARE_MS) }),
+    ])
+    window.clearTimeout(timer)
+  }, [readSplitInk])
+
   const openInSplit = useCallback(async (path: string) => {
     if (/\.story$/iu.test(path)) {
       setWritingPath(path)
@@ -5683,6 +5702,7 @@ export default function App({ startupBootstrap }: AppProps) {
         toast('Öffne zuerst eine zweite Notiz für die geteilte Ansicht.', 'info')
         return
       }
+      await prepareSplitInk(other)
       setSplitPath(other)
       return
     }
@@ -5697,8 +5717,9 @@ export default function App({ startupBootstrap }: AppProps) {
         return
       }
     }
+    await prepareSplitInk(path)
     setSplitPath(path)
-  }, [readNoteTab, toast])
+  }, [prepareSplitInk, readNoteTab, toast])
 
   /** Ctrl+\ — open the second pane with the most recent other note, or close it. */
   const toggleSplit = useCallback(() => {
@@ -6406,8 +6427,12 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!splitTab || splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path)) return null
     // The saved text carries the ink marker; keystrokes in the pane must not re-read the page.
     const { path, savedContent } = splitTab
-    return () => readNoteInk(path, savedContent)
-  }, [splitTab?.path, splitTab?.kind, splitTab?.savedContent])
+    return () => readSplitInk(path, savedContent)
+  }, [readSplitInk, splitTab?.path, splitTab?.kind, splitTab?.savedContent])
+  const splitInkRead = splitTab ? splitInkReadsRef.current.get(splitTab.path) : undefined
+  const splitInkInitial = splitTab && splitInkRead?.content === splitTab.savedContent && Date.now() - splitInkRead.at <= PREPARED_INK_TTL_MS
+    ? splitInkRead.document
+    : undefined
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -7374,6 +7399,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   store={splitPaperViewStore}
                   globalShortcuts={focusedPane === 'split'}
                   onEdgeSwipe={(direction) => void navigateHistory(direction === 'back' ? -1 : 1)}
+                  openZoom={splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? undefined : splitFitZoom}
                 >
                   <article className={`unified-paper ${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'is-pdf-note' : ''}`} aria-label={`${splitTab.title} · zweite Spalte`}>
                     {splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? (
@@ -7423,7 +7449,7 @@ export default function App({ startupBootstrap }: AppProps) {
                       </SafeBoundary>
                     ) : loadSplitInk && (
                       <SafeBoundary name="Handschrift (zweite Spalte)" fallbackTitle="Die Handschrift-Vorschau ist abgestürzt">
-                        <InkPreviewLayer load={loadSplitInk} smoothing={settings.smoothing} reloadKey={drawingSession.key} />
+                        <InkPreviewLayer key={splitTab.path} load={loadSplitInk} initial={splitInkInitial} smoothing={settings.smoothing} reloadKey={drawingSession.key} />
                       </SafeBoundary>
                     )}
                   </article>

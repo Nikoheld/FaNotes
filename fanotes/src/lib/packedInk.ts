@@ -3,6 +3,17 @@ import type { PackedInk } from '../types'
 
 export { expandPackedInk, expandPackedStroke, frameBudgetOpen, INK_FRAME_BUDGET_MS, INK_PACK_POINTS }
 
+/**
+ * A packed page up to this many points opens in one pass: decoded and painted
+ * before the note's first frame (DrawingBoard's restore, InkPreviewLayer).
+ * About 80,000 points take some 60 ms, far less than the frames a chunked
+ * restore waited for while the note showed its text without its ink.
+ */
+export const INK_OPEN_ONE_PASS_POINTS = 300_000
+
+/** Points in a packed page. */
+export const packedInkPoints = (packed: PackedInk) => packed.columns.length / Math.max(1, packed.stride)
+
 /** Matches the companion limit in the desktop main process. */
 const MAX_REWRITE_JSON_BYTES = 24 * 1024 * 1024
 

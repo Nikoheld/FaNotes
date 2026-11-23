@@ -81,7 +81,7 @@ import type {
   RecognitionResources,
 } from '../lib/handwritingDb'
 import { decodeInkHistory, encodeInkHistory, type EncodedInkHistory } from '../lib/inkHistory'
-import { expandPackedStroke, frameBudgetOpen, inkPageIsHeavy } from '../lib/packedInk'
+import { expandPackedStroke, frameBudgetOpen, INK_OPEN_ONE_PASS_POINTS, inkPageIsHeavy, packedInkPoints } from '../lib/packedInk'
 import { inkStrokeAllowsShapeSnap, shapeSnapAllowsLiveSample, shapeSnapProfile, snapStrokeToShape } from '../lib/shapeSnap'
 import {
   VIEW_ROTATE_STEP,
@@ -1670,6 +1670,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const inkReadyRef = useRef(true)
   const inkHydratingRef = useRef(false)
   /**
+   * Set while the heavy page this board just loaded has not shown its first
+   * frame. Its paint then runs in one pass instead of the sliced heavy job:
+   * the note is opening, there is nothing on screen to keep, and a sliced
+   * paint left the ink blank for several frames after the note's text showed.
+   * The pass waits for the frame callback before that first frame
+   * (openPaintFrameRef): the layouts an open passes through before it would
+   * each have painted the whole page, and the bitmap cache only holds the
+   * last one.
+   */
+  const openPaintRef = useRef(false)
+  const openPaintFrameRef = useRef(0)
+  /** True inside the first frame's callback and the passes after it in that frame. */
+  const openPaintNowRef = useRef(false)
+  /**
    * A stored page was handed to this board and the load effect has not taken
    * it yet. The first layout pass grows the still-empty page to the sheet and
    * marks it dirty before that effect runs.
@@ -2880,12 +2894,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       committedCanvasDirtyRef.current = false
       markInkPainted()
     }
-    const heavyRepaint = !samePaint
+    const heavyPaint = !samePaint
       && !shift
       && !erasePatch
       && !eraseOutside
       && !activeStrokeRef.current
       && inkPageIsHeavy(strokesRef.current)
+    const heavyRepaint = heavyPaint && !openPaintRef.current
+    // The opening page's one pass, at the layout its first frame shows.
+    const openPaintLater = heavyPaint && openPaintRef.current && !openPaintNowRef.current
     // A grow under the pen on a heavy page: the bitmap held every stroke at
     // the old layout, so a copy into the new one stands in for the repaint
     // that would otherwise run whole in this pointer event.
@@ -3126,6 +3143,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
         stepInkRepaint(job, 0, host)
       }
+    } else if (openPaintLater) {
+      committedCanvasDirtyRef.current = true
+      if (!openPaintFrameRef.current) {
+        openPaintFrameRef.current = requestAnimationFrame(() => {
+          openPaintFrameRef.current = 0
+          openPaintNowRef.current = true
+          committedCanvasDirtyRef.current = true
+          redrawRef.current()
+          // A resize observer later in this frame paints in one pass too;
+          // from the next frame on a heavy repaint is the sliced job again.
+          requestAnimationFrame(() => {
+            openPaintNowRef.current = false
+            openPaintRef.current = false
+          })
+        })
+      }
     } else {
       paintInPlace()
     }
@@ -3296,6 +3329,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // The board is gone: no job may swap into it, and the offscreen page (a
     // second page-sized bitmap) goes back to the browser with it.
     cancelInkPaint()
+    if (openPaintFrameRef.current) cancelAnimationFrame(openPaintFrameRef.current)
+    openPaintFrameRef.current = 0
     inkBufferRef.current?.release()
   }, [cancelInkPaint])
 
@@ -3318,20 +3353,27 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     ) return
     if (!canvas.width || !canvas.height || typeof createImageBitmap !== 'function') return
     if (!inkPageIsHeavy(strokesRef.current)) return
-    const signature = inkModelSignature(strokesRef.current)
+    // This runs in the commit that shows the next note. Its signature reads
+    // every point of the page (tens of ms on a big one), so it is taken once
+    // the window is idle; the closed board's strokes no longer change.
+    const strokes = strokesRef.current
     const coverage = markerCoverageRef.current
     const generation = inkBitmapCache.generation()
     // The copy is taken now (the bitmap is read at the call); only the promise settles later.
     void createImageBitmap(canvas).then((bitmap) => {
-      inkBitmapCache.put({
-        drawingId: drawing,
-        signature,
-        contentKey: held.key,
-        topPx: held.topPx,
-        bitmap,
-        coverage,
-        coverageBytes: coverage?.mask.byteLength ?? 0,
-      }, generation)
+      const store = () => {
+        inkBitmapCache.put({
+          drawingId: drawing,
+          signature: inkModelSignature(strokes),
+          contentKey: held.key,
+          topPx: held.topPx,
+          bitmap,
+          coverage,
+          coverageBytes: coverage?.mask.byteLength ?? 0,
+        }, generation)
+      }
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(store, { timeout: 1_000 })
+      else window.setTimeout(store, 0)
     }, () => {})
   }
   useEffect(() => {
@@ -3472,6 +3514,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setMathCorrectorEnabled(false)
       undoRef.current = history.undo
       redoRef.current = history.redo
+      // The board's first page: painted whole before the note's first frame.
+      if (loadedDrawingIdRef.current === undefined && inkPageIsHeavy(strokes)) openPaintRef.current = true
       inkHydratingRef.current = false
       inkLoadFailedRef.current = false
       if (!inkPageIsHeavy(strokes)) inkReadyRef.current = true
@@ -3505,17 +3549,27 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     inkReadyRef.current = false
     inkHydratingRef.current = true
     const columns = packedInk
+    // A board that shows nothing yet (the note is opening) takes the whole
+    // page in this pass, before the note's first frame paints: restored over
+    // frames, the note showed its text without any ink for a third of a
+    // second (most of it waiting for frames, not working), and its first
+    // layout widened the empty page and rewrote the note. Only a page too big
+    // to read in one pass still restores across frames.
+    const openInOnePass = loadedDrawingIdRef.current === undefined
+      && !strokesRef.current.length
+      && packedInkPoints(columns) <= INK_OPEN_ONE_PASS_POINTS
     const yieldFrame = () => new Promise<void>((resolve) => {
       requestAnimationFrame(() => resolve())
     })
-    const readChunk = async (list: unknown, clampToSheet: boolean) => {
-      if (!Array.isArray(list)) return [] as InkStroke[]
+    // The restore, written once: it yields where a restore across frames
+    // waits for the next frame, and an open in one pass runs straight through.
+    function* readChunk(list: unknown, clampToSheet: boolean): Generator<void, InkStroke[]> {
+      if (!Array.isArray(list)) return []
       const out: InkStroke[] = []
       let points = 0
       let started = performance.now()
       let finished = 0
       for (const entry of list) {
-        if (cancelled || token !== inkOpenTokenRef.current) return out
         const safe = safeInkStrokes([expandPackedStroke(entry, columns)], initialColorRef.current, { clampToSheet })
         for (const stroke of safe) {
           out.push(stroke)
@@ -3523,7 +3577,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
         finished += 1
         if (points >= 4000 || !frameBudgetOpen(started, performance.now(), finished)) {
-          await yieldFrame()
+          yield
           points = 0
           started = performance.now()
           finished = 0
@@ -3531,16 +3585,33 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       return out
     }
-    const expandHidden = async (value: unknown): Promise<void> => {
+    function* expandHidden(value: unknown): Generator<void, void> {
       if (!Array.isArray(value)) return
       for (const entry of value) {
-        if (cancelled || token !== inkOpenTokenRef.current) return
         if (!entry || typeof entry !== 'object') continue
         const section = entry as { collapsed?: unknown; hidden?: { strokes?: unknown; sections?: unknown } }
         if (section.collapsed !== true || !section.hidden || typeof section.hidden !== 'object') continue
-        section.hidden.strokes = await readChunk(section.hidden.strokes, false)
-        await expandHidden(section.hidden.sections)
+        section.hidden.strokes = yield* readChunk(section.hidden.strokes, false)
+        yield* expandHidden(section.hidden.sections)
       }
+    }
+    function* restorePacked(raw: Partial<DrawingDocument>): Generator<void, void> {
+      const strokes = yield* readChunk(raw.strokes, true)
+      yield* expandHidden(raw.sections)
+      const loadedSections = deserializeSections<InkStroke>(raw.sections, (value) => (
+        Array.isArray(value) ? value as InkStroke[] : []
+      ))
+      const encoded = raw.inkHistory
+      let history = { undo: [] as InkStroke[][], redo: [] as InkStroke[][] }
+      if (encoded && typeof encoded === 'object' && Array.isArray(encoded.extras)) {
+        const extras = yield* readChunk(encoded.extras, true)
+        history = extras.length === encoded.extras.length
+          ? decodeInkHistory(strokes, { ...encoded, extras }, (entry) => (
+            entry && typeof entry === 'object' ? entry as InkStroke : null
+          ))
+          : history
+      }
+      applyLoaded(raw, strokes, loadedSections, history)
     }
     let packedRaw: Partial<DrawingDocument>
     try {
@@ -3552,28 +3623,23 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return () => { cancelled = true }
     }
     applyPageBox(packedRaw)
+    const restore = restorePacked(packedRaw)
+    if (openInOnePass) {
+      try {
+        while (!restore.next().done) {
+          // No frame to wait for: the note's first frame shows the whole page.
+        }
+      } catch {
+        failLoad()
+      }
+      return () => { cancelled = true }
+    }
     void (async () => {
       try {
-        const raw = packedRaw
-        const strokes = await readChunk(raw.strokes, true)
-        if (cancelled || token !== inkOpenTokenRef.current) return
-        await expandHidden(raw.sections)
-        if (cancelled || token !== inkOpenTokenRef.current) return
-        const loadedSections = deserializeSections<InkStroke>(raw.sections, (value) => (
-          Array.isArray(value) ? value as InkStroke[] : []
-        ))
-        const encoded = raw.inkHistory
-        let history = { undo: [] as InkStroke[][], redo: [] as InkStroke[][] }
-        if (encoded && typeof encoded === 'object' && Array.isArray(encoded.extras)) {
-          const extras = await readChunk(encoded.extras, true)
+        while (!restore.next().done) {
+          await yieldFrame()
           if (cancelled || token !== inkOpenTokenRef.current) return
-          history = extras.length === encoded.extras.length
-            ? decodeInkHistory(strokes, { ...encoded, extras }, (entry) => (
-              entry && typeof entry === 'object' ? entry as InkStroke : null
-            ))
-            : history
         }
-        applyLoaded(raw, strokes, loadedSections, history)
       } catch {
         failLoad()
       }
@@ -4694,7 +4760,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const fitLoadedPageRef = useRef(() => {})
   fitLoadedPageRef.current = () => {
-    fitPageToInk()
+    // A packed page never took this fit: its strokes used to come frames
+    // after it ran. Now that it opens in one pass it still does not, so
+    // opening a big page does not grow it and rewrite the note; writing near
+    // an edge grows it as before.
+    if (!packedInk?.columns) fitPageToInk()
     absorbPaintedOneCanvas()
   }
 
