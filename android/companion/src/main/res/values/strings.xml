@@ -1180,6 +1180,12 @@
     <string name="mensa_setting">Mensa menu on the start page</string>
     <string name="mensa_setting_body">Shows today\'s menu of the Mensa Alte Kanti on Today. Off by default.</string>
     <string name="mensa_title">Mensa</string>
+    <string name="teacher_absences_setting">Absent teachers on Today</string>
+    <string name="teacher_absences_setting_body">Shows the teachers the school lists as absent or on an excursion today, read from the Schulnetz start page. Off by default.</string>
+    <string name="teacher_absences_title">Teachers</string>
+    <string name="teacher_absences_absent">Absent</string>
+    <string name="teacher_absences_excursion">On excursion</string>
+    <string name="teacher_absences_none">No absences reported today</string>
     <string name="mensa_closed">Mensa closed</string>
     <string name="mensa_student_price">Students CHF %1$s</string>
     <string name="planned_absence">Planned absence</string>

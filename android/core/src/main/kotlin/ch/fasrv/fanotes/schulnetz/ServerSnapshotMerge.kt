@@ -47,6 +47,7 @@ fun adoptServerSnapshot(phone: SchulnetzSnapshot, server: SchulnetzSnapshot): Sc
         konto = server.konto.ifEmpty { phone.konto },
         kontoSaldo = server.kontoSaldo.ifBlank { phone.kontoSaldo },
         startMessages = server.startMessages.ifEmpty { phone.startMessages },
+        teacherAbsences = newerTeacherAbsences(server.teacherAbsences, phone.teacherAbsences),
         weekFetched = newestStamps(phone.weekFetched, server.weekFetched),
         weekRead = newestStamps(phone.weekRead, server.weekRead),
         examWeekFetched = newestStamps(phone.examWeekFetched, server.examWeekFetched),

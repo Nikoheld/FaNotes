@@ -13,7 +13,7 @@ import { credentialOr } from './credentials.mjs'
 import { CLASS_CODE, isAksaBase } from './class-timetables.mjs'
 import { createCommute } from './commute.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
-import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, tagErrorStage, latencyPercentile, describePollError, FETCH_TIMEOUT_MS, TRANSIENT_HTTP, retryBackoffMs, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, tagErrorStage, latencyPercentile, describePollError, FETCH_TIMEOUT_MS, TRANSIENT_HTTP, retryBackoffMs, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, teacherAbsenceField, newerTeacherAbsences, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
   alertAllowed,
   applyEventWindow,
@@ -483,6 +483,11 @@ export const createSchulnetzRuntime = (options = {}) => {
     Array.isArray(existing?.fcmTokens) ? existing.fcmTokens.filter(isValidFcmToken).slice(-8) : []
   )
 
+  const teacherAbsencePart = (previous, next) => {
+    const kept = newerTeacherAbsences(previous?.teacherAbsences, next)
+    return kept ? { teacherAbsences: kept } : {}
+  }
+
   const acceptSnapshot = async (accountId, body) => {
     const link = await readLink(accountId)
     if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
@@ -500,6 +505,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       snapshot.deviceReadAt = snapshot.fetchedAt
       snapshot.readErrors = Array.isArray(previous?.readErrors) ? previous.readErrors : []
     }
+    // The newer day wins; an upload without the field keeps the stored one.
+    Object.assign(snapshot, teacherAbsencePart(previous, snapshot.teacherAbsences))
     // An app before the points parser uploads other ids; the server's own statement read stays.
     Object.assign(snapshot, absenceFields(keepAbsenceRead(previous || {}, snapshot)))
     // A device link's changes were already announced on the phone that read them: feed only, no push.
@@ -1348,6 +1355,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     let snapshot
     try { snapshot = parseRawSnapshot(raw, now().toISOString()) } catch (error) { throw tagErrorStage('parse-rest', error) }
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
+    const keptTeachers = newerTeacherAbsences(previous?.teacherAbsences, snapshot.teacherAbsences)
+    if (keptTeachers) snapshot.teacherAbsences = keptTeachers
     // A missing or rejected Kontoauszug page is not an empty statement.
     if (!kontoStatementRead(raw.kontoHtml || '')) {
       snapshot.konto = previous?.konto || []
@@ -1485,6 +1494,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       konto: kontoFresh ? parseKontoauszug(kontoHtml) : (previous?.konto || []),
       kontoSaldo: kontoFresh ? parseKontoSaldo(kontoHtml) : (previous?.kontoSaldo || ''),
       startMessages: keepMessages ? (previous?.startMessages || []) : parseStartMessages(scraped.startHtml || ''),
+      // Same start page, no extra request. An unreadable page keeps the stored value.
+      ...teacherAbsencePart(previous, failed ? null : teacherAbsenceField(scraped.startHtml || '', now().toISOString())),
       readErrors: scraped.problem ? [`Schulnetz: ${scraped.problem}`] : [],
       weekFetched: failed ? (previous?.weekFetched || {}) : (scraped.weekFetched || {}),
       weekRead: failed ? (previous?.weekRead || {}) : (scraped.weekRead || {}),

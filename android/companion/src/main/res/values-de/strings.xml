@@ -1180,6 +1180,12 @@
     <string name="mensa_setting">Mensa-Menü auf der Startseite</string>
     <string name="mensa_setting_body">Zeigt unter Heute das Menü der Mensa Alte Kanti. Standardmässig aus.</string>
     <string name="mensa_title">Mensa</string>
+    <string name="teacher_absences_setting">Abwesende Lehrpersonen auf Heute</string>
+    <string name="teacher_absences_setting_body">Zeigt die Lehrpersonen, die laut Schulnetz-Startseite heute abwesend oder auf Exkursion sind. Standardmässig aus.</string>
+    <string name="teacher_absences_title">Lehrpersonen</string>
+    <string name="teacher_absences_absent">Abwesend</string>
+    <string name="teacher_absences_excursion">Auf Exkursion</string>
+    <string name="teacher_absences_none">Heute keine Abwesenheiten gemeldet</string>
     <string name="mensa_closed">Mensa geschlossen</string>
     <string name="mensa_student_price">Schüler CHF %1$s</string>
     <string name="planned_absence">Geplante Absenz</string>

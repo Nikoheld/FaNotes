@@ -229,6 +229,7 @@ fun TodayScreen(model: CompanionModel) {
                 }
             }
         }
+        if (model.desk.showTeacherAbsences) item(key = "teacher-absences") { TeacherAbsenceCard(model.snapshot.teacherAbsences, java.time.LocalDate.now(ZoneId.of("Europe/Zurich"))) }
         if (model.desk.showMensa) {
             val mensaDay = model.mensa?.let { feed -> ch.fasrv.fanotes.schulnetz.pickMensaDay(feed.days, now.atZone(ZoneId.of("Europe/Zurich")).toLocalDateTime()) }
             if (mensaDay != null) item(key = "mensa") { MensaCard(mensaDay) }
