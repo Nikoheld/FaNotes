@@ -62,6 +62,19 @@ fun MensaDishRow(menu: MensaMenu) {
     }
 }
 
+/** One dish on one line for the Today card: optional label chip, name (ellipsis) and the student price. */
+@Composable
+fun MensaDishLine(menu: MensaMenu) {
+    val scheme = MaterialTheme.colorScheme
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (menu.label.isNotBlank()) Surface(color = scheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
+            Text(menu.label, style = MaterialTheme.typography.labelSmall, color = scheme.onSecondaryContainer, maxLines = 1, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+        }
+        Text(menu.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        menu.studentPrice?.let { Text(t(R.string.mensa_price_short, mensaPrice(it)), style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 1) }
+    }
+}
+
 /** The whole-week Mensa page. */
 @Composable
 fun MensaWeekScreen(model: CompanionModel) {

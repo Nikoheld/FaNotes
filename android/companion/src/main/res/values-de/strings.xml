@@ -101,7 +101,6 @@
     <string name="color_ocean">Ozeanblau</string>
     <string name="color_orchid">Orchidee</string>
     <string name="color_violet">Violett</string>
-    <string name="coming_into_view">Kommt in Sicht</string>
     <string name="commitments">Termine</string>
     <string name="compact_home_widget">Kompaktes Startbildschirm-Widget</string>
     <string name="compact_rows">Kompakte Zeilen</string>
@@ -404,7 +403,6 @@
     <string name="of">%1$s von %2$s</string>
     <string name="offline_changes_stay_on_this_device">FaNotes offline · Änderungen bleiben auf diesem Gerät</string>
     <string name="on_today">Auf Heute</string>
-    <string name="on_your_list">Auf deiner Liste</string>
     <string name="only_used_for_your_scenario">Nur für dein Szenario.</string>
     <string name="open">Offen</string>
     <string name="open_2">%1$s offen</string>
@@ -413,7 +411,6 @@
     <string name="open_kanti">Kanti+ öffnen</string>
     <string name="open_linked_note">Verknüpfte Notiz öffnen</string>
     <string name="open_school_session">Schul-Sitzung öffnen</string>
-    <string name="open_today_s_schedule">Heutigen Stundenplan öffnen</string>
     <string name="opening_note">Notiz wird geöffnet…</string>
     <string name="opening_your_library">Bibliothek wird geöffnet…</string>
     <string name="optional">Optional</string>
@@ -890,10 +887,6 @@
     <string name="notify_appointment_new_body">Ein neuer Termin, der keine Lektion und keine Prüfung ist</string>
     <string name="notify_message_new">Neue Mitteilungen</string>
     <string name="notify_message_new_body">Eine neue Mitteilung aus Schulnetz</string>
-    <plurals name="assignments_review">
-        <item quantity="one">%d Schulauftrag zum Ansehen</item>
-        <item quantity="other">%d Schulaufträge zum Ansehen</item>
-    </plurals>
     <plurals name="conflict_copies">
         <item quantity="one">%d widersprüchliche Bearbeitung wurde als eigene Notiz behalten. Du findest sie in der Bibliothek.</item>
         <item quantity="other">%d widersprüchliche Bearbeitungen wurden als eigene Notizen behalten. Du findest sie in der Bibliothek.</item>
@@ -1188,8 +1181,6 @@
     <string name="mensa_title">Mensa</string>
     <string name="teacher_absences_setting">Abwesende Lehrpersonen auf Heute</string>
     <string name="teacher_absences_setting_body">Zeigt die Lehrpersonen, die laut Schulnetz-Startseite heute abwesend oder auf Exkursion sind. Standardmässig aus.</string>
-    <string name="teacher_absences_title">Lehrpersonen</string>
-    <string name="teacher_absences_absent">Abwesend</string>
     <string name="teacher_absences_excursion">Auf Exkursion</string>
     <string name="teacher_absences_none">Heute keine Abwesenheiten gemeldet</string>
     <string name="mensa_closed">Mensa geschlossen</string>
@@ -1489,4 +1480,11 @@
     <string name="widget_preview_c4">→ 07:47</string>
     <string name="widget_preview_c5">07:35</string>
     <string name="widget_preview_c6">S29</string>
+    <string name="tile_subjects">Fächer</string>
+    <string name="tile_absence_left">Absenzpunkte übrig</string>
+    <string name="glance_tile_desc">%1$s: %2$s</string>
+    <string name="mensa_more">+%1$d weitere</string>
+    <string name="mensa_price_short">CHF %1$s</string>
+    <string name="teacher_absences_row">Abwesende Lehrpersonen</string>
+    <string name="teacher_absences_excursion_inline">auf Exkursion: %1$s</string>
 </resources>

@@ -242,10 +242,11 @@ abstract class UiPerfBase {
         while (!graph.snapshotReady.value && System.currentTimeMillis() - waitStart < 20_000) { idleMain(); Thread.sleep(10) }
         graph.saveDeskPrefs(DeskPrefs(theme = "system", showMensa = true))
         val firstTask = today.plusDays(1)
+        // Only two open tasks are due today or tomorrow, so the "Up next" list on Heute (four rows) still reaches the first exam.
         (0 until 30).forEach { index ->
             val subject = PerfFixture.courses.values.toList()[index % 12].title
             graph.saveHomeworkTask(HomeworkTask(id = "perf-task-$index", title = "Aufgabe $index", notes = "Notizen $index", subject = subject,
-                dueDate = firstTask.plusDays(index % 14 - 4L).toString(), done = index % 5 == 0, createdAt = "2026-09-01T08:00:00Z"))
+                dueDate = firstTask.plusDays(index % 14L).toString(), done = index % 5 == 0, createdAt = "2026-09-01T08:00:00Z"))
         }
         val slots = PerfFixture.slots
         graph.savePlannedAbsences((0 until 4).map { PlannedAbsence("perf-plan-$it", today.plusDays(3L + it * 9).toString(), slots[it].first, slots[it].second, "Mathematik") })

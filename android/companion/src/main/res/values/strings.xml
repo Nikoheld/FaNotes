@@ -101,7 +101,6 @@
     <string name="color_ocean">Ocean blue</string>
     <string name="color_orchid">Orchid</string>
     <string name="color_violet">Violet</string>
-    <string name="coming_into_view">Coming into view</string>
     <string name="commitments">commitments</string>
     <string name="compact_home_widget">Compact home widget</string>
     <string name="compact_rows">Compact rows</string>
@@ -404,7 +403,6 @@
     <string name="of">%1$s of %2$s</string>
     <string name="offline_changes_stay_on_this_device">FaNotes offline · changes stay on this device</string>
     <string name="on_today">On Today</string>
-    <string name="on_your_list">On your list</string>
     <string name="only_used_for_your_scenario">Only used for your scenario.</string>
     <string name="open">Open</string>
     <string name="open_2">%1$s open</string>
@@ -413,7 +411,6 @@
     <string name="open_kanti">Open Kanti+</string>
     <string name="open_linked_note">Open linked note</string>
     <string name="open_school_session">Open school session</string>
-    <string name="open_today_s_schedule">Open today\'s schedule</string>
     <string name="opening_note">Opening note…</string>
     <string name="opening_your_library">Opening your library…</string>
     <string name="optional">Optional</string>
@@ -890,10 +887,6 @@
     <string name="notify_appointment_new_body">A new appointment that is not a lesson or an exam</string>
     <string name="notify_message_new">New messages</string>
     <string name="notify_message_new_body">A new message from Schulnetz</string>
-    <plurals name="assignments_review">
-        <item quantity="one">%d school assignment to review</item>
-        <item quantity="other">%d school assignments to review</item>
-    </plurals>
     <plurals name="conflict_copies">
         <item quantity="one">%d conflicting edit was preserved as a separate note. Find it in your library.</item>
         <item quantity="other">%d conflicting edits were preserved as separate notes. Find them in your library.</item>
@@ -1188,8 +1181,6 @@
     <string name="mensa_title">Mensa</string>
     <string name="teacher_absences_setting">Absent teachers on Today</string>
     <string name="teacher_absences_setting_body">Shows the teachers the school lists as absent or on an excursion today, read from the Schulnetz start page. Off by default.</string>
-    <string name="teacher_absences_title">Teachers</string>
-    <string name="teacher_absences_absent">Absent</string>
     <string name="teacher_absences_excursion">On excursion</string>
     <string name="teacher_absences_none">No absences reported today</string>
     <string name="mensa_closed">Mensa closed</string>
@@ -1489,4 +1480,11 @@
     <string name="widget_preview_c4">→ 07:47</string>
     <string name="widget_preview_c5">07:35</string>
     <string name="widget_preview_c6">S29</string>
+    <string name="tile_subjects">Subjects</string>
+    <string name="tile_absence_left">Absence points left</string>
+    <string name="glance_tile_desc">%1$s: %2$s</string>
+    <string name="mensa_more">+%1$d more</string>
+    <string name="mensa_price_short">CHF %1$s</string>
+    <string name="teacher_absences_row">Absent teachers</string>
+    <string name="teacher_absences_excursion_inline">on excursion: %1$s</string>
 </resources>
