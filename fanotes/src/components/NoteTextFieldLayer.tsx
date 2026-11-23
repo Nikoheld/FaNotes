@@ -4,7 +4,8 @@ import { Baseline, Trash2 } from 'lucide-react'
 import { ToolbarMenu } from './ToolbarMenu'
 import { FormattingToolbar } from './FormattingToolbar'
 import type { MarkdownFormatAction } from './MarkdownEditor'
-import { formatTextFieldText } from '../lib/noteTextFieldFormat'
+import { applySimpleLatexButton, type SimpleLatexButton, type SimpleLatexOperands } from '../lib/simpleLatex'
+import { formatTextFieldText, type TextFieldEdit } from '../lib/noteTextFieldFormat'
 import { noteLinkMarkerCss } from '../lib/noteLink'
 import {
   NOTE_TEXT_FIELD_COLORS,
@@ -59,26 +60,62 @@ const fitTextArea = (node: HTMLTextAreaElement) => {
   node.style.height = `${Math.max(node.scrollHeight, 0)}px`
 }
 
+/**
+ * Runs one edit (markdown toolbar action, simple LaTeX button or shortcut) on the textarea of a text box:
+ * the same selection rules as the note editor, then the selection is restored after React re-renders.
+ */
+function runTextFieldFormat(
+  field: NoteTextField,
+  makeEdit: (area: HTMLTextAreaElement | null) => (start: number, end: number) => TextFieldEdit,
+  onText: (id: string, text: string) => void,
+  area: HTMLTextAreaElement | null = document.querySelector<HTMLTextAreaElement>(`[data-note-text-field="${CSS.escape(field.id)}"]`),
+) {
+  const start = area?.selectionStart ?? field.text.length
+  const end = area?.selectionEnd ?? field.text.length
+  const edit = makeEdit(area)(start, end)
+  if (edit.text.length > NOTE_TEXT_FIELD_MAX_CHARS) return
+  if (!area || !replaceThroughEditor(area, edit.text)) onText(field.id, edit.text)
+  requestAnimationFrame(() => {
+    if (!area) return
+    area.focus({ preventScroll: true })
+    area.setSelectionRange(edit.start, edit.end)
+  })
+}
+
+/**
+ * Writes `next` into the textarea as a typed edit (only the changed span), so Strg+Z / Strg+Umschalt+Z step
+ * through toolbar formatting like they do in the note editor. False when the browser refuses the edit.
+ */
+function replaceThroughEditor(area: HTMLTextAreaElement, next: string): boolean {
+  const before = area.value
+  let head = 0
+  while (head < before.length && head < next.length && before[head] === next[head]) head += 1
+  let tail = 0
+  while (tail < before.length - head && tail < next.length - head && before[before.length - 1 - tail] === next[next.length - 1 - tail]) tail += 1
+  area.focus({ preventScroll: true })
+  area.setSelectionRange(head, before.length - tail)
+  const inserted = next.slice(head, next.length - tail)
+  const done = inserted === '' ? document.execCommand('delete') : document.execCommand('insertText', false, inserted)
+  return done && area.value === next
+}
+
 /** Same toolbar as the note editor (markdown actions) plus size, colour and remove for the selected text box. */
-export function NoteTextFieldToolbar({ field, hideTypeable = false, onStyle, onText, onRemove }: {
+export function NoteTextFieldToolbar({ field, hideTypeable = false, onStyle, onText, onRemove, onLatexError }: {
   field: NoteTextField
   hideTypeable?: boolean
   onStyle: (id: string, patch: StylePatch) => void
   onText: (id: string, text: string) => void
   onRemove: (id: string) => void
+  onLatexError?: (message: string) => void
 }) {
-  const format = (action: MarkdownFormatAction) => {
-    const area = document.querySelector<HTMLTextAreaElement>(`[data-note-text-field="${CSS.escape(field.id)}"]`)
-    const start = area?.selectionStart ?? field.text.length
-    const end = area?.selectionEnd ?? field.text.length
-    const edit = formatTextFieldText(area?.value ?? field.text, start, end, action)
-    if (edit.text.length > NOTE_TEXT_FIELD_MAX_CHARS) return
-    onText(field.id, edit.text)
-    requestAnimationFrame(() => {
-      if (!area) return
-      area.focus({ preventScroll: true })
-      area.setSelectionRange(edit.start, edit.end)
-    })
+  const format = (action: MarkdownFormatAction) => runTextFieldFormat(field, (area) => (start, end) => formatTextFieldText(area?.value ?? field.text, start, end, action), onText)
+  const insertLatex = (button: SimpleLatexButton, operands: SimpleLatexOperands) => {
+    runTextFieldFormat(field, (area) => (_start, end) => {
+      const text = area?.value ?? field.text
+      const result = applySimpleLatexButton(text, button, operands, end)
+      const added = result.note.length - text.length
+      return { text: result.note, start: end + added, end: end + added }
+    }, onText)
   }
   const custom = field.color ?? '#20222b'
   // Controls that need their own press (slider, colour picker) keep the native behaviour.
@@ -93,10 +130,10 @@ export function NoteTextFieldToolbar({ field, hideTypeable = false, onStyle, onT
       onMouseDown={(event) => { if (!needsOwnPress(event.target)) event.preventDefault() }}
     >
       <FormattingToolbar
-        hideLatex
         hideTypeable={hideTypeable}
         onFormat={format}
-        onInsertLatex={() => undefined}
+        onInsertLatex={insertLatex}
+        onLatexError={onLatexError}
         trailingSlots={2}
         trailing={(
           <>
@@ -438,10 +475,12 @@ export function NoteTextFieldLayer({
       finish(event.currentTarget)
       return
     }
-    if (mod && !event.shiftKey && (event.code === 'KeyB' || event.key.toLowerCase() === 'b')) {
+    // Same shortcuts as the note editor (Strg+B / I / K): they write markdown around the selection.
+    const shortcut = mod && !event.shiftKey ? ({ b: 'bold', i: 'italic', k: 'link' } as const)[event.key.toLowerCase() as 'b' | 'i' | 'k'] : undefined
+    if (shortcut) {
       event.preventDefault()
       event.stopPropagation()
-      onStyle(field.id, { bold: field.bold ? undefined : true })
+      runTextFieldFormat(field, (area) => (start, end) => formatTextFieldText(area?.value ?? field.text, start, end, shortcut), onText, event.currentTarget)
       return
     }
     // Typing must never reach tool keys, delete or undo handlers of the sheet.
@@ -481,6 +520,8 @@ export function NoteTextFieldLayer({
             }}
             onBlur={(event) => {
               const next = event.relatedTarget
+              // Focus moving into the toolbar or its menus (formula fields, size slider) keeps the box selected.
+              if (next instanceof Element && next.closest('.note-text-field-toolbar, .ftb-popover')) return
               if (next instanceof Node && !event.currentTarget.contains(next) && !composingRef.current) setSelectedId((current) => current === field.id ? null : current)
             }}
           >

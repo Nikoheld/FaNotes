@@ -20,7 +20,11 @@ on:
       - 'fanotes/src/lib/pdfOpenCamera.ts'
       - 'fanotes/src/styles.css'
       - 'fanotes/electron/famd*'
+      - 'fanotes/src/components/FormattingToolbar.tsx'
+      - 'fanotes/src/components/NoteTextFieldMarkdown.tsx'
+      - 'fanotes/src/lib/noteTextFieldFormat.ts'
       - 'fanotes/scripts/check-famd-open-stable.mjs'
+      - 'fanotes/scripts/check-text-field-toolbar.mjs'
       - '.github/workflows/famd-open-stable.yml'
   workflow_dispatch:
 
@@ -58,3 +62,5 @@ jobs:
           test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
       - name: Every frame of a note opening
         run: npm run check:famd-open-stable
+      - name: Text boxes use the document formatting toolbar
+        run: npm run check:text-field-toolbar
