@@ -20,10 +20,11 @@ class NoteCompanionsTest {
     fun importingAPdfNextToAMarkdownNoteOfTheSameNameDoesNotShareItsSidecar() {
         val (vault, store) = vault()
         val md = store.createMarkdown("", "Blatt")
-        val famdBefore = vault.read("Blatt.famd")!!.decodeToString()
+        // A plain note may have no .famd yet (#1430); the PDF must still not claim the name its sidecar will use.
+        val famdBefore = vault.read("Blatt.famd")?.decodeToString()
         val pdf = store.importUniquePdf("", "Blatt.pdf", pdfBytes)
         assertEquals("Blatt 2.pdf", pdf)
-        assertEquals(famdBefore, vault.read("Blatt.famd")!!.decodeToString())
+        assertEquals(famdBefore, vault.read("Blatt.famd")?.decodeToString())
         assertTrue(vault.exists(md))
         assertFailsWith<IllegalStateException> { store.importPdf("", "Blatt.pdf", pdfBytes) }
     }

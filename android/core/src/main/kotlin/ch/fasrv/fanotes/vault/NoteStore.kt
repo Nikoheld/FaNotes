@@ -358,6 +358,17 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         createFolder(directory, stem)
     }
 
+    /**
+     * A note stem is one family: `.md`/`.markdown` text, a `.pdf` and the shared `.famd` sidecar.
+     * A plain Markdown note may have no `.famd` yet (it is only written once ink or boxes exist), so
+     * the text file itself must also block a PDF of the same name, and the other way round.
+     */
+    private fun noteFamilyTaken(path: String): Boolean =
+        listOf(FAMD_EXTENSION, ".md", ".markdown", ".pdf").any { extension ->
+            val sibling = companionPath(path, extension)
+            sibling != path && io.exists(sibling)
+        }
+
     private fun nextFreeLeaf(directory: String, stem: String, extension: String): String {
         fun taken(name: String): Boolean {
             val leaf = name + extension
@@ -365,7 +376,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
             val path = if (folder.isEmpty()) leaf else "$folder/$leaf"
             if (io.exists(path)) return true
             // A PDF and a Markdown note of one name would share one .famd (desktop `companionNameTaken`).
-            return (extension == ".md" || extension == ".pdf") && io.exists(companionPath(path, FAMD_EXTENSION))
+            return (extension == ".md" || extension == ".pdf") && noteFamilyTaken(path)
         }
         if (!taken(stem)) return stem
         var index = 2
@@ -391,7 +402,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         val stem = safeNoteName(fileName.substringBeforeLast('.').ifBlank { "Document" })
         val folder = directory.trim('/')
         val path = if (folder.isEmpty()) "$stem.pdf" else "$folder/$stem.pdf"
-        if (io.exists(path) || io.exists(companionPath(path, FAMD_EXTENSION))) throw IllegalStateException("A note named $stem already exists")
+        if (io.exists(path) || noteFamilyTaken(path)) throw IllegalStateException("A note named $stem already exists")
         io.write(path, bytes)
         val now = isoNow()
         val document = newInkDocument(stem, "blank", now)
