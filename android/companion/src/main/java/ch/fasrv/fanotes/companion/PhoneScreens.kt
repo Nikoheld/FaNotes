@@ -139,6 +139,7 @@ fun CompanionRoot(model: CompanionModel) {
                 KantiTopBar(
                     title = title,
                     subtitle = subtitle,
+                    titleTrailing = if (subtitle.isNotBlank()) ({ TodaySyncStamp(model) }) else null,
                     root = primary,
                     compact = shortWindow,
                     onBack = { model.back() },
@@ -262,6 +263,7 @@ fun todaySubtitle(today: LocalDate): String =
 fun KantiTopBar(
     title: String,
     subtitle: String,
+    titleTrailing: (@Composable () -> Unit)? = null,
     root: Boolean,
     compact: Boolean,
     onBack: () -> Unit,
@@ -278,8 +280,12 @@ fun KantiTopBar(
     ) {
         if (!root) ActionIcon(Icons.AutoMirrored.Outlined.ArrowBack, t(R.string.back), onClick = onBack)
         Column(Modifier.weight(1f).padding(start = if (root) 0.dp else 4.dp)) {
-            Text(title, style = if (root && !compact) MaterialTheme.typography.headlineLarge else MaterialTheme.typography.titleLarge,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { heading() })
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(title, style = if (root && !compact) MaterialTheme.typography.headlineLarge else MaterialTheme.typography.titleLarge,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).semantics { heading() })
+                // Quiet trailing state (sync stamp) on the title row, bottom-aligned with the title's baseline area.
+                if (titleTrailing != null) Box(Modifier.weight(1f).padding(start = Space.md, bottom = 6.dp), contentAlignment = Alignment.CenterEnd) { titleTrailing() }
+            }
             if (subtitle.isNotBlank() && !compact) Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (root) {

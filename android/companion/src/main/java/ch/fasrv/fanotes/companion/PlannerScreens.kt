@@ -108,6 +108,22 @@ fun timetableMissing(snapshot: SchulnetzSnapshot, linked: Boolean, today: LocalD
 
 private fun clockMinutes(raw: String): Int? = runCatching { LocalTime.parse(raw.take(5)).let { it.hour * 60 + it.minute } }.getOrNull()
 
+/** Gap between two sections of Heute. Sections carry no other top padding. */
+private val TodayGap = Space.page
+
+@Composable
+private fun TodaySection(content: @Composable ColumnScope.() -> Unit) = Column(Modifier.fillMaxWidth().padding(top = TodayGap), content = content)
+
+/** Trailing sync state of the Heute header: "Updating…", "Updated 14:32" or the offline line. Nothing before school data exists. */
+@Composable
+fun TodaySyncStamp(model: CompanionModel, modifier: Modifier = Modifier) {
+    val schoolKnown = model.snapshot.fetchedAt.isNotBlank() || model.link.linked
+    if (!schoolKnown) return
+    val stamp = updatedLabel(model.snapshot.fetchedAt)
+    if (LocalOnline.current) SyncStamp(model.syncing, model.lastSyncOk, stamp, modifier)
+    else StatusLine(t(R.string.offline_last_updated, stamp), StateTone.Offline, modifier)
+}
+
 @Composable
 fun TodayScreen(model: CompanionModel) {
     val now = rememberNow()
@@ -130,10 +146,13 @@ fun TodayScreen(model: CompanionModel) {
     val schoolKnown = model.snapshot.fetchedAt.isNotBlank() || model.link.linked
     val unreadAhead = remember(model.snapshot, model.link.linked, today) { timetableMissing(model.snapshot, model.link.linked, today) }
     val lead = todayLead(next, schoolKnown, unreadAhead)
-    val urgent = sortHomeworkTasks(model.tasks.filter { !it.done }).sortedBy { when (taskBucket(it, today)) { "Overdue" -> 0; "Today" -> 1; "Upcoming" -> 2; else -> 3 } }
+    val clockNow = now.atZone(zone).toLocalTime().let { "%02d:%02d".format(it.hour, it.minute) }
+    val upNextRows = remember(model.tasks, agenda, today, clockNow, next?.key, cards) {
+        upNext(model.tasks, upcomingExams(agenda, today, clockNow, next?.key), today, showTasks = "tasks" in cards, showExams = "exam" in cards)
+    }
     var selected by remember { mutableStateOf<AgendaEntry?>(null) }
     var task by remember { mutableStateOf<HomeworkTask?>(null) }
-    val recent = remember(model.tree) { flattenNotes(model.tree).sortedByDescending { it.modifiedAt }.take(3) }
+    val recent = remember(model.tree) { flattenNotes(model.tree).sortedByDescending { it.modifiedAt }.take(TODAY_NOTES_LIMIT) }
     var allowed by remember { mutableStateOf(CompanionAlerts.notificationsAllowed(context)) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         allowed = CompanionAlerts.notificationsAllowed(context)
@@ -141,155 +160,181 @@ fun TodayScreen(model: CompanionModel) {
         model.dismissNotifyTip()
     }
     androidx.compose.runtime.LaunchedEffect(model.desk.showMensa) { model.refreshMensa() }
+    val syncCopy = rememberFaNotesSyncCopy(sync.status, model.notesAccount, model.syncOffline, online)
+    val banner = todayBanner(TodayBannerState(
+        needsReauth = model.link.needsReauth,
+        syncNotice = syncCopy != null, syncError = syncCopy?.third == true,
+        demo = model.demo,
+        connect = model.schoolReady && lead == TodayLead.Next && !model.notesAccount && !model.link.linked && model.snapshot.fetchedAt.isBlank(),
+        notifyTip = model.link.linked && !allowed && !model.notifyTipDismissed && Build.VERSION.SDK_INT >= 33,
+    ))
     RefreshableScreenList(model.syncing, { model.pullRefresh() }) {
-        // One item that is always first, so a status or banner that appears after the snapshot
-        // loads is shown above the card instead of being inserted off-screen.
+        // One item that is always first, so a banner that appears after the snapshot loads is shown above the card instead of being inserted off-screen.
         item(key = "top") {
             Column(Modifier.fillMaxWidth()) {
-                if (schoolKnown) {
-                    val stamp = updatedLabel(model.snapshot.fetchedAt)
-                    if (online) SyncStamp(model.syncing, model.lastSyncOk, stamp, Modifier.padding(bottom = 12.dp))
-                    else StatusLine(t(R.string.offline_last_updated, stamp), StateTone.Offline, Modifier.padding(bottom = 12.dp))
-                }
-                val syncCopy = rememberFaNotesSyncCopy(sync.status, model.notesAccount, model.syncOffline, online)
-                if (model.demo) Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(R.string.demo_active_title), t(R.string.demo_active_body), t(R.string.demo_end), tone = StateTone.Warning, onAction = { model.stopDemo() }) }
-                if (model.link.needsReauth) Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(R.string.reconnect_your_school), t(R.string.your_last_school_data_is_still_here), t(R.string.sign_in), tone = StateTone.Warning, onAction = { model.navigate(Page.Connections) }) }
-                else if (syncCopy != null) Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(syncCopy.first), t(syncCopy.second), t(R.string.account_sync), error = syncCopy.third, tone = if (syncCopy.third) StateTone.Error else StateTone.Offline, onAction = { model.navigate(Page.Connections) }) }
-                if (model.schoolReady && lead == TodayLead.Next && !model.notesAccount && !model.link.linked && model.snapshot.fetchedAt.isBlank() && !model.link.needsReauth) Box(Modifier.padding(bottom = 12.dp)) {
-                    InfoBanner(t(R.string.your_school_day), t(R.string.connect_schulnetz_to_see_grades_the_timetable_ex), if (model.busy) null else t(R.string.connect_schulnetz), onAction = { model.requestVisibleLogin("today") })
-                }
-                if (model.link.linked && !allowed && !model.notifyTipDismissed && Build.VERSION.SDK_INT >= 33) Box(Modifier.padding(bottom = 12.dp)) {
-                    InfoBanner(t(R.string.notify_tip_title), t(R.string.notify_tip_body), t(R.string.allow_notifications), onAction = { permission.launch(Manifest.permission.POST_NOTIFICATIONS) })
+                when (banner) {
+                    TodayBanner.Reconnect -> InfoBanner(t(R.string.reconnect_your_school), t(R.string.your_last_school_data_is_still_here), t(R.string.sign_in), tone = StateTone.Warning, onAction = { model.navigate(Page.Connections) })
+                    TodayBanner.SyncError, TodayBanner.SyncOffline -> syncCopy?.let { InfoBanner(t(it.first), t(it.second), t(R.string.account_sync), error = it.third, tone = if (it.third) StateTone.Error else StateTone.Offline, onAction = { model.navigate(Page.Connections) }) }
+                    TodayBanner.Demo -> InfoBanner(t(R.string.demo_active_title), t(R.string.demo_active_body), t(R.string.demo_end), tone = StateTone.Warning, onAction = { model.stopDemo() })
+                    TodayBanner.Connect -> InfoBanner(t(R.string.your_school_day), t(R.string.connect_schulnetz_to_see_grades_the_timetable_ex), if (model.busy) null else t(R.string.connect_schulnetz), onAction = { model.requestVisibleLogin("today") })
+                    TodayBanner.NotifyTip -> InfoBanner(t(R.string.notify_tip_title), t(R.string.notify_tip_body), t(R.string.allow_notifications), onAction = { permission.launch(Manifest.permission.POST_NOTIFICATIONS) })
+                    null -> {}
                 }
             }
         }
         val ready = model.schoolReady && !model.loading
         if ("lessons" in cards) item(key = "lead") {
-            if (!ready) Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
-                Box(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { SkeletonRows(2) }
-            } else when (lead) {
-                TodayLead.Next -> {
-                    val entry = next!!
-                    val dayLessons = agenda.filter { it.day == entry.day && it.kind == AgendaKind.Lesson && it.start.isNotBlank() }
-                    val gapUnread = remember(model.snapshot, today, entry.day) { unreadSchoolDayBefore(model.snapshot, today, entry.day, today) }
-                    Box {
-                        NextHero(model, entry, now, zone, dayLessons) { selected = entry }
-                        if (LocalCompanionSemantics.current.snow && model.snowfall && !LocalKantiMotion.current.reduced) Snowfall(Modifier.matchParentSize().clip(MaterialTheme.shapes.extraLarge))
+            Column(Modifier.fillMaxWidth().padding(top = if (banner != null) Space.md else 0.dp)) {
+                if (!ready) Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
+                    Box(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { SkeletonRows(2) }
+                } else when (lead) {
+                    TodayLead.Next -> {
+                        val entry = next!!
+                        val dayLessons = agenda.filter { it.day == entry.day && it.kind == AgendaKind.Lesson && it.start.isNotBlank() }
+                        val gapUnread = remember(model.snapshot, today, entry.day) { unreadSchoolDayBefore(model.snapshot, today, entry.day, today) }
+                        // Built off the main thread and kept in the model: scrolling this item back in or returning to Heute reuses it.
+                        val minute = now.epochSecond / 60
+                        val strip by androidx.compose.runtime.produceState(model.cachedLessonStrip(minute) ?: emptyList(), model.snapshot, model.hidden, minute) {
+                            value = model.lessonStrip(now, zone)
+                        }
+                        Box {
+                            NextHero(model, entry, now, zone, dayLessons, strip, onLesson = { selected = entry }, onOpen = { model.openPlanner() })
+                            if (LocalCompanionSemantics.current.snow && model.snowfall && !LocalKantiMotion.current.reduced) Snowfall(Modifier.matchParentSize().clip(MaterialTheme.shapes.extraLarge))
+                        }
+                        if (gapUnread) StatusLine(t(R.string.unread_before_next), StateTone.Warning, Modifier.padding(top = Space.sm, start = Space.xs))
                     }
-                    if (gapUnread) StatusLine(t(R.string.unread_before_next), StateTone.Warning, Modifier.padding(top = 10.dp, start = 4.dp))
-                    // Built off the main thread and kept in the model: scrolling this item back in or returning to Heute reuses it.
-                    val minute = now.epochSecond / 60
-                    val strip by androidx.compose.runtime.produceState(model.cachedLessonStrip(minute) ?: emptyList(), model.snapshot, model.hidden, minute) {
-                        value = model.lessonStrip(now, zone)
+                    TodayLead.Unread -> LeadCard(Icons.Outlined.EventBusy, StateTone.Warning, t(R.string.timetable_not_loaded), if (online) t(R.string.timetable_not_loaded_body) else t(R.string.offline_waiting),
+                        if (!model.busy) t(R.string.refresh_school_data) else null) { model.refreshSchool() }
+                    TodayLead.Connect -> LeadCard(Icons.Outlined.School, StateTone.Accent, t(R.string.your_school_day), t(R.string.connect_schulnetz_to_see_grades_the_timetable_ex),
+                        if (!model.busy) t(R.string.connect_schulnetz) else null) { model.requestVisibleLogin("today") }
+                    TodayLead.Clear -> LeadCard(Icons.Outlined.WbSunny, StateTone.Neutral, t(R.string.room_to_breathe), t(R.string.no_upcoming_commitments_in_your_planner), null) {}
+                }
+            }
+        }
+        if ("tasks" in cards || "exam" in cards) {
+            val showEmpty = "tasks" in cards && ready && upNextRows.isEmpty()
+            if (upNextRows.isNotEmpty() || showEmpty || ("tasks" in cards && !ready)) item(key = "up-next") {
+                TodaySection {
+                    SectionLabel(t(R.string.up_next), t(R.string.all), topPadding = 0.dp) { model.openPlanner(true) }
+                    if (!ready) SkeletonRows(2)
+                    else if (upNextRows.isEmpty()) Group {
+                        Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.CheckCircleOutline, null, tint = LocalCompanionSemantics.current.success)
+                            Text(t(R.string.you_re_all_caught_up), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    } else Group {
+                        upNextRows.forEachIndexed { index, row ->
+                            if (index > 0) FineDivider()
+                            when (row) {
+                                is UpNextItem.Task -> TaskRow(row.task, today, { model.toggleTask(row.task) }, colors = model.colors) { task = row.task }
+                                is UpNextItem.Exam -> AgendaRow(model, row.entry, RailPosition.Single, showDay = true, modifier = Modifier.padding(horizontal = Space.md)) { selected = row.entry }
+                            }
+                        }
                     }
-                    if (strip.count { !it.heading } >= 2) LessonStrip(strip, today, Modifier.padding(top = 12.dp))
-                }
-                TodayLead.Unread -> LeadCard(Icons.Outlined.EventBusy, StateTone.Warning, t(R.string.timetable_not_loaded), if (online) t(R.string.timetable_not_loaded_body) else t(R.string.offline_waiting),
-                    if (!model.busy) t(R.string.refresh_school_data) else null) { model.refreshSchool() }
-                TodayLead.Connect -> LeadCard(Icons.Outlined.School, StateTone.Accent, t(R.string.your_school_day), t(R.string.connect_schulnetz_to_see_grades_the_timetable_ex),
-                    if (!model.busy) t(R.string.connect_schulnetz) else null) { model.requestVisibleLogin("today") }
-                TodayLead.Clear -> LeadCard(Icons.Outlined.WbSunny, StateTone.Neutral, t(R.string.room_to_breathe), t(R.string.no_upcoming_commitments_in_your_planner), null) {}
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { model.openPlanner() }) {
-                    Text(t(R.string.open_today_s_schedule), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Icon(Icons.Outlined.ChevronRight, null, Modifier.padding(start = 2.dp).size(18.dp))
                 }
             }
-        }
-        if ("tasks" in cards) {
-            item(key = "tasks-head") { SectionLabel(t(R.string.on_your_list), if (urgent.isEmpty()) t(R.string.tasks) else t(R.string.all_2, urgent.size)) { model.openPlanner(true) } }
-            if (!ready) item(key = "tasks-loading") { SkeletonRows(2) }
-            else if (urgent.isEmpty()) item(key = "tasks-empty") {
-                Group { Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.CheckCircleOutline, null, tint = LocalCompanionSemantics.current.success)
-                    Text(t(R.string.you_re_all_caught_up), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-                } }
-            }
-            val shown = urgent.take(3)
-            itemsIndexed(shown, key = { _, item -> "today-task:${item.id}" }) { index, item ->
-                GroupItem(index, shown.size) { TaskRow(item, today, { model.toggleTask(item) }, colors = model.colors) { task = item } }
-            }
-            if (model.snapshot.homework.isNotEmpty()) item(key = "tasks-school") {
-                TextButton(onClick = { model.openPlanner(true); model.taskSource = "school" }, modifier = Modifier.padding(top = 4.dp)) {
-                    Icon(Icons.AutoMirrored.Outlined.Assignment, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
-                    Text(tp(R.plurals.assignments_review, model.snapshot.homework.size, model.snapshot.homework.size), style = MaterialTheme.typography.labelLarge)
-                }
-            }
-        }
-        if ("exam" in cards) {
-            val clockNow = now.atZone(zone).toLocalTime().let { "%02d:%02d".format(it.hour, it.minute) }
-            val exams = agenda.filter { it.kind == AgendaKind.Exam && it.key != next?.key && it.school?.isCancelled() != true &&
-                (it.day > today || (it.day == today && it.end.ifBlank { it.start.ifBlank { "23:59" } } >= clockNow)) }
-                .sortedWith(compareBy<AgendaEntry> { it.day }.thenBy { it.start }).take(2)
-            if (exams.isNotEmpty()) {
-                item(key = "exam-head") { SectionLabel(t(R.string.coming_into_view)) }
-                itemsIndexed(exams, key = { _, it -> "today-exam:${it.key}" }) { index, exam ->
-                    AgendaRow(model, exam, railPosition(index, exams.size), showDay = true) { selected = exam }
-                }
-            }
-        }
-        if (model.desk.showTeacherAbsences) item(key = "teacher-absences") { TeacherAbsenceCard(model.snapshot.teacherAbsences, java.time.LocalDate.now(ZoneId.of("Europe/Zurich"))) }
-        if (model.desk.showMensa) {
-            val mensaDay = model.mensa?.let { feed -> ch.fasrv.fanotes.schulnetz.pickMensaDay(feed.days, now.atZone(ZoneId.of("Europe/Zurich")).toLocalDateTime()) }
-            if (mensaDay != null) item(key = "mensa") { MensaCard(mensaDay) { model.navigate(Page.Mensa) } }
         }
         val gradesShown = "grades" in cards && model.snapshot.grades.isNotEmpty()
         val pointsShown = "pluspunkte" in cards && model.desk.showPluspunkte && model.snapshot.grades.isNotEmpty()
         val updates = model.snapshot.messages.size + model.snapshot.startMessages.size
         val updatesShown = "events" in cards && updates > 0
         val absencesShown = "absences" in cards && absenceTally.quota != null && absenceTally.remaining != null
-        if (gradesShown || pointsShown || updatesShown || absencesShown) {
-            item(key = "school-head") { SectionLabel(t(R.string.from_school)) }
-            item(key = "school-group") {
-                val courses = remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook)) }
-                Group {
-                    if (gradesShown) SettingRow(Icons.Outlined.Insights, t(R.string.your_grades), tp(R.plurals.subjects_review, courses.size, courses.size)) { model.navigate(Page.Grades) }
-                    if (pointsShown) {
-                        if (gradesShown) FineDivider()
-                        val total = remember(courses) { promotionTotals(courses) }
-                        SettingRow(Icons.Outlined.Balance, t(R.string.promotion_points_2), "", uiPlus(total.total), trailingColor = if (total.total >= 0) LocalCompanionSemantics.current.success else MaterialTheme.colorScheme.error) { model.navigate(Page.Grades) }
-                    }
-                    if (absencesShown) {
-                        if (gradesShown || pointsShown) FineDivider()
-                        val subtitle = if (absenceTally.estimated > 0) t(R.string.absence_points_summary, uiPoints(absenceTally.booked), "≈ ${absenceTally.estimated}") else t(R.string.absence_points_summary, uiPoints(absenceTally.booked), "0")
-                        SettingRow(Icons.Outlined.EventBusy, t(R.string.absence_points), subtitle, absencePointsLeft(absenceTally).orEmpty(),
-                            tone = if (absenceTally.estimated > 0) StateTone.Warning else StateTone.Neutral,
-                            trailingColor = if ((absenceTally.remaining ?: 0.0) < 0) MaterialTheme.colorScheme.error else if (absenceTally.estimated > 0) LocalCompanionSemantics.current.warning else null) { model.navigate(Page.Absences) }
-                    }
-                    if (updatesShown) {
-                        if (gradesShown || pointsShown || absencesShown) FineDivider()
-                        SettingRow(Icons.Outlined.NotificationsNone, t(R.string.school_updates), tp(R.plurals.messages_announcements, updates, updates)) { model.navigate(Page.Updates) }
-                    }
-                }
+        val glance = glanceLayout(gradesShown, pointsShown, absencesShown, updatesShown)
+        if (glance.tiles.isNotEmpty() || glance.updatesLink) item(key = "glance") {
+            val courses = remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook)) }
+            TodaySection { GlanceRow(model, glance, courses, absenceTally, updates) }
+        }
+        if (model.desk.showTeacherAbsences) {
+            val absences = model.snapshot.teacherAbsences
+            if (absences != null && absences.day == java.time.LocalDate.now(ZoneId.of("Europe/Zurich")).toString()) item(key = "teacher-absences") {
+                TodaySection { TeacherAbsenceCard(absences, java.time.LocalDate.now(ZoneId.of("Europe/Zurich"))) }
             }
         }
-        // The commute card closes the "Von der Schule" section; without that section it sits after the Mensa card, before the notes.
-        if ("commute" in cards && !model.demo) item(key = "commute") {
-            CommuteCard(model.commute, nowMs, showInvite = model.commute.loaded || !model.link.linked, onOpen = model::openCommuteDetail, onOpenTrip = model::openCommuteTrip,
-                onAdd = { model.editCommuteRoute(null) }, modifier = Modifier.padding(top = if (gradesShown || pointsShown || updatesShown || absencesShown) 8.dp else 12.dp), onRepick = { model.editCommuteRoute(it, openPicker = true) })
+        if (model.desk.showMensa) {
+            val zurichNow = now.atZone(ZoneId.of("Europe/Zurich")).toLocalDateTime()
+            val mensaDay = model.mensa?.let { feed -> ch.fasrv.fanotes.schulnetz.pickMensaDay(feed.days, zurichNow) }
+            if (mensaDay != null) item(key = "mensa") { TodaySection { MensaCard(mensaDay, zurichNow.toLocalDate()) { model.navigate(Page.Mensa) } } }
         }
-        if (model.notesAccount) {
-            item(key = "notes-head") { SectionLabel(t(R.string.pick_up_a_note), t(R.string.library)) { model.select(Destination.Notes) } }
-            if (recent.isEmpty()) item(key = "notes-empty") { Text(t(R.string.your_notes_will_be_waiting_here_capture_an_idea), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 12.dp)) }
-            itemsIndexed(recent, key = { _, it -> "recent:${it.path}" }) { index, node -> GroupItem(index, recent.size) { NoteRow(model, node) { model.openNote(node.path) } } }
+        if ("commute" in cards && !model.demo) item(key = "commute") {
+            TodaySection {
+                CommuteCard(model.commute, nowMs, showInvite = model.commute.loaded || !model.link.linked, onOpen = model::openCommuteDetail, onOpenTrip = model::openCommuteTrip,
+                    onAdd = { model.editCommuteRoute(null) }, onRepick = { model.editCommuteRoute(it, openPicker = true) })
+            }
+        }
+        if (model.notesAccount) item(key = "notes") {
+            TodaySection {
+                SectionLabel(t(R.string.pick_up_a_note), t(R.string.library), topPadding = 0.dp) { model.select(Destination.Notes) }
+                if (recent.isEmpty()) Text(t(R.string.your_notes_will_be_waiting_here_capture_an_idea), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 12.dp))
+                else Column { recent.forEachIndexed { index, node -> GroupItem(index, recent.size) { NoteRow(model, node) { model.openNote(node.path) } } } }
+            }
         }
     }
     selected?.let { AgendaDetails(model, it) { selected = null } }
     task?.let { TaskForm(model, it) { task = null } }
 }
 
-/** Compact Mensa card: weekday and date, then each dish. The whole card and the "Week" action open the week page. */
+/** "At a glance": up to three equal tiles in one row, and school updates as a text link when a fourth entry applies. */
 @Composable
-private fun MensaCard(day: ch.fasrv.fanotes.schulnetz.MensaDay, onOpen: () -> Unit) {
+private fun GlanceRow(model: CompanionModel, layout: GlanceLayout, courses: List<CourseSummary>, tally: AbsenceTally, updates: Int) {
+    val s = LocalCompanionSemantics.current
     val scheme = MaterialTheme.colorScheme
-    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        SectionLabel(t(R.string.mensa_title), t(R.string.mensa_week_action), onAction = onOpen)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        if (layout.tiles.isNotEmpty()) Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+            layout.tiles.forEach { tile ->
+                val m = Modifier.weight(1f).fillMaxHeight()
+                when (tile) {
+                    GlanceTile.Grades -> GlanceTileCard(Icons.Outlined.Insights, courses.size.toString(), t(R.string.tile_subjects), null,
+                        t(R.string.glance_tile_desc, t(R.string.your_grades), tp(R.plurals.subjects_review, courses.size, courses.size)), m) { model.navigate(Page.Grades) }
+                    GlanceTile.Points -> {
+                        val total = remember(courses) { promotionTotals(courses) }
+                        GlanceTileCard(Icons.Outlined.Balance, uiPlus(total.total), t(R.string.promotion_points_2), if (total.total >= 0) s.success else scheme.error,
+                            t(R.string.glance_tile_desc, t(R.string.promotion_points_2), uiPlus(total.total)), m) { model.navigate(Page.Grades) }
+                    }
+                    GlanceTile.Absences -> GlanceTileCard(Icons.Outlined.EventBusy, uiPoints(tally.remaining ?: 0.0), t(R.string.tile_absence_left),
+                        if ((tally.remaining ?: 0.0) < 0) scheme.error else if (tally.estimated > 0) s.warning else null,
+                        t(R.string.glance_tile_desc, t(R.string.absence_points), absencePointsLeft(tally).orEmpty()), m) { model.navigate(Page.Absences) }
+                    GlanceTile.Updates -> GlanceTileCard(Icons.Outlined.NotificationsNone, updates.toString(), t(R.string.school_updates), null,
+                        t(R.string.glance_tile_desc, t(R.string.school_updates), tp(R.plurals.messages_announcements, updates, updates)), m) { model.navigate(Page.Updates) }
+                }
+            }
+        }
+        if (layout.updatesLink) Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { model.navigate(Page.Updates) }.padding(horizontal = Space.xs),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+            Icon(Icons.Outlined.NotificationsNone, null, Modifier.size(18.dp), tint = scheme.primary)
+            Text(tp(R.plurals.messages_announcements, updates, updates), style = MaterialTheme.typography.labelLarge, color = scheme.primary, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = scheme.primary)
+        }
+    }
+}
+
+@Composable
+private fun GlanceTileCard(icon: androidx.compose.ui.graphics.vector.ImageVector, value: String, label: String, valueColor: androidx.compose.ui.graphics.Color?, description: String, modifier: Modifier, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(onClick = onClick, color = scheme.surface, shape = MaterialTheme.shapes.large, modifier = modifier.heightIn(min = 48.dp).semantics { contentDescription = description; role = Role.Button }) {
+        Column(Modifier.padding(horizontal = Space.md, vertical = Space.md).clearAndSetSemantics {}, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                Icon(icon, null, Modifier.size(20.dp), tint = scheme.onSurfaceVariant)
+                Text(value, style = MaterialTheme.typography.headlineSmall, color = valueColor ?: scheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Text(label, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** Compact Mensa card: the first dish on one line, "+N more" below. The whole card and the "Week" action open the week page. */
+@Composable
+private fun MensaCard(day: ch.fasrv.fanotes.schulnetz.MensaDay, today: LocalDate, onOpen: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth()) {
+        SectionLabel(t(R.string.mensa_title), t(R.string.mensa_week_action), topPadding = 0.dp, onAction = onOpen)
         Group {
-            Column(Modifier.clickable(role = Role.Button, onClick = onOpen).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(mensaDayTitle(day.date), style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant, modifier = Modifier.semantics { heading() })
-                if (day.closed) Text(day.note.ifBlank { t(R.string.mensa_closed) }, style = MaterialTheme.typography.bodyMedium)
-                day.menus.forEach { MensaDishRow(it) }
+            Column(Modifier.clickable(role = Role.Button, onClick = onOpen).padding(horizontal = Space.lg, vertical = Space.md), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                if (day.date != today) Text(mensaDayTitle(day.date), style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
+                if (day.closed || day.menus.isEmpty()) Text(day.note.ifBlank { t(R.string.mensa_closed) }, style = MaterialTheme.typography.bodyMedium)
+                else {
+                    MensaDishLine(day.menus.first())
+                    if (day.menus.size > 1) Text(t(R.string.mensa_more, day.menus.size - 1), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                }
             }
         }
     }
@@ -312,7 +357,7 @@ private fun entryPeople(entry: AgendaEntry): String = entry.school?.teachers?.jo
 
 /** The one prominent block on Heute: the next commitment, its countdown and the day band. */
 @Composable
-private fun NextHero(model: CompanionModel, entry: AgendaEntry, now: Instant, zone: ZoneId, dayLessons: List<AgendaEntry>, onClick: () -> Unit) {
+private fun NextHero(model: CompanionModel, entry: AgendaEntry, now: Instant, zone: ZoneId, dayLessons: List<AgendaEntry>, strip: List<WidgetRow>, onLesson: () -> Unit, onOpen: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val s = LocalCompanionSemantics.current
     val today = now.atZone(zone).toLocalDate()
@@ -333,9 +378,11 @@ private fun NextHero(model: CompanionModel, entry: AgendaEntry, now: Instant, zo
     val room = entryRoom(entry)
     val people = entryPeople(entry)
     val cancelled = entry.school?.isCancelled() == true
-    Surface(onClick = onClick, color = scheme.primaryContainer, shape = MaterialTheme.shapes.extraLarge,
+    Surface(onClick = onOpen, color = scheme.primaryContainer, shape = MaterialTheme.shapes.extraLarge,
         modifier = Modifier.fillMaxWidth().then(if (s.snow) Modifier.border(1.dp, scheme.primary.copy(alpha = 0.16f), MaterialTheme.shapes.extraLarge) else Modifier)) {
-        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 20.dp)) {
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 16.dp)) {
+            // The lesson itself opens its details; the rest of the card opens the schedule.
+            Column(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onLesson)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (running) Box(Modifier.size(8.dp).background(scheme.primary, CircleShape))
                 Text(label, style = MaterialTheme.typography.labelLarge, color = scheme.primary, modifier = Modifier.padding(start = if (running) 8.dp else 0.dp).weight(1f))
@@ -357,32 +404,31 @@ private fun NextHero(model: CompanionModel, entry: AgendaEntry, now: Instant, zo
                     heroMark?.let { Tag(it.first, it.second) }
                 }
             }
-            if (dayLessons.size >= 2) DayBand(dayLessons, if (entry.day == today) clock else -1, entry.key, Modifier.padding(top = 18.dp))
+            }
+            if (dayLessons.size >= 2) DayBand(dayLessons, if (entry.day == today) clock else -1, entry.key, Modifier.padding(top = Space.md))
+            val rest = remember(strip, entry) { strip.filter { it.heading || it.event?.id != entry.school?.id } }
+            if (rest.count { !it.heading } >= 1) LessonStrip(rest, today, Modifier.padding(top = Space.md))
         }
     }
 }
 
-/** All remaining lessons of today, then the next school day, as one sideways scroll under the hero. */
+/** The remaining lessons of today, then the next school day, as one compact sideways row inside the hero. */
 @Composable
 private fun LessonStrip(rows: List<WidgetRow>, today: LocalDate, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
     val s = LocalCompanionSemantics.current
-    LazyRow(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyRow(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.sm), verticalAlignment = Alignment.CenterVertically) {
         itemsIndexed(rows, key = { index, row -> "strip:$index:${row.day}:${row.event?.id.orEmpty()}" }) { _, row ->
             if (row.heading) {
                 val heading = if (row.day == today.plusDays(1)) t(R.string.tomorrow) else row.day.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())
-                Box(Modifier.height(64.dp).padding(horizontal = 4.dp), contentAlignment = Alignment.CenterStart) {
-                    Text(heading, style = MaterialTheme.typography.labelLarge, color = scheme.primary, maxLines = 1)
-                }
+                Text(heading, style = MaterialTheme.typography.labelLarge, color = scheme.primary, maxLines = 1, modifier = Modifier.padding(horizontal = Space.xs))
             } else {
                 val accent = when { row.cancelled -> scheme.error; row.exam -> s.warning; else -> scheme.onSurfaceVariant }
-                Surface(color = scheme.surfaceVariant.copy(alpha = 0.5f), shape = MaterialTheme.shapes.large) {
-                    Column(Modifier.widthIn(min = 112.dp, max = 168.dp).padding(horizontal = 12.dp, vertical = 8.dp)) {
-                        Text(row.clock.ifBlank { t(R.string.all_day) }, style = TimeStyle, color = accent, maxLines = 1)
+                Surface(color = scheme.surface.copy(alpha = 0.55f), shape = MaterialTheme.shapes.medium) {
+                    Row(Modifier.widthIn(max = 200.dp).padding(horizontal = Space.md, vertical = Space.sm), horizontalArrangement = Arrangement.spacedBy(Space.sm), verticalAlignment = Alignment.CenterVertically) {
+                        Text(row.clock.substringBefore('–').ifBlank { t(R.string.all_day) }, style = TimeStyle, color = accent, maxLines = 1)
                         Text(row.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             textDecoration = if (row.cancelled) TextDecoration.LineThrough else TextDecoration.None)
-                        Text(listOf(row.room.takeIf { it.isNotBlank() }, if (row.exam) t(R.string.exam) else null).filterNotNull().joinToString(" · ").ifBlank { " " },
-                            style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -685,7 +731,7 @@ private fun NowRow(clock: String) {
 }
 
 @Composable
-fun AgendaRow(model: CompanionModel, entry: AgendaEntry, position: RailPosition = RailPosition.Single, now: Int? = null, showDay: Boolean = false, onClick: () -> Unit) {
+fun AgendaRow(model: CompanionModel, entry: AgendaEntry, position: RailPosition = RailPosition.Single, now: Int? = null, showDay: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val s = LocalCompanionSemantics.current
     val highlighted = entry.school?.let { lessonTargetId(it) in model.highlightIds } == true
@@ -733,7 +779,7 @@ fun AgendaRow(model: CompanionModel, entry: AgendaEntry, position: RailPosition 
         title = courseAlias(entry.title, model.desk.courseAliases),
         meta = meta.joinToString("  ·  "),
         accent = accent, node = node, position = position, running = running, highlighted = highlighted,
-        compact = model.desk.planCompact, tags = tags, onClick = onClick,
+        compact = model.desk.planCompact, tags = tags, onClick = onClick, modifier = modifier,
     )
 }
 

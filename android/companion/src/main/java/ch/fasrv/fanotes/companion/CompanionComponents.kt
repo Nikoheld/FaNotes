@@ -136,7 +136,7 @@ fun SyncStamp(syncing: Boolean, lastSyncOk: Long, fallback: String, modifier: Mo
             Text(t(R.string.sync_updating), style = MaterialTheme.typography.labelMedium, color = color, modifier = Modifier.padding(start = 6.dp))
         } else {
             val stamp = if (lastSyncOk > 0L) formatSchoolStamp(java.time.Instant.ofEpochMilli(lastSyncOk).atZone(java.time.ZoneId.systemDefault()), "HH:mm") else fallback
-            if (stamp.isNotBlank()) Text(t(R.string.sync_updated_at, stamp), style = MaterialTheme.typography.labelMedium, color = color)
+            if (stamp.isNotBlank()) Text(t(R.string.sync_updated_at, stamp), style = MaterialTheme.typography.labelMedium, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -169,8 +169,8 @@ fun GroupItem(index: Int, count: Int, content: @Composable ColumnScope.() -> Uni
 }
 
 @Composable
-fun SectionLabel(title: String, action: String? = null, count: Int? = null, tone: Color? = null, onAction: () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 6.dp).heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
+fun SectionLabel(title: String, action: String? = null, count: Int? = null, tone: Color? = null, topPadding: Dp = 22.dp, onAction: () -> Unit = {}) {
+    Row(Modifier.fillMaxWidth().padding(top = topPadding, bottom = 6.dp).heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = MaterialTheme.typography.titleMedium, color = tone ?: MaterialTheme.colorScheme.onBackground,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).semantics { heading() })
