@@ -267,6 +267,14 @@ fun NoteEditorScreen(model: CompanionModel) {
             Box(Modifier.padding(Space.md)) { InfoBanner(t(R.string.note_needs_attention), shownText(editor.error), if (editor.note == null) t(R.string.try_again) else t(R.string.save_again), true, onAction = { if (editor.note == null) editor.load() else editor.flush() }) }
         }
         if (editor.note == null) return
+        if (editor.note?.inkPending == true) {
+            // The handwriting is still on its way: say so instead of opening an empty note that could be saved over it.
+            Box(Modifier.padding(Space.md)) {
+                InfoBanner(t(R.string.note_ink_pending_title), t(R.string.note_ink_pending_body), if (model.busy) null else t(R.string.sync_now), tone = StateTone.Warning,
+                    onAction = { model.syncThenReopen(editor) })
+            }
+            return
+        }
         SegmentedTabs(listOf("read" to t(R.string.editor_read), "text" to t(R.string.editor_text), "ink" to t(R.string.editor_ink)), mode, { focus.clearFocus(); mode = it },
             Modifier.padding(horizontal = Space.page, vertical = 6.dp))
         HorizontalDivider(color = LocalCompanionSemantics.current.hairline)

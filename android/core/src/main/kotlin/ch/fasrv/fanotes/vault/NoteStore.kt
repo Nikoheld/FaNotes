@@ -175,7 +175,16 @@ data class OpenNote(
     val payload: JsonValue.Obj,
     val worksheets: List<String>,
     val inkId: String,
+    /**
+     * The body references handwriting (an ink marker) but its `.famd` is not on this device yet, e.g.
+     * still syncing. Shown as such, never as an empty note, and never saved: a save would write an
+     * empty sidecar that could replace the real handwriting on the other devices.
+     */
+    val inkPending: Boolean = false,
 )
+
+/** The message [NoteStore.save] throws for a note whose handwriting has not arrived yet. */
+const val INK_PENDING_MESSAGE = "This note's handwriting has not reached this device yet. It was left unchanged."
 
 class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit = {}) {
     fun tree(): List<VaultNode> = buildTree("")
@@ -207,6 +216,8 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         val title = titleOf(normalized)
         val document = parseInkDocument(payload.obj("ink"), title, payload.string("paperStyle") ?: "dots", payload.string("updatedAt") ?: isoNow())
         val inkId = noteInkId(markdown) ?: UUID.randomUUID().toString()
+        // A marker is only written together with its sidecar, so a marker without one means it has not arrived.
+        val inkPending = extension != ".pdf" && extension != FAMD_EXTENSION && famdBytes == null && embedded == null && noteInkId(markdown) != null
         return OpenNote(
             path = normalized,
             kind = if (extension == ".pdf") NoteKind.PDF else NoteKind.MARKDOWN,
@@ -216,6 +227,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
             payload = payload,
             worksheets = worksheetIdsFromMarkdown(markdown),
             inkId = inkId,
+            inkPending = inkPending,
         )
     }
 
@@ -232,6 +244,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         textFieldBase: List<ch.fasrv.fanotes.desk.NoteTextField>? = null,
     ): OpenNote {
         val famdPathForPlain = if (note.path.endsWith(FAMD_EXTENSION)) note.path else companionPath(note.path, FAMD_EXTENSION)
+        if (note.inkPending && !io.exists(famdPathForPlain)) throw IllegalStateException(INK_PENDING_MESSAGE)
         // A plain Markdown note that never had ink stays a plain file: no marker, no sidecar, no asset.
         val plain = note.kind == NoteKind.MARKDOWN &&
             !note.path.endsWith(FAMD_EXTENSION) &&

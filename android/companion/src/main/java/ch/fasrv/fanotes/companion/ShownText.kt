@@ -95,6 +95,7 @@ private val FRAGMENTS = Regex(
 )
 
 private val EXACT = mapOf(
+    ch.fasrv.fanotes.vault.INK_PENDING_MESSAGE to R.string.note_ink_pending_saved,
     "Verspätung" to R.string.commute_alert_delay,
     "Fällt aus" to R.string.commute_alert_cancelled,
     "Anschluss verpasst" to R.string.commute_alert_missed,

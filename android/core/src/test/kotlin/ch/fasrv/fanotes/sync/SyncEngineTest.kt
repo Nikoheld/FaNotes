@@ -406,7 +406,7 @@ class SyncEngineTest {
     }
 
     @Test
-    fun anOversizedNoteIsSkippedWithoutPausingOrDroppingItsSibling() = runBlocking {
+    fun anOversizedNoteSyncsWithoutPausingOrDroppingItsSibling() = runBlocking {
         val server = MemorySyncServer()
         val hostA = MemoryHost("cap-a")
         val hostB = MemoryHost("cap-b")
@@ -427,7 +427,46 @@ class SyncEngineTest {
             engineB.syncNow()
             assertEquals(SyncStatus.IDLE, engineB.state.value.status)
             kotlin.test.assertContentEquals(kept, hostB.read("Notes/ok.famd"))
-            assertTrue("Notes/huge.famd" !in hostB.files)
+            // It used to be skipped, so the note was on the desktop but never on the phone.
+            kotlin.test.assertContentEquals(huge, hostB.read("Notes/huge.famd"))
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun aHandwritingNoteAboveTheParseCapArrivesByteForByteAndStaysQuiet() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("big-a")
+        val hostB = MemoryHost("big-b")
+        val engineA = engine(SyncApi(server), hostA, "Laptop")
+        val engineB = engine(SyncApi(server), hostB, "Phone")
+        // A real >16 MB v2 note: an ink marker body plus one long packed stroke list.
+        val strokes = JsonValue.Arr()
+        val block = "!".repeat(45 * 1_000)
+        repeat(420) { index ->
+            strokes.items.add(JsonValue.Obj().put("id", jsonString("s$index")).put("famdPts", jsonString(block)))
+        }
+        val payload = emptyFamdPayload("2026-11-21T13:00:00Z").put("ink", JsonValue.Obj().put("strokes", strokes))
+        val big = serializeFamd("<!-- fanotes-ink:synthetic -->", payload, "v2").encodeToByteArray()
+        assertTrue(big.size > MAX_SYNC_DOCUMENT_BYTES)
+        try {
+            engineA.registerAndSettle("big@example.com", "synthetic passphrase")
+            hostA.put("Chemie/Heft.md", "<!-- fanotes-ink:synthetic -->\n".encodeToByteArray(), 1_000)
+            hostA.put("Chemie/Heft.famd", big, 1_000)
+            engineA.syncNow()
+            engineB.loginAndSettle("big@example.com", "synthetic passphrase")
+            engineB.syncNow()
+            assertEquals(SyncStatus.IDLE, engineB.state.value.status)
+            assertEquals(null, engineB.state.value.error)
+            kotlin.test.assertContentEquals(big, hostB.read("Chemie/Heft.famd"))
+            // The next cycles on both sides upload nothing and make no conflict copy.
+            val mark = server.callCount()
+            engineB.syncNow()
+            engineA.syncNow()
+            assertTrue(server.callsSince(mark).none { it.method == "PUT" })
+            assertTrue(synchronized(hostB.files) { hostB.files.keys.none { it.contains("Konflikt") } })
         } finally {
             engineA.close()
             engineB.close()

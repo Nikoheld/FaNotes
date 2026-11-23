@@ -381,6 +381,9 @@
     <string name="note">Note</string>
     <string name="note_duplicated">Note duplicated</string>
     <string name="note_needs_attention">Note needs attention</string>
+    <string name="note_ink_pending_title">Handwriting still on its way</string>
+    <string name="note_ink_pending_body">This note\'s handwriting has not reached this phone yet. It opens as soon as sync has brought it in.</string>
+    <string name="note_ink_pending_saved">This note\'s handwriting has not reached this phone yet. Nothing was changed.</string>
     <string name="note_noun">note</string>
     <string name="note_restored">Note restored</string>
     <string name="note_search_needs_attention">Note search needs attention</string>
