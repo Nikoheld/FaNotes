@@ -60,7 +60,7 @@ export function formatTextFieldText(text: string, start: number, end: number, ac
       return { text: `${text.slice(0, start)}${insert}${text.slice(end)}`, start: urlStart, end: urlStart + 8 }
     }
     case 'codeBlock': return template(text, start, end, '\n```\n{{selection}}\n```\n', 'Code')
-    case 'table': return template(text, start, end, '\n| Thema | Notiz |\n| --- | --- |\n| {{selection}} |  |\n', 'Eintrag')
+    case 'table': return template(text, start, end, `\n${newTableText(3, 3, '{{selection}}')}\n`, 'Eintrag')
     case 'mathBlock': return template(text, start, end, '\n$$\n{{selection}}\n$$\n', 'f(x) = x^2')
     case 'details': return template(text, start, end, '\n<details>\n<summary>Titel</summary>\n\n{{selection}}\n\n</details>\n', 'Einklappbarer Inhalt')
     case 'horizontalRule': return template(text, start, end, '\n\n---\n\n{{selection}}', '')

@@ -51,6 +51,7 @@
     "check:markdown": "node scripts/check-markdown.mjs",
     "check:markdown-table": "node scripts/check-markdown-table.mjs",
     "check:note-text-markdown": "node scripts/check-note-text-markdown.mjs",
+    "check:text-field-toolbar": "node scripts/check-text-field-toolbar.mjs",
     "check:simple-latex": "node scripts/check-simple-latex.mjs",
     "check:recognition": "node scripts/check-context-recognition.mjs",
     "check:recognition:fusion": "node scripts/check-recognition-fusion.mjs",
