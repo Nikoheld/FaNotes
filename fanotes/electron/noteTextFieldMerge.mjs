@@ -7,7 +7,8 @@
 // Electron main process (require), the renderer (import) and the checks.
 //
 // A box is the sanitised shape of `src/lib/noteTextField.ts`:
-//   { id, page, x, y, width, fontSize, text, color?, bold?, updatedAt? }
+//   { id, page, x, y, width, fontSize, text, color?, bold?, updatedAt?, aspect? }
+// `aspect` is the sheet height/width that `y` was written against (additive).
 // `updatedAt` is the epoch millisecond of the last edit of that one box. A
 // deleted box leaves a tombstone `{ id, deletedAt }` in the payload so a stale
 // edit of it can be told apart from a box that never existed.
@@ -32,6 +33,7 @@ export const sameNoteTextFieldContent = (left, right) => (
   left.page === right.page
   && left.x === right.x
   && left.y === right.y
+  && (left.aspect ?? null) === (right.aspect ?? null)
   && left.width === right.width
   && left.fontSize === right.fontSize
   && left.text === right.text

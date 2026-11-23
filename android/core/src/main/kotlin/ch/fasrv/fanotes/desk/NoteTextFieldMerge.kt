@@ -103,6 +103,7 @@ fun sameNoteTextFieldContent(left: NoteTextField, right: NoteTextField): Boolean
     left.page == right.page &&
         left.x == right.x &&
         left.y == right.y &&
+        left.aspect == right.aspect &&
         left.width == right.width &&
         left.fontSize == right.fontSize &&
         left.text == right.text &&

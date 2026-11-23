@@ -144,6 +144,8 @@ function sanitizeNoteTextField(value) {
   const fontSize = Number(value.fontSize)
   const color = typeof value.color === 'string' && /^#[0-9a-f]{6}$/iu.test(value.color) ? value.color.toLowerCase() : null
   const updatedAt = sanitizeTextFieldStamp(value.updatedAt)
+  const aspectValue = Number(value.aspect)
+  const aspect = value.aspect !== null && value.aspect !== undefined && Number.isFinite(aspectValue) && aspectValue >= 0.05 && aspectValue <= 200 ? Math.round(aspectValue * 1e6) / 1e6 : null
   return {
     id: typeof value.id === 'string' && TEXT_FIELD_ID.test(value.id) ? value.id : `tf-${Date.now().toString(36)}`,
     page: Number.isSafeInteger(page) && page >= 1 && page <= 10000 ? page : 1,
@@ -155,6 +157,7 @@ function sanitizeNoteTextField(value) {
     ...(color ? { color } : {}),
     ...(value.bold === true ? { bold: true } : {}),
     ...(updatedAt ? { updatedAt } : {}),
+    ...(aspect !== null ? { aspect } : {}),
   }
 }
 

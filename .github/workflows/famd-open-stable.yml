@@ -7,7 +7,9 @@ name: Handwriting note opens stable
 # is complete from that first frame too - no blank, partial, flashing or moved
 # ink frame on any open, opening writes no note, and opens stay inside their
 # time budget (fanotes/scripts/check-ink-open-flicker.mjs, about a minute).
-# Never builds or publishes a release.
+# Another step drives text boxes (fanotes/scripts/check-text-field-position.mjs,
+# about a minute): dragging never selects text, and boxes stay where they were
+# left. Never builds or publishes a release.
 on:
   pull_request:
     paths:
@@ -26,8 +28,13 @@ on:
       - 'fanotes/src/lib/pdfOpenCamera.ts'
       - 'fanotes/src/styles.css'
       - 'fanotes/electron/famd*'
+      - 'fanotes/src/components/FormattingToolbar.tsx'
+      - 'fanotes/src/components/NoteTextFieldMarkdown.tsx'
+      - 'fanotes/src/lib/noteTextFieldFormat.ts'
       - 'fanotes/scripts/check-famd-open-stable.mjs'
       - 'fanotes/scripts/check-ink-open-flicker.mjs'
+      - 'fanotes/scripts/check-text-field-position.mjs'
+      - 'fanotes/scripts/check-text-field-toolbar.mjs'
       - '.github/workflows/famd-open-stable.yml'
   workflow_dispatch:
 
@@ -67,3 +74,7 @@ jobs:
         run: npm run check:famd-open-stable
       - name: Handwriting complete from the first frame of every open
         run: npm run check:ink-open-flicker
+      - name: Text boxes never select text and stay put
+        run: npm run check:text-field-position
+      - name: Text boxes use the document formatting toolbar
+        run: npm run check:text-field-toolbar

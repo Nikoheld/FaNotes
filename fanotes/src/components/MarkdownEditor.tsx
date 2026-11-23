@@ -1476,6 +1476,9 @@ const selectionDragAutoScroll = ViewPlugin.fromClass(class {
 
   private pointerDown = (event: PointerEvent) => {
     if (event.button !== 0 || this.view.state.readOnly) return
+    // A press on a text box (its move and resize handles) belongs to the box:
+    // dragging it across the typed text must not start a selection there.
+    if (event.target instanceof Element && event.target.closest('.note-text-field')) return
     this.activePointer = event.pointerId
     this.clientX = event.clientX
     this.clientY = event.clientY

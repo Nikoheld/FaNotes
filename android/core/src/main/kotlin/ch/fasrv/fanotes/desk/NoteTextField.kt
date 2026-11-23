@@ -30,6 +30,11 @@ data class NoteTextField(
      * decide which edit of one box is newer. Null for boxes written before desktop stamped them.
      */
     val updatedAt: Long? = null,
+    /**
+     * Sheet height/width that desktop wrote [y] against (additive; null on older files). Android keeps it as read,
+     * and drops it when it rewrites x or y itself, because y is then a fraction of this device's sheet.
+     */
+    val aspect: Double? = null,
 )
 
 /** Largest epoch millisecond a JS Date can hold; a stamp beyond it is junk. */
@@ -107,7 +112,7 @@ fun acceptPlacedTextField(existing: List<NoteTextField>, field: NoteTextField): 
     if (current.size >= NOTE_TEXT_FIELD_LIMIT) {
         return ArmedTextFieldTap(current, null, TEXT_FIELD_LIMIT_MESSAGE, true)
     }
-    val clean = sanitizeNoteTextField(field.id, field.page, field.x, field.y, field.width, field.text, field.fontSize, field.color, field.bold, field.updatedAt)
+    val clean = sanitizeNoteTextField(field.id, field.page, field.x, field.y, field.width, field.text, field.fontSize, field.color, field.bold, field.updatedAt, field.aspect)
     if (current.any { it.id == clean.id }) return ArmedTextFieldTap(current, null, null, true)
     return ArmedTextFieldTap(current + clean, clean, null, false)
 }
@@ -129,6 +134,7 @@ fun parseNoteTextFields(array: JsonValue.Arr?): List<NoteTextField> {
             color = obj.string("color"),
             bold = (obj.get("bold") as? JsonValue.Bool)?.value == true,
             updatedAt = obj.double("updatedAt")?.takeIf { it.isFinite() }?.toLong(),
+            aspect = obj.double("aspect"),
         )
         if (field.id in seen) continue
         seen += field.id
@@ -142,7 +148,7 @@ fun parseNoteTextFieldList(fields: List<NoteTextField>): List<NoteTextField> {
     val seen = linkedSetOf<String>()
     val clean = mutableListOf<NoteTextField>()
     for (field in fields) {
-        val next = sanitizeNoteTextField(field.id, field.page, field.x, field.y, field.width, field.text, field.fontSize, field.color, field.bold, field.updatedAt)
+        val next = sanitizeNoteTextField(field.id, field.page, field.x, field.y, field.width, field.text, field.fontSize, field.color, field.bold, field.updatedAt, field.aspect)
         if (next.id in seen) continue
         seen += next.id
         clean += next
@@ -165,6 +171,7 @@ fun noteTextFieldsJson(fields: List<NoteTextField>): JsonValue.Arr = JsonValue.A
     if (field.bold) obj.put("bold", JsonValue.Bool(true))
     // Written back as read, so desktop's per-box merge still sees when this box was last edited.
     field.updatedAt?.let { obj.put("updatedAt", jsonNumber(it.toDouble())) }
+    field.aspect?.let { obj.put("aspect", jsonNumber(it)) }
     obj
 }.toMutableList())
 
@@ -203,7 +210,9 @@ fun patchNoteTextField(
             color = color ?: field.color,
             bold = bold ?: field.bold,
         )
-        if (changed == field) field else changed.copy(updatedAt = maxOf(now, (field.updatedAt ?: 0L) + 1L))
+        // y is a fraction of this device's sheet from here on, so desktop's basis no longer describes it.
+        val rebased = if (changed.x != field.x || changed.y != field.y) changed.copy(aspect = null) else changed
+        if (rebased == field) field else rebased.copy(updatedAt = maxOf(now, (field.updatedAt ?: 0L) + 1L))
     })
 }
 
@@ -236,7 +245,7 @@ fun noteTextFieldsAfterOriginGrow(
         if (x == field.x && y == field.y && width == field.width) field
         else {
             changed = true
-            field.copy(x = x, y = y, width = width)
+            field.copy(x = x, y = y, width = width, aspect = if (y == field.y) field.aspect else null)
         }
     }
     return if (changed) remapped else fields
@@ -274,6 +283,7 @@ private fun sanitizeNoteTextField(
     color: String? = null,
     bold: Boolean = false,
     updatedAt: Long? = null,
+    aspect: Double? = null,
 ): NoteTextField {
     val safeId = if (id != null && TEXT_FIELD_ID.matches(id)) id else newNoteTextFieldId()
     return NoteTextField(
@@ -287,6 +297,7 @@ private fun sanitizeNoteTextField(
         color = color?.takeIf { TEXT_FIELD_COLOR.matches(it) }?.lowercase(),
         bold = bold,
         updatedAt = updatedAt?.takeIf { it in 1..TEXT_FIELD_STAMP_MAX },
+        aspect = aspect?.takeIf { it.isFinite() && it in 0.05..200.0 }?.let { Math.round(it * 1e6) / 1e6 },
     )
 }
 

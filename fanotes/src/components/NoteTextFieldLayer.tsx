@@ -4,9 +4,13 @@ import { Baseline, Trash2 } from 'lucide-react'
 import { ToolbarMenu } from './ToolbarMenu'
 import { FormattingToolbar } from './FormattingToolbar'
 import type { MarkdownFormatAction } from './MarkdownEditor'
-import { formatTextFieldText } from '../lib/noteTextFieldFormat'
+import { applySimpleLatexButton, type SimpleLatexButton, type SimpleLatexOperands } from '../lib/simpleLatex'
+import { formatTextFieldText, type TextFieldEdit } from '../lib/noteTextFieldFormat'
 import { noteLinkMarkerCss } from '../lib/noteLink'
 import {
+  noteTextFieldYOnSheet,
+  noteTextFieldsWithBasis,
+  clampAspect,
   NOTE_TEXT_FIELD_COLORS,
   NOTE_TEXT_FIELD_MAX_CHARS,
   NOTE_TEXT_FIELD_REFERENCE_PAGE_WIDTH,
@@ -30,7 +34,7 @@ type FieldLayout = {
   inverse: number
 }
 
-type GeometryPatch = { page?: number; x?: number; y?: number; width?: number }
+type GeometryPatch = { page?: number; x?: number; y?: number; width?: number; aspect?: number }
 type StylePatch = { fontSize?: number; color?: string | undefined; bold?: boolean | undefined }
 
 type NoteTextFieldLayerProps = {
@@ -38,19 +42,42 @@ type NoteTextFieldLayerProps = {
   placing: boolean
   pdf: boolean
   focusId?: string | null
-  onPlace: (point: { page: number; x: number; y: number }) => void
+  onPlace: (point: { page: number; x: number; y: number; aspect?: number }) => void
   onText: (id: string, text: string) => void
   onGeometry: (id: string, patch: GeometryPatch, commit: boolean) => void
   onStyle: (id: string, patch: StylePatch) => void
   onFinish?: () => void
   onRemove: (id: string) => void
   onFocusHandled?: () => void
+  /** Boxes moved along with the sheet (not by the owner): same page position, new fractions. */
+  onRemap?: (fields: readonly NoteTextField[]) => void
   onSelectedChange?: (id: string | null) => void
 }
 
 type Gesture =
   | { kind: 'move'; id: string; dx: number; dy: number; width: number; moved: boolean }
   | { kind: 'resize'; id: string; startX: number; startWidth: number; pageWidth: number }
+
+/**
+ * While a box is moved or resized nothing under the pointer may be selected.
+ * The press is taken over (preventDefault on pointerdown, pointer capture), which
+ * also suppresses the mousedown whose preventDefault used to stop the browser
+ * from starting a selection - so dragging over typed text selected it. This
+ * stops the selection from starting at all, drops one that already exists and
+ * ends with the gesture.
+ */
+const lockTextSelection = (): (() => void) => {
+  const stop = (event: Event) => event.preventDefault()
+  document.addEventListener('selectstart', stop, true)
+  document.addEventListener('dragstart', stop, true)
+  document.documentElement.classList.add('is-text-field-gesture')
+  try { window.getSelection()?.removeAllRanges() } catch { /* no selection API */ }
+  return () => {
+    document.removeEventListener('selectstart', stop, true)
+    document.removeEventListener('dragstart', stop, true)
+    document.documentElement.classList.remove('is-text-field-gesture')
+  }
+}
 
 const MIN_BOX_HEIGHT = 1.9 // em
 
@@ -59,26 +86,62 @@ const fitTextArea = (node: HTMLTextAreaElement) => {
   node.style.height = `${Math.max(node.scrollHeight, 0)}px`
 }
 
+/**
+ * Runs one edit (markdown toolbar action, simple LaTeX button or shortcut) on the textarea of a text box:
+ * the same selection rules as the note editor, then the selection is restored after React re-renders.
+ */
+function runTextFieldFormat(
+  field: NoteTextField,
+  makeEdit: (area: HTMLTextAreaElement | null) => (start: number, end: number) => TextFieldEdit,
+  onText: (id: string, text: string) => void,
+  area: HTMLTextAreaElement | null = document.querySelector<HTMLTextAreaElement>(`[data-note-text-field="${CSS.escape(field.id)}"]`),
+) {
+  const start = area?.selectionStart ?? field.text.length
+  const end = area?.selectionEnd ?? field.text.length
+  const edit = makeEdit(area)(start, end)
+  if (edit.text.length > NOTE_TEXT_FIELD_MAX_CHARS) return
+  if (!area || !replaceThroughEditor(area, edit.text)) onText(field.id, edit.text)
+  requestAnimationFrame(() => {
+    if (!area) return
+    area.focus({ preventScroll: true })
+    area.setSelectionRange(edit.start, edit.end)
+  })
+}
+
+/**
+ * Writes `next` into the textarea as a typed edit (only the changed span), so Strg+Z / Strg+Umschalt+Z step
+ * through toolbar formatting like they do in the note editor. False when the browser refuses the edit.
+ */
+function replaceThroughEditor(area: HTMLTextAreaElement, next: string): boolean {
+  const before = area.value
+  let head = 0
+  while (head < before.length && head < next.length && before[head] === next[head]) head += 1
+  let tail = 0
+  while (tail < before.length - head && tail < next.length - head && before[before.length - 1 - tail] === next[next.length - 1 - tail]) tail += 1
+  area.focus({ preventScroll: true })
+  area.setSelectionRange(head, before.length - tail)
+  const inserted = next.slice(head, next.length - tail)
+  const done = inserted === '' ? document.execCommand('delete') : document.execCommand('insertText', false, inserted)
+  return done && area.value === next
+}
+
 /** Same toolbar as the note editor (markdown actions) plus size, colour and remove for the selected text box. */
-export function NoteTextFieldToolbar({ field, hideTypeable = false, onStyle, onText, onRemove }: {
+export function NoteTextFieldToolbar({ field, hideTypeable = false, onStyle, onText, onRemove, onLatexError }: {
   field: NoteTextField
   hideTypeable?: boolean
   onStyle: (id: string, patch: StylePatch) => void
   onText: (id: string, text: string) => void
   onRemove: (id: string) => void
+  onLatexError?: (message: string) => void
 }) {
-  const format = (action: MarkdownFormatAction) => {
-    const area = document.querySelector<HTMLTextAreaElement>(`[data-note-text-field="${CSS.escape(field.id)}"]`)
-    const start = area?.selectionStart ?? field.text.length
-    const end = area?.selectionEnd ?? field.text.length
-    const edit = formatTextFieldText(area?.value ?? field.text, start, end, action)
-    if (edit.text.length > NOTE_TEXT_FIELD_MAX_CHARS) return
-    onText(field.id, edit.text)
-    requestAnimationFrame(() => {
-      if (!area) return
-      area.focus({ preventScroll: true })
-      area.setSelectionRange(edit.start, edit.end)
-    })
+  const format = (action: MarkdownFormatAction) => runTextFieldFormat(field, (area) => (start, end) => formatTextFieldText(area?.value ?? field.text, start, end, action), onText)
+  const insertLatex = (button: SimpleLatexButton, operands: SimpleLatexOperands) => {
+    runTextFieldFormat(field, (area) => (_start, end) => {
+      const text = area?.value ?? field.text
+      const result = applySimpleLatexButton(text, button, operands, end)
+      const added = result.note.length - text.length
+      return { text: result.note, start: end + added, end: end + added }
+    }, onText)
   }
   const custom = field.color ?? '#20222b'
   // Controls that need their own press (slider, colour picker) keep the native behaviour.
@@ -93,10 +156,10 @@ export function NoteTextFieldToolbar({ field, hideTypeable = false, onStyle, onT
       onMouseDown={(event) => { if (!needsOwnPress(event.target)) event.preventDefault() }}
     >
       <FormattingToolbar
-        hideLatex
         hideTypeable={hideTypeable}
         onFormat={format}
-        onInsertLatex={() => undefined}
+        onInsertLatex={insertLatex}
+        onLatexError={onLatexError}
         trailingSlots={2}
         trailing={(
           <>
@@ -153,10 +216,21 @@ export function NoteTextFieldLayer({
   onFinish,
   onRemove,
   onFocusHandled,
+  onRemap,
   onSelectedChange,
 }: NoteTextFieldLayerProps) {
   const layerRef = useRef<HTMLDivElement>(null)
   const gestureRef = useRef<Gesture | null>(null)
+  const unlockSelectionRef = useRef<(() => void) | null>(null)
+  const beginSelectionLock = () => {
+    unlockSelectionRef.current?.()
+    unlockSelectionRef.current = lockTextSelection()
+  }
+  const endSelectionLock = () => {
+    unlockSelectionRef.current?.()
+    unlockSelectionRef.current = null
+  }
+  useEffect(() => () => { unlockSelectionRef.current?.(); unlockSelectionRef.current = null }, [])
   const fieldsRef = useRef(fields)
   fieldsRef.current = fields
   const [layout, setLayout] = useState<FieldLayout[]>([])
@@ -169,6 +243,8 @@ export function NoteTextFieldLayer({
   onTextRef.current = onText
   const onFinishRef = useRef(onFinish)
   onFinishRef.current = onFinish
+  const onRemapRef = useRef(onRemap)
+  onRemapRef.current = onRemap
 
   // The rendered Markdown is memoised on its text, so these read the current props.
   const toggleTask = useCallback((id: string, line: number) => {
@@ -209,13 +285,17 @@ export function NoteTextFieldLayer({
       visualWidth: layoutWidth * zoom,
       visualHeight: layoutHeight * zoom,
     }
+    // `y` is a fraction of the sheet's height at the time it was written, and that
+    // height follows the typed text: a box with a basis (`aspect`) is placed from it
+    // instead, so it stays at the same distance from the top however tall the sheet is.
+    const sheetAspect = !pdf && layoutWidth > 1 && layoutHeight > 1 ? layoutHeight / layoutWidth : 0
     const next = fields.map((field) => {
       const page = pdf
         ? paper?.querySelector<HTMLElement>(`[data-pdf-page="${field.page}"]`)
         : null
       const pageRect = page?.getBoundingClientRect()
       const css = noteLinkMarkerCss(
-        field,
+        sheetAspect > 0 && field.aspect !== undefined ? { x: field.x, y: noteTextFieldYOnSheet(field, sheetAspect) } : field,
         paperBox,
         pageRect
           ? { left: pageRect.left, top: pageRect.top, width: pageRect.width, height: pageRect.height }
@@ -265,6 +345,27 @@ export function NoteTextFieldLayer({
       window.removeEventListener('resize', measure)
     }
   }, [measure])
+
+  // A box from an older file has no basis yet. It gets the sheet's the moment the owner starts to edit
+  // the note (before the typing can change the sheet's height), and it is saved with it.
+  useEffect(() => {
+    if (pdf) return
+    const view = layerRef.current?.closest('.unified-note-view, .paper-view') ?? layerRef.current?.closest('.unified-paper')
+    if (!view) return
+    const stamp = (event: Event) => {
+      if (event.target instanceof Element && event.target.closest('.note-text-field')) return
+      const current = fieldsRef.current
+      if (!current.length || current.every((field) => field.aspect !== undefined)) return
+      const sheet = layerRef.current?.closest('.unified-paper') as HTMLElement | null
+      const aspect = sheet && sheet.offsetWidth > 1 ? clampAspect(sheet.offsetHeight / sheet.offsetWidth) : undefined
+      if (aspect === undefined) return
+      const next = noteTextFieldsWithBasis(current, aspect)
+      if (next !== current) onRemapRef.current?.(next)
+    }
+    const events = ['keydown', 'beforeinput', 'paste', 'cut', 'drop']
+    for (const name of events) view.addEventListener(name, stamp, true)
+    return () => { for (const name of events) view.removeEventListener(name, stamp, true) }
+  }, [pdf])
 
   useLayoutEffect(() => {
     const layer = layerRef.current
@@ -345,7 +446,14 @@ export function NoteTextFieldLayer({
     event.preventDefault()
     event.stopPropagation()
     const point = pointAt(event.clientX, event.clientY)
-    if (point) onPlace(point)
+    if (point) onPlace({ ...point, aspect: sheetAspectNow() })
+  }
+
+  /** Height/width of the sheet as laid out now; undefined on a PDF, whose boxes sit on pages. */
+  const sheetAspectNow = () => {
+    if (pdf) return undefined
+    const sheet = layerRef.current?.closest('.unified-paper') as HTMLElement | null
+    return sheet && sheet.offsetWidth > 1 ? clampAspect(sheet.offsetHeight / sheet.offsetWidth) : undefined
   }
 
   const clampMove = (field: NoteTextField | undefined, gesture: Extract<Gesture, { kind: 'move' }>, clientX: number, clientY: number) => {
@@ -355,6 +463,7 @@ export function NoteTextFieldLayer({
       page: point.page,
       x: Math.max(0, Math.min(1 - gesture.width, point.x - gesture.dx)),
       y: Math.max(0, Math.min(0.97, point.y - gesture.dy)),
+      aspect: sheetAspectNow(),
     }
   }
 
@@ -365,6 +474,7 @@ export function NoteTextFieldLayer({
     event.preventDefault()
     event.stopPropagation()
     setSelectedId(field.id)
+    beginSelectionLock()
     gestureRef.current = { kind: 'move', id: field.id, dx: point.x - field.x, dy: point.y - field.y, width: field.width, moved: false }
     event.currentTarget.setPointerCapture(event.pointerId)
   }
@@ -375,6 +485,7 @@ export function NoteTextFieldLayer({
     event.preventDefault()
     event.stopPropagation()
     setSelectedId(field.id)
+    beginSelectionLock()
     gestureRef.current = {
       kind: 'resize',
       id: field.id,
@@ -411,6 +522,7 @@ export function NoteTextFieldLayer({
     applyGesture(event, true)
     const gesture = gestureRef.current
     gestureRef.current = null
+    endSelectionLock()
     if (!gesture) return
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     layerRef.current
@@ -438,10 +550,12 @@ export function NoteTextFieldLayer({
       finish(event.currentTarget)
       return
     }
-    if (mod && !event.shiftKey && (event.code === 'KeyB' || event.key.toLowerCase() === 'b')) {
+    // Same shortcuts as the note editor (Strg+B / I / K): they write markdown around the selection.
+    const shortcut = mod && !event.shiftKey ? ({ b: 'bold', i: 'italic', k: 'link' } as const)[event.key.toLowerCase() as 'b' | 'i' | 'k'] : undefined
+    if (shortcut) {
       event.preventDefault()
       event.stopPropagation()
-      onStyle(field.id, { bold: field.bold ? undefined : true })
+      runTextFieldFormat(field, (area) => (start, end) => formatTextFieldText(area?.value ?? field.text, start, end, shortcut), onText, event.currentTarget)
       return
     }
     // Typing must never reach tool keys, delete or undo handlers of the sheet.
@@ -481,6 +595,8 @@ export function NoteTextFieldLayer({
             }}
             onBlur={(event) => {
               const next = event.relatedTarget
+              // Focus moving into the toolbar or its menus (formula fields, size slider) keeps the box selected.
+              if (next instanceof Element && next.closest('.note-text-field-toolbar, .ftb-popover')) return
               if (next instanceof Node && !event.currentTarget.contains(next) && !composingRef.current) setSelectedId((current) => current === field.id ? null : current)
             }}
           >

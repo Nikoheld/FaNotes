@@ -1,6 +1,9 @@
 import { memo, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import type { Element as HastElement, ElementContent } from 'hast'
 import { Check } from 'lucide-react'
 import { translateUiText } from '../i18n'
@@ -18,7 +21,8 @@ type NoteTextFieldMarkdownProps = {
   onOpenLink: (href: string) => void
 }
 
-const REMARK_PLUGINS = [remarkGfm, remarkNoteTextDialect, remarkNoteTextScripts, remarkNoteTextSoftBreaks]
+const REHYPE_PLUGINS = [rehypeKatex]
+const REMARK_PLUGINS = [remarkGfm, remarkMath, remarkNoteTextDialect, remarkNoteTextScripts, remarkNoteTextSoftBreaks]
 
 const isElement = (node: ElementContent | undefined): node is HastElement => node?.type === 'element'
 
@@ -101,7 +105,7 @@ function NoteTextFieldMarkdownView({ text, onToggleTask, onOpenLink }: NoteTextF
     img: ({ alt }) => <span className="note-text-md-image">{alt || ''}</span>,
   }
   return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components} skipHtml>
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={components} skipHtml>
       {text}
     </ReactMarkdown>
   )

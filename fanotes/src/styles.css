@@ -48,8 +48,16 @@
   --ease-in-out: cubic-bezier(.45, .05, .2, 1);
   --ease-spring: cubic-bezier(.34, 1.28, .64, 1);
   --motion-fast: .16s;
-  --motion-med: .24s;
+  --motion-med: .2s;
   --motion-slow: .48s;
+  /* Shared motion system (src/motion.css): durations 120-200 ms, opacity/transform only.
+     Reduced motion (OS or the app setting) sets every --dur-* to ~0 and turns the --motion-scale off. */
+  --dur-1: 120ms; /* hover, selection, exits */
+  --dur-2: 160ms; /* enter of popovers, menus, panels */
+  --dur-3: 200ms; /* enter of dialogs and settings */
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --ease-decel: var(--ease-out);
+  --ease-accel: cubic-bezier(.4, 0, 1, 1);
   /* Shared polish tokens: spacing scale, radii, icon sizes, focus ring (used by dialogs, menus and notices). */
   --space-1: 4px;
   --space-2: 8px;
@@ -919,6 +927,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   border-bottom: 2px dotted var(--text-muted, #747887);
 }
 .note-text-field-move:active { cursor: grabbing; }
+/* Moving or resizing a box never selects what is under the pointer. */
+html.is-text-field-gesture, html.is-text-field-gesture * { -webkit-user-select: none !important; user-select: none !important; }
 .note-text-field.is-selected .note-text-field-move,
 .note-text-field:hover .note-text-field-move { display: grid; }
 .note-text-field-resize {
