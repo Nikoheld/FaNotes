@@ -231,7 +231,7 @@ fun TodayScreen(model: CompanionModel) {
         }
         if (model.desk.showMensa) {
             val mensaDay = model.mensa?.let { feed -> ch.fasrv.fanotes.schulnetz.pickMensaDay(feed.days, now.atZone(ZoneId.of("Europe/Zurich")).toLocalDateTime()) }
-            if (mensaDay != null) item(key = "mensa") { MensaCard(mensaDay) }
+            if (mensaDay != null) item(key = "mensa") { MensaCard(mensaDay) { model.navigate(Page.Mensa) } }
         }
         val gradesShown = "grades" in cards && model.snapshot.grades.isNotEmpty()
         val pointsShown = "pluspunkte" in cards && model.desk.showPluspunkte && model.snapshot.grades.isNotEmpty()
@@ -278,31 +278,17 @@ fun TodayScreen(model: CompanionModel) {
     task?.let { TaskForm(model, it) { task = null } }
 }
 
-/** Compact Mensa card: weekday and date, then each dish as label chip, name, short description and student price. */
+/** Compact Mensa card: weekday and date, then each dish. The whole card and the "Week" action open the week page. */
 @Composable
-private fun MensaCard(day: ch.fasrv.fanotes.schulnetz.MensaDay) {
+private fun MensaCard(day: ch.fasrv.fanotes.schulnetz.MensaDay, onOpen: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    val dayTitle = day.date.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, d. MMMM", java.util.Locale.getDefault()))
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        SectionLabel(t(R.string.mensa_title))
+        SectionLabel(t(R.string.mensa_title), t(R.string.mensa_week_action), onAction = onOpen)
         Group {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(dayTitle, style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant, modifier = Modifier.semantics { heading() })
+            Column(Modifier.clickable(role = Role.Button, onClick = onOpen).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(mensaDayTitle(day.date), style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant, modifier = Modifier.semantics { heading() })
                 if (day.closed) Text(day.note.ifBlank { t(R.string.mensa_closed) }, style = MaterialTheme.typography.bodyMedium)
-                day.menus.forEach { menu ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-                        Column(Modifier.weight(1f)) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (menu.label.isNotBlank()) Surface(color = scheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
-                                    Text(menu.label, style = MaterialTheme.typography.labelSmall, color = scheme.onSecondaryContainer, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
-                                }
-                                Text(menu.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f, fill = false))
-                            }
-                            if (menu.description.isNotBlank()) Text(menu.description, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-                        }
-                        menu.studentPrice?.let { Text(t(R.string.mensa_student_price, ch.fasrv.fanotes.schulnetz.mensaPrice(it)), style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant) }
-                    }
-                }
+                day.menus.forEach { MensaDishRow(it) }
             }
         }
     }
