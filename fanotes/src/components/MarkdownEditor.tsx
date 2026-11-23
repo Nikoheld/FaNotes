@@ -1210,7 +1210,28 @@ const spellingWave = (color: string) => {
   return `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3' viewBox='0 0 6 3'%3E%3Cpath d='M0 2.2Q1.5.4 3 2.2T6 2.2' fill='none' stroke='${stroke}' stroke-width='.7'/%3E%3C/svg%3E")`
 }
 
+// CodeMirror mounts every theme's StyleModule into the document for good (it is never unmounted), and a
+// new `EditorView.theme(...)` is a new module. Building one per editor creation added ~30 CSS rules for every
+// note opened, so the style sheet grew without bound and every style recalculation got slower. The same
+// appearance now reuses one extension.
+const appearanceCache = new Map<string, Extension>()
+
 function editorAppearance(
+  settings: MarkdownEditorSettings,
+  dark: boolean,
+  paperMode = false,
+): Extension {
+  const key = JSON.stringify([settings.editorFont, settings.editorFontSize, settings.lineHeight, dark, paperMode])
+  const cached = appearanceCache.get(key)
+  if (cached) return cached
+  const built = buildEditorAppearance(settings, dark, paperMode)
+  // Settings are dragged through many values (a font size slider); a handful of the latest ones is plenty.
+  if (appearanceCache.size >= 16) appearanceCache.delete(appearanceCache.keys().next().value as string)
+  appearanceCache.set(key, built)
+  return built
+}
+
+function buildEditorAppearance(
   settings: MarkdownEditorSettings,
   dark: boolean,
   paperMode = false,
