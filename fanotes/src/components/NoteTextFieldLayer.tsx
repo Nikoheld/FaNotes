@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { flushSync } from 'react-dom'
 import { Baseline, Trash2 } from 'lucide-react'
 import { ToolbarMenu } from './ToolbarMenu'
 import { FormattingToolbar } from './FormattingToolbar'
@@ -252,7 +253,10 @@ export function NoteTextFieldLayer({
     const layer = layerRef.current
     const paper = layer?.closest('.unified-paper')
     if (!paper || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(() => measure())
+    // The observer runs after layout and before paint. Rendering the new
+    // positions right there keeps a sheet that just took its page (a note
+    // opening) from painting one frame of the old layout.
+    const observer = new ResizeObserver(() => flushSync(measure))
     observer.observe(paper)
     paper.querySelectorAll('[data-pdf-page]').forEach((page) => observer.observe(page))
     window.addEventListener('resize', measure)

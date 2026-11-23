@@ -3410,17 +3410,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setDirty(false)
       setNotice({ kind: 'error', text: 'Die gespeicherte Zeichnung konnte nicht gelesen werden.' })
     }
-    const applyLoaded = (
-      raw: Partial<DrawingDocument>,
-      strokes: InkStroke[],
-      loadedSections: ReturnType<typeof deserializeSections<InkStroke>>,
-      history: { undo: InkStroke[][]; redo: InkStroke[][] },
-    ) => {
+    // The saved page box (size, origin pad, paper) is part of the first frame.
+    // A packed page hydrates its strokes over several frames; until then the
+    // sheet was only as tall as the text, the typed text sat without its
+    // origin pad and the text boxes were laid out on that short sheet — all
+    // of it jumped when the last chunk landed.
+    const applyPageBox = (raw: Partial<DrawingDocument>) => {
       if (cancelled || token !== inkOpenTokenRef.current) return
-      strokesRef.current = strokes
-      sectionsRef.current = loadedSections
-      setSections(loadedSections)
-      setSectionPlacing(null)
       if (!pagePaperStyle && raw.paperStyle && raw.paperStyle in paperLabel) setPaperStyle(raw.paperStyle)
       if (typeof raw.sourceHeight === 'number' && raw.sourceHeight >= WRITE_SLACK_HEIGHT && raw.sourceHeight <= MAX_SOURCE_HEIGHT) {
         sourceHeightRef.current = raw.sourceHeight
@@ -3444,6 +3440,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       pendingGrowRemapRef.current = null
       pendingStaleLayoutRef.current = null
       applyInkExtentStylesRef.current(sourceHeightRef.current, sourceWidthRef.current)
+    }
+    const applyLoaded = (
+      raw: Partial<DrawingDocument>,
+      strokes: InkStroke[],
+      loadedSections: ReturnType<typeof deserializeSections<InkStroke>>,
+      history: { undo: InkStroke[][]; redo: InkStroke[][] },
+    ) => {
+      if (cancelled || token !== inkOpenTokenRef.current) return
+      strokesRef.current = strokes
+      sectionsRef.current = loadedSections
+      setSections(loadedSections)
+      setSectionPlacing(null)
+      applyPageBox(raw)
       if (typeof raw.createdAt === 'string') createdAtRef.current = raw.createdAt
       searchTranscriptRef.current = typeof raw.searchTranscript === 'string' ? raw.searchTranscript : ''
       setMarginTranscript(searchTranscriptRef.current)
@@ -3533,11 +3542,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         await expandHidden(section.hidden.sections)
       }
     }
+    let packedRaw: Partial<DrawingDocument>
+    try {
+      const document: unknown = JSON.parse(initialDrawingJson)
+      if (!document || typeof document !== 'object') throw new Error('Kein Zeichnungsobjekt')
+      packedRaw = document as Partial<DrawingDocument>
+    } catch {
+      failLoad()
+      return () => { cancelled = true }
+    }
+    applyPageBox(packedRaw)
     void (async () => {
       try {
-        const document: unknown = JSON.parse(initialDrawingJson)
-        if (!document || typeof document !== 'object') throw new Error('Kein Zeichnungsobjekt')
-        const raw = document as Partial<DrawingDocument>
+        const raw = packedRaw
         const strokes = await readChunk(raw.strokes, true)
         if (cancelled || token !== inkOpenTokenRef.current) return
         await expandHidden(raw.sections)
@@ -4221,6 +4238,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const nextW = Math.min(MAX_SOURCE_WIDTH, Math.max(SOURCE_WIDTH, Math.round(targetWidth)))
     if (nextH === prevH && nextW === prevW && addX === 0 && addY === 0) return false
     const paper = resolvePaperElement()
+    // Text boxes and note links are laid out on the sheet as painted
+    // (NoteTextFieldLayer, NoteLinkLayer), not on the ink's saved page.
+    const placedBefore = paper ? { width: paper.offsetWidth, height: paper.offsetHeight } : null
     const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
     const originCamera = { x: scroller?.scrollLeft ?? 0, y: scroller?.scrollTop ?? 0 }
     const scrollerBox = scroller
@@ -4299,20 +4319,32 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       compassPoseRef.current = next
       setCompassPose(next)
     }
-    const remappedLinks = noteLinksAfterOriginGrow(
-      noteLinksRef.current,
-      { width: prevPaintW, height: prevPaintH },
-      { width: nextPaintW, height: nextPaintH, padX: addX, padY: addY },
+    // Remap them by how that sheet changed. Opening a saved page in a pane
+    // wider than it was saved in grows the page into the sheet that is
+    // already on screen: the sheet keeps its size, so the boxes keep theirs.
+    // Remapping them from the saved page instead pulled every box left and
+    // narrowed it (its text rewrapped) a moment after the note appeared, and
+    // the shrunken boxes were saved, so the next open shrank them again.
+    const placedAfter = paper ? { width: paper.offsetWidth, height: paper.offsetHeight } : null
+    const placedFrom = placedBefore && placedBefore.width > 1 && placedBefore.height > 1
+      ? placedBefore
+      : { width: prevPaintW, height: prevPaintH }
+    const placedTo = placedAfter && placedAfter.width > 1 && placedAfter.height > 1
+      ? { ...placedAfter, padX: addX, padY: addY }
+      : { width: nextPaintW, height: nextPaintH, padX: addX, padY: addY }
+    // Only a page that holds this note's ink moves them. The first layout
+    // pass grows a still-empty or still-loading page to the sheet; remapping
+    // then measured the boxes against a sheet without the note's page and
+    // saved that, so every open moved them again.
+    const placedFollowInk = !inkLoadBlocksSave() && (
+      activeStrokeRef.current !== null || strokesRef.current.length > 0 || sectionsRef.current.length > 0
     )
+    const remappedLinks = placedFollowInk ? noteLinksAfterOriginGrow(noteLinksRef.current, placedFrom, placedTo) : noteLinksRef.current
     if (remappedLinks !== noteLinksRef.current) {
       noteLinksRef.current = remappedLinks
       onNoteLinksExtentRef.current?.(remappedLinks)
     }
-    const remappedFields = noteTextFieldsAfterOriginGrow(
-      textFieldsRef.current,
-      { width: prevPaintW, height: prevPaintH },
-      { width: nextPaintW, height: nextPaintH, padX: addX, padY: addY },
-    )
+    const remappedFields = placedFollowInk ? noteTextFieldsAfterOriginGrow(textFieldsRef.current, placedFrom, placedTo) : textFieldsRef.current
     if (remappedFields !== textFieldsRef.current) {
       textFieldsRef.current = remappedFields
       onTextFieldsExtentRef.current?.(remappedFields)
@@ -4397,7 +4429,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     canvasQualityKeyRef.current = ''
     redraw(true)
     return true
-  }, [applyInkExtentStyles, forEachTrackedPoint, inline, planInkWindowNow, resolvePaperElement, setDirty, redraw])
+  }, [applyInkExtentStyles, forEachTrackedPoint, inkLoadBlocksSave, inline, planInkWindowNow, resolvePaperElement, setDirty, redraw])
 
   /**
    * The 0–1 ink space is the painted sheet (`.unified-paper`), the same box

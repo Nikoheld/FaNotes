@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactElement } from 'react'
+import { flushSync } from 'react-dom'
 import { Camera, ClipboardPaste, FileImage, Lock, LockOpen, Redo2, Trash2, Undo2, X, Columns2 } from 'lucide-react'
 import { clipboardImageFile } from '../lib/clipboardImage'
 import { noteLinkPageAtPoint } from '../lib/noteLink'
@@ -265,7 +266,10 @@ export function StudyAnnotationLayer({ path, pdf, open, onClose }: StudyAnnotati
     const layer = layerRef.current
     const paper = layer?.closest('.unified-paper')
     if (!paper || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(() => measure())
+    // The observer runs after layout and before paint. Rendering the new
+    // positions right there keeps a sheet that just took its page (a note
+    // opening) from painting one frame of the old layout.
+    const observer = new ResizeObserver(() => flushSync(measure))
     observer.observe(paper)
     paper.querySelectorAll('[data-pdf-page]').forEach((node) => observer.observe(node))
     // Pages mount lazily; re-measure shortly after the viewer settles.
