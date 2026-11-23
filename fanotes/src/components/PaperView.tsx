@@ -673,15 +673,19 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       restoreTimer = window.setTimeout(considerRestored, PAPER_VIEW_RESTORE_SETTLE_MS)
     } else {
       applyOpenCamera(true)
+      const openZoom = viewRef.current.zoom
       // This runs in the commit that swaps the note's text in. The sheet
       // still carries the last note's page box until the new ink layer
       // mounts in the follow-up commit of the same task, so the camera above
       // can be the previous page's (a short note then opened scrolled to its
       // empty bottom, a narrow one shifted sideways). Place it again before
-      // the first frame paints, from the sheet that frame shows.
+      // the first frame paints, from the sheet that frame shows. A zoom set
+      // in between (the split pane's fit) placed the camera itself.
       openCameraId = window.requestAnimationFrame(() => {
         openCameraId = 0
-        if (!userInteracted) applyOpenCamera(true)
+        if (Math.abs(viewRef.current.zoom - openZoom) < 0.001) {
+          if (!userInteracted) applyOpenCamera(true)
+        }
         clampScroll()
         holdOpenText()
       })
