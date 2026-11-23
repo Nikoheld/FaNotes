@@ -165,6 +165,8 @@ data class SchulnetzLinkState(
     val settingsUpdatedAt: String = "",
     /** Browsers (Kanti+ im Browser) that can read this connection. */
     val webSessions: Int = 0,
+    /** When the server's web sign-in ends (ISO time); blank when unknown or not a web sign-in. */
+    val signInExpiresAt: String = "",
 )
 
 /** A request was started on the main thread (a bug: the caller must switch to Dispatchers.IO). */
@@ -1157,6 +1159,7 @@ class SchulnetzClient(
             mode = obj.string("mode").orEmpty(),
             settingsUpdatedAt = obj.string("settingsUpdatedAt").orEmpty(),
             webSessions = obj.double("webSessions")?.toInt() ?: 0,
+            signInExpiresAt = obj.string("signInExpiresAt").orEmpty(),
         )
     }
 

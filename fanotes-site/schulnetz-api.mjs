@@ -99,6 +99,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   guessGrades: false,
 })
 const COOKIE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
+/** The server keeps a web sign-in for COOKIE_MAX_AGE_MS. This long before it ends, the phone is reminded once, so grade checks never lapse unnoticed. */
+export const COOKIE_REMIND_BEFORE_MS = 2 * 24 * 60 * 60 * 1000
 const SSO_HOSTS = new Set(['login.microsoftonline.com', 'login.microsoft.com', 'login.live.com', 'login.windows.net'])
 const SSO_COOKIE_NAMES = new Set(['ESTSAUTH', 'ESTSAUTHPERSISTENT', 'ESTSAUTHLIGHT', 'SignInStateCookie', 'x-ms-RefreshTokenCredential'])
 const LINK_LIMIT = 5
@@ -347,7 +349,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       // A saved school address that is not an allowed address must not be opened, or the next poll drops the session.
       && baseKnown(link)
       // A saved sign-in flag that is not a flag must not look set, or the next poll stays silent or sends another sign-in push.
-      && flagKnown(link.needsReauth) && flagKnown(link.loginPushSent)
+      && flagKnown(link.needsReauth) && flagKnown(link.loginPushSent) && flagKnown(link.expirySoonPushSent)
     if (!known) throw Object.assign(new Error('link'), { code: 'EBADMSG' })
     if (link.topic != null || link.pushEndpoints != null) {
       stripLegacyPush(link)
@@ -357,6 +359,11 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
   const saveLink = async (accountId, link) => writeJson(resolve(accountDir(accountId), 'link.json'), stripLegacyPush(link))
 
+  const signInExpiresAt = (link) => {
+    if (link?.mode !== 'web' || link.needsReauth === true) return ''
+    const savedAt = Date.parse(link.cookiesSavedAt || '')
+    return Number.isFinite(savedAt) ? new Date(savedAt + COOKIE_MAX_AGE_MS).toISOString() : ''
+  }
   const publicStatus = (link) => {
     if (!link) return { linked: false, settings: DEFAULT_SETTINGS }
     return {
@@ -370,6 +377,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       settings: { ...DEFAULT_SETTINGS, ...(link.settings || {}) },
       settingsUpdatedAt: link.settingsUpdatedAt || '',
       mode: link.mode || 'rest',
+      // When the server's web sign-in ends and grade checks stop until the next sign-in.
+      signInExpiresAt: signInExpiresAt(link),
       provider: link.provider || 'schulnetz',
       push: { endpoints: (link.fcmTokens || []).length },
     }
@@ -916,7 +925,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const ping = async (accountId, link, event, priority = 'HIGH', changes = []) => {
-    if (event !== 'sync' && event !== 'reauth' && event !== 'test' && event !== 'commute') return
+    if (event !== 'sync' && event !== 'reauth' && event !== 'reauth-soon' && event !== 'test' && event !== 'commute') return
     const tokens = (link.fcmTokens || []).filter(isValidFcmToken)
     if (!tokens.length) return []
     const results = []
@@ -1243,6 +1252,13 @@ export const createSchulnetzRuntime = (options = {}) => {
         // The grade promise cannot hold without a sign-in: tell the user once instead of going quiet.
         await alertReauthOnce(accountId, link)
         return { needsReauth: true }
+      }
+      if (now().getTime() - savedAt > COOKIE_MAX_AGE_MS - COOKIE_REMIND_BEFORE_MS && link.expirySoonPushSent !== true) {
+        // Once per sign-in: a new sign-in writes a fresh link without this flag.
+        link.expirySoonPushSent = true
+        await saveLink(accountId, link)
+        await ping(accountId, link, 'reauth-soon')
+        log('info', `Anmeldung läuft bald ab ${accountId.slice(0, 8)}: Erinnerung gesendet`)
       }
       return pollWeb(accountId, link, material, { gradesOnly })
     }

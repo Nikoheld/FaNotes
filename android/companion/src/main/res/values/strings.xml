@@ -534,6 +534,9 @@
     <string name="recently_deleted_unavailable">Recently deleted unavailable</string>
     <string name="recently_edited">Recently edited</string>
     <string name="reconnect_your_school">Reconnect your school</string>
+    <string name="reauth_soon_title">Schulnetz sign-in expires soon</string>
+    <string name="reauth_soon_body">In 2 days Kanti+ stops checking your grades in the background. Sign in again now to keep alerts on time.</string>
+    <string name="sign_in_expires_on">Sign in again by %1$s</string>
     <string name="recurrence_daily">daily</string>
     <string name="recurrence_monthly">monthly</string>
     <string name="recurrence_weekly">weekly</string>

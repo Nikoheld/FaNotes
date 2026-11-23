@@ -176,6 +176,39 @@ test('an expired sign-in is announced once, not silently dropped', async () => {
   }
 })
 
+test('two days before the sign-in ends the phone is reminded once, then told when it ends', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-reauth-soon-'))
+  let clock = Date.parse('2026-11-14T08:00:00Z')
+  const sent = []
+  const runtime = createSchulnetzRuntime({ root, key: randomBytes(32), autostart: false, spacingMs: 0, now: () => new Date(clock), fetch: async () => { throw Object.assign(new Error('offline'), { code: 'ECONNRESET' }) }, fcmSend: async (message) => { sent.push(message.message.data.event); return { status: 200 } } })
+  try {
+    const guest = await runtime.createGuest('203.0.113.72')
+    await runtime.linkAccount(guest.accountId, { mode: 'web', baseUrl: 'https://www.schulnetz-ag.ch/aksa', deviceId: '0123456789abcdef01234567', userAgent: 'KantiTest', ssoCookies: { 'login.microsoftonline.com': 'ESTSAUTHPERSISTENT=synthetic' } })
+    const linkPath = join(root, 'accounts', guest.accountId, 'link.json')
+    const link = JSON.parse(await readFile(linkPath, 'utf8'))
+    link.fcmTokens = [`${'e'.repeat(40)}:APA91b${'y'.repeat(120)}`]
+    await (await import('node:fs/promises')).writeFile(linkPath, JSON.stringify(link))
+    const day = 24 * 60 * 60_000
+    clock += 11 * day
+    await runtime.pollAccount(guest.accountId).catch(() => {})
+    assert.deepEqual(sent, [], 'no reminder with three days left')
+    clock += 1 * day + 60_000
+    await runtime.pollAccount(guest.accountId).catch(() => {})
+    await runtime.pollAccount(guest.accountId).catch(() => {})
+    assert.deepEqual(sent, ['reauth-soon'], 'one reminder two days before')
+    clock += 2 * day
+    await runtime.pollAccount(guest.accountId).catch(() => {})
+    assert.deepEqual(sent, ['reauth-soon', 'reauth'])
+    // A new sign-in starts over: the next reminder comes again two days before its end.
+    await runtime.linkAccount(guest.accountId, { mode: 'web', baseUrl: 'https://www.schulnetz-ag.ch/aksa', deviceId: '0123456789abcdef01234567', userAgent: 'KantiTest', ssoCookies: { 'login.microsoftonline.com': 'ESTSAUTHPERSISTENT=synthetic' } })
+    clock += 12 * day + 60_000
+    await runtime.pollAccount(guest.accountId).catch(() => {})
+    assert.deepEqual(sent, ['reauth-soon', 'reauth', 'reauth-soon'])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('percentiles use nearest rank', () => {
   assert.equal(latencyPercentile([], 0.95), null)
   assert.equal(latencyPercentile([10, 20, 30, 40], 0.5), 20)
