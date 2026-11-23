@@ -6579,6 +6579,12 @@ export default function App({ startupBootstrap }: AppProps) {
     try { localStorage.setItem('fanotes.theme', settings.theme) } catch { /* private mode */ }
   }, [settings.theme])
 
+  // The reduce-motion setting zeroes the shared motion tokens on <html>, which also covers portaled overlays.
+  useEffect(() => {
+    document.documentElement.classList.toggle('motion-off', settings.reduceMotion)
+    return () => document.documentElement.classList.remove('motion-off')
+  }, [settings.reduceMotion])
+
   // Portaled popovers, menus and dialogs render under document.body, outside .app-shell,
   // so mirror the theme class and tokens there to keep them themed.
   useEffect(() => {
