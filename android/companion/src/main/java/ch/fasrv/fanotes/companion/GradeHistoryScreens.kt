@@ -52,7 +52,7 @@ fun GradeVersionList(track: GradeTrack, decimals: Int, hidden: Boolean) {
                     Column(Modifier.weight(1f)) {
                         Text(version.title.ifBlank { t(R.string.school_mark) }, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(
-                            t(R.string.grade_version_detail, uiMark(version.weight), version.date),
+                            t(R.string.grade_version_detail, uiMark(version.weight), parseDisplayDate(version.date)?.let { formatSchoolDate(it, "d.M.yyyy") } ?: version.date),
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         val current = if (index == 0 && track.removedAt == null) " · ${t(R.string.grade_current)}" else ""
