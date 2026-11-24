@@ -116,10 +116,20 @@ export type PaperViewApi = PaperViewSnapshot & {
  * host lives, so a consumer can hold it without re-rendering on every zoom
  * step; the current snapshot comes from `getView`, changes from `subscribe`.
  */
-export type PaperViewController = Pick<PaperViewApi, 'zoomBy' | 'zoomTo' | 'rotateBy' | 'resetView' | 'setView'> & {
+export type PaperViewController = Pick<PaperViewApi, 'zoomBy' | 'zoomTo' | 'rotateBy' | 'resetView' | 'setView' | 'liveZoom'> & {
   getView: () => PaperViewSnapshot
   subscribe: (listener: (view: PaperViewSnapshot) => void) => () => void
+  /**
+   * The zoom on screen, frame by frame: called after every preview frame of a
+   * wheel or pinch zoom (`preview` true, the sheet is a compositor scale of
+   * the committed camera; `settleMs` is how long the preview waits for a next
+   * step before it commits) and once when the gesture ends (`preview` false).
+   * The committed camera still comes through `subscribe`.
+   */
+  subscribeLiveZoom: (listener: PaperLiveZoomListener) => () => void
 }
+
+export type PaperLiveZoomListener = (zoom: number, preview: boolean, settleMs: number) => void
 
 /** Longest the sheet stays hidden while the remembered camera is applied. */
 const PAPER_VIEW_REVEAL_CAP_MS = 450
@@ -138,6 +148,37 @@ export const usePaperView = () => useContext(PaperViewContext)
  * `subscribe` and refs instead.
  */
 export const usePaperViewController = () => useContext(PaperViewControllerContext)
+
+/**
+ * The zoom percentage as the screen shows it. It follows a pinch or wheel
+ * zoom frame by frame; the camera itself is only committed once the gesture
+ * rests, and a label that waited for that trailed the picture by half a second.
+ * The text is written straight into the span, in the frame that scales the
+ * sheet: no React render per frame, here or in the host.
+ */
+export function PaperZoomPercent({ controller, zoom }: { controller: PaperViewController | null; zoom: number }) {
+  const spanRef = useRef<HTMLSpanElement | null>(null)
+  const write = useCallback((value: number) => {
+    const span = spanRef.current
+    const text = `${Math.round(value * 100)}%`
+    if (span && span.textContent !== text) span.textContent = text
+  }, [])
+  // The host's zoom state changed: show the zoom on screen now, which is the
+  // preview's while a gesture runs.
+  useLayoutEffect(() => {
+    write(controller ? controller.liveZoom() : zoom)
+  }, [controller, write, zoom])
+  useEffect(() => {
+    if (!controller) return
+    const unsubscribeLive = controller.subscribeLiveZoom((next) => write(next))
+    const unsubscribe = controller.subscribe((view) => write(view.zoom))
+    return () => {
+      unsubscribeLive()
+      unsubscribe()
+    }
+  }, [controller, write])
+  return <span ref={spanRef} className="paper-zoom-percent" />
+}
 
 type PaperViewProps = {
   children: ReactNode
@@ -192,6 +233,10 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   const noteTextRef = useRef<HTMLElement | null>(null)
   const noteTextMissRef = useRef(false)
   const commitZoomGestureRef = useRef(() => {})
+  const liveZoomListenersRef = useRef(new Set<PaperLiveZoomListener>())
+  const notifyLiveZoomRef = useRef((zoom: number, preview: boolean, settleMs = 0) => {
+    for (const listener of [...liveZoomListenersRef.current]) listener(zoom, preview, settleMs)
+  })
   const cancelZoomGestureRef = useRef(() => {})
   const pushZoomGestureRef = useRef<(factor: number, origin: { x: number; y: number }) => void>(() => {})
   const onEdgeSwipeRef = useRef(onEdgeSwipe)
@@ -872,10 +917,12 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     zoomContentGuardRef.current?.release(0)
     zoomContentGuardRef.current = null
     const plane = zoomPlaneRef.current
+    const cancelled = zoomGestureRef.current
     zoomGestureRef.current = null
     zoomGestureActiveRef.current = false
     zoomPlaneRef.current = null
     if (plane) clearPaperZoomGestureFrame(plane, 0)
+    if (cancelled) notifyLiveZoomRef.current(viewRef.current.zoom, false)
   }
 
   commitZoomGestureRef.current = () => {
@@ -904,6 +951,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     if (Math.abs(gesture.zoom - gesture.baseZoom) < 0.0005) {
       guard?.release(0)
       zoomGestureActiveRef.current = false
+      notifyLiveZoomRef.current(viewRef.current.zoom, false)
       return
     }
     userAdjustedRef.current = true
@@ -921,6 +969,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       { guard, glideCentre: true },
     )
     zoomGestureActiveRef.current = false
+    notifyLiveZoomRef.current(viewRef.current.zoom, false)
   }
   pushZoomGestureRef.current = (factor, origin) => {
     if (!(factor > 0) || Math.abs(factor - 1) < 1e-8) {
@@ -982,6 +1031,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       userAdjustedRef.current = true
       zoomTo(gesture.zoom, gesture.origin)
       zoomGestureActiveRef.current = false
+      notifyLiveZoomRef.current(viewRef.current.zoom, false)
       return
     }
     // No guard check here: reading the line's offset each preview frame
@@ -990,6 +1040,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     clearZoomGestureClock()
     const settleMs = zoomGestureSettleMsRef.current
     zoomGestureSettleMsRef.current = PAPER_ZOOM_GESTURE_SETTLE_MS
+    notifyLiveZoomRef.current(gesture.zoom, true, settleMs)
     zoomGestureTimerRef.current = window.setTimeout(() => {
       zoomGestureTimerRef.current = 0
       zoomGestureCommitFrameRef.current = window.requestAnimationFrame(() => {
@@ -1047,9 +1098,14 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     rotateBy,
     resetView,
     setView,
+    liveZoom,
     getView: () => viewRef.current,
     subscribe: store.subscribe,
-  }), [resetView, rotateBy, setView, store, zoomBy, zoomTo])
+    subscribeLiveZoom: (listener) => {
+      liveZoomListenersRef.current.add(listener)
+      return () => { liveZoomListenersRef.current.delete(listener) }
+    },
+  }), [liveZoom, resetView, rotateBy, setView, store, zoomBy, zoomTo])
 
   useEffect(() => {
     const root = noteViewRef.current
@@ -1379,7 +1435,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
               onClick={resetView}
               disabled={!active}
             >
-              {Math.round(view.zoom * 100)}%{view.rotation ? ` · ${view.rotation}°` : ''}
+              <PaperZoomPercent controller={controller} zoom={view.zoom} />{view.rotation ? ` · ${view.rotation}°` : ''}
             </button>
           </div>
         )}
