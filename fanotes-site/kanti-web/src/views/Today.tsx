@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { allEntries, byDay, daysBetween, isRunning, nextCommitment, clockMinutes, type Entry } from '../lib/agenda'
 import { courseSummaries, latestGrades, overallAverage, plusLabel, promotionTotals } from '../lib/grades'
 import { dateLabel, markLabel, pointsLabel } from '../lib/i18n'
-import { toMensaFeed, pickMensaDay, type MensaFeed } from '../lib/mensa'
+import { pickMensaDay } from '../lib/mensa'
+import { useMensa } from '../lib/useMensa'
+import { homeworkDue, type HomeworkItem } from '../lib/homework'
+import { teacherAbsencesToday } from '../lib/teacher-absences'
+import { TeacherAbsenceCard } from '../components/TeacherAbsenceCard'
 import { MensaCard } from '../components/MensaCard'
 import { CommuteCard } from '../components/CommuteCard'
 import { useKanti } from '../state'
 import { Banner, Card, DayBand, Dialog, Empty, Icon, RoomPill, SectionLabel, Snowfall } from '../components/ui'
-import { EntryDetails, EntryRow, EntryTags, MarkBadge, relativeDay, useClock } from './common'
+import { EntryDetails, EntryRow, EntryTags, HomeworkDetails, HomeworkRow, MarkBadge, relativeDay, useClock } from './common'
 import { absenceTally, addDays, eventDate } from '@shared/schulnetz-logic'
 
 export const Today = () => {
@@ -19,17 +23,11 @@ export const Today = () => {
   const days = useMemo(() => byDay(entries), [entries])
   const next = nextCommitment(entries, clock)
   const [selected, setSelected] = useState<Entry | null>(null)
-  const [mensa, setMensa] = useState<MensaFeed | null>(null)
-  // The menu is public and cached by the server; the page asks again every few hours at most.
-  useEffect(() => {
-    if (!prefs.showMensa || kanti.demo) return undefined
-    let alive = true
-    const load = () => { kanti.api.mensa().then((body) => { if (alive) setMensa(toMensaFeed(body)) }, () => { /* unavailable: no card */ }) }
-    load()
-    const timer = window.setInterval(load, 3 * 3_600_000)
-    return () => { alive = false; window.clearInterval(timer) }
-  }, [prefs.showMensa, kanti.demo, kanti.api])
-  const mensaDay = prefs.showMensa && mensa ? pickMensaDay(mensa.days, new Date()) : null
+  const [homeworkOpen, setHomeworkOpen] = useState<HomeworkItem | null>(null)
+  const mensa = useMensa(prefs.showMensa)
+  const mensaDay = prefs.showMensa && mensa.feed ? pickMensaDay(mensa.feed.days, new Date()) : null
+  const teachers = prefs.showTeacherAbsences ? teacherAbsencesToday(snapshot, clock.today) : null
+  const homework = useMemo(() => homeworkDue(snapshot?.homework, clock.today, addDays(clock.today, 14)).slice(0, 4), [snapshot, clock.today])
   const todays = days.get(clock.today) || []
   const courses = useMemo(() => courseSummaries(snapshot?.grades || []), [snapshot])
   const totals = promotionTotals(courses)
@@ -140,15 +138,17 @@ export const Today = () => {
               <EntryRow key={entry.key} entry={entry} t={t} language={language} today={clock.today} now={isRunning(entry, clock)} onOpen={() => setSelected(entry)} />
             )) : <Empty icon="today">{t.noLessonsToday}</Empty>}
           </Card>
-          {mensaDay ? <MensaCard day={mensaDay} t={t} language={language} /> : null}
+          {teachers ? <TeacherAbsenceCard absences={teachers} t={t} /> : null}
+          {mensaDay ? <MensaCard day={mensaDay} t={t} language={language} onWeek={() => kanti.navigate('mensa')} /> : null}
         </div>
 
         <div className="dash-col">
           <SectionLabel action={<button type="button" className="link" onClick={() => kanti.navigate('agenda')}>{t.agenda} <Icon name="right" size={16} /></button>}>{t.comingUp}</SectionLabel>
           <Card className="list">
-            {exams.length || appointments.length ? [...exams, ...appointments].sort((a, b) => a.day.localeCompare(b.day)).map((entry) => (
-              <EntryRow key={entry.key} entry={entry} t={t} language={language} today={clock.today} showDay onOpen={() => setSelected(entry)} />
-            )) : <Empty icon="agenda">{t.noExams}</Empty>}
+            {exams.length || appointments.length || homework.length ? [
+              ...[...exams, ...appointments].map((entry) => ({ day: entry.day, node: <EntryRow key={entry.key} entry={entry} t={t} language={language} today={clock.today} showDay onOpen={() => setSelected(entry)} /> })),
+              ...homework.map((item) => ({ day: item.day, node: <HomeworkRow key={`hw:${item.id}`} item={item} t={t} language={language} today={clock.today} onOpen={() => setHomeworkOpen(item)} /> })),
+            ].sort((a, b) => a.day.localeCompare(b.day)).map((row) => row.node) : <Empty icon="agenda">{t.noExams}</Empty>}
           </Card>
 
           {(snapshot?.messages?.length || snapshot?.startMessages?.length) ? (
@@ -180,6 +180,7 @@ export const Today = () => {
           </Card>
         </div>
       </div>
+      {homeworkOpen ? <Dialog title={homeworkOpen.title} onClose={() => setHomeworkOpen(null)}><HomeworkDetails item={homeworkOpen} t={t} language={language} /></Dialog> : null}
       {selected ? <Dialog title={selected.title} onClose={() => setSelected(null)}><EntryDetails entry={selected} t={t} language={language} /></Dialog> : null}
     </div>
   )

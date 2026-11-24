@@ -36,7 +36,7 @@ Reference implementation: the shell (`src/styles/shell.css`, `src/App.tsx`) and 
 ## Working
 - Screenshots (synthetic demo data, fixed clock Wed 11 Nov 2026 10:02):
   `PORT=<your port> PLAYWRIGHT_BROWSERS_PATH=/srv/agents/fanotes/chats/companion-683d7e0e/.work/pw-browsers node scripts/review-shots.mjs <out-dir> <view,view>`
-  views: heute stundenplan noten termine absenzen mitteilungen pendeln einstellungen anmelden about 404;
+  views: heute stundenplan noten termine absenzen mitteilungen mensa pendeln einstellungen anmelden about 404;
   `SIZES=desktop,tablet,phone THEMES=light,dark`. Read the PNGs and be your own harshest critic:
   alignment, rhythm, truncation, empty space, contrast, dark mode. Iterate until it looks premium.
 - Checks: `npm run typecheck`, `npx vitest run`. Keep every existing behaviour, text and test intact.

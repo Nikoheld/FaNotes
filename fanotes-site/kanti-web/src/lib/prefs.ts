@@ -12,6 +12,8 @@ export interface Prefs {
   compactTimetable: boolean
   showWeekend: boolean
   showMensa: boolean
+  /** Today's absent teachers from the start page; off by default like the app. */
+  showTeacherAbsences: boolean
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -25,6 +27,7 @@ export const DEFAULT_PREFS: Prefs = {
   compactTimetable: false,
   showWeekend: false,
   showMensa: false,
+  showTeacherAbsences: false,
 }
 
 const KEY = 'kanti-web:prefs'
