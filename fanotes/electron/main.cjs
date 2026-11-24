@@ -372,6 +372,8 @@ const IPC = Object.freeze({
   listNoteHistory: 'fanotes:list-note-history',
   readNoteHistory: 'fanotes:read-note-history',
   exportNotePdf: 'fanotes:export-note-pdf',
+  renderNoteHtmlPdf: 'fanotes:render-note-html-pdf',
+  cancelNoteHtmlPdf: 'fanotes:render-note-html-pdf-cancel',
   readAssetDataUrl: 'fanotes:read-asset-data-url',
   readAssetBytes: 'fanotes:read-asset-bytes',
   loadSpellingResources: 'fanotes:load-spelling-resources',
@@ -5841,6 +5843,77 @@ function registerIpcHandlers() {
       await mainWindow.webContents.executeJavaScript('document.documentElement.classList.remove("is-printing")').catch(() => {})
     }
     return { filePath: result.filePath }
+  })
+
+  // Text-note PDF export: the renderer builds a script-free HTML page (Markdown, KaTeX, pictures and fonts
+  // inlined) and this prints it from a hidden, sandboxed window that can load nothing but that page.
+  const noteHtmlPdfJobs = new Map()
+  handle(IPC.renderNoteHtmlPdf, async (_event, payload) => {
+    await ensureBootstrap()
+    const id = typeof payload?.id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(payload.id) ? payload.id : ''
+    const html = typeof payload?.html === 'string' ? payload.html : ''
+    if (!id || !html || html.length > 200_000_000) throw new Error('Der PDF-Export hat keine gültige Seite erhalten.')
+    if (noteHtmlPdfJobs.has(id)) throw new Error('Dieser PDF-Export läuft bereits.')
+    const inches = (value) => (Number.isFinite(value) ? Math.min(3, Math.max(0, value)) : 0.8)
+    const margins = { top: inches(payload.margins?.top), bottom: inches(payload.margins?.bottom), left: inches(payload.margins?.left), right: inches(payload.margins?.right) }
+    const pageNumbers = payload.pageNumbers === true
+    const folder = await fsp.mkdtemp(path.join(app.getPath('temp'), 'fanotes-export-'))
+    const file = path.join(folder, 'note.html')
+    const job = { win: null, cancelled: false }
+    noteHtmlPdfJobs.set(id, job)
+    try {
+      await fsp.writeFile(file, html, 'utf8')
+      const win = new BrowserWindow({
+        show: false,
+        width: 900,
+        height: 1200,
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+          webSecurity: true,
+          spellcheck: false,
+          backgroundThrottling: false,
+          partition: `fanotes-note-export-${id}`,
+        },
+      })
+      job.win = win
+      const pageUrl = pathToFileURL(file).href
+      win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !(details.url === pageUrl || details.url.startsWith('data:')) }))
+      win.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      win.webContents.on('will-navigate', (navigation) => navigation.preventDefault())
+      await win.loadURL(pageUrl)
+      // Fonts and pictures are data URLs: wait until they are decoded before the page is printed.
+      await win.webContents.executeJavaScript('(async () => { await document.fonts.ready; await Promise.all([...document.images].map((image) => image.decode().catch(() => undefined))); return true })()')
+      if (job.cancelled || win.isDestroyed()) throw new Error('Der PDF-Export wurde abgebrochen.')
+      const data = await win.webContents.printToPDF({
+        pageSize: payload.pageSize === 'Letter' ? 'Letter' : 'A4',
+        margins,
+        printBackground: true,
+        displayHeaderFooter: pageNumbers,
+        headerTemplate: '<span></span>',
+        footerTemplate: pageNumbers
+          ? '<div style="width:100%;font-size:9px;color:#666;text-align:center;font-family:sans-serif"><span class="pageNumber"></span> / <span class="totalPages"></span></div>'
+          : '<span></span>',
+      })
+      if (job.cancelled) throw new Error('Der PDF-Export wurde abgebrochen.')
+      return new Uint8Array(data)
+    } catch (error) {
+      if (job.cancelled) throw new Error('Der PDF-Export wurde abgebrochen.')
+      throw error
+    } finally {
+      noteHtmlPdfJobs.delete(id)
+      if (job.win && !job.win.isDestroyed()) job.win.destroy()
+      await fsp.rm(folder, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+
+  handle(IPC.cancelNoteHtmlPdf, async (_event, id) => {
+    const job = typeof id === 'string' ? noteHtmlPdfJobs.get(id) : null
+    if (!job) return
+    job.cancelled = true
+    if (job.win && !job.win.isDestroyed()) job.win.destroy()
   })
 
   // OneNote import runs in two steps: importOneNote converts the chosen source and returns its

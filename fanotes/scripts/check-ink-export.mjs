@@ -1,7 +1,7 @@
 // Vector export of a handwriting note and of a PDF note, in the real desktop app.
 //
 // Handwriting note (strokes, a highlighter, a text box "x ≤ 1 α", a picture):
-//   - the palette's PDF export gives a vector PDF: no page-sized raster image,
+//   - the export dialog's PDF export gives a vector PDF: no page-sized raster image,
 //     the text box text is extractable, the page count fits the sheet;
 //   - rendering page 1 (pdf.js, as the DOCX export does) and the sheet on
 //     screen at the same scale agree on where the ink is (loose overlap);
@@ -87,7 +87,7 @@ const png = (() => {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))])
 })()
 fs.writeFileSync(path.join(vault, 'bild.png'), png)
-fs.writeFileSync(path.join(vault, 'Export.famd'), serializeFamd('# Export\n\nGetippter Absatz.\n\n![Bild](bild.png)\n\nZweiter Absatz.\n', {
+fs.writeFileSync(path.join(vault, 'Export.famd'), serializeFamd('# Export\n\n<!-- fanotes-ink:export-ink -->\n\nGetippter Absatz.\n\n![Bild](bild.png)\n\nZweiter Absatz.\n', {
   ...emptyFamdPayload(at),
   ink,
   paperStyle: 'lines',
@@ -171,6 +171,7 @@ try {
   page.on('console', (message) => { if (message.type() === 'error') console.log('console.error', message.text().slice(0, 300)) })
   await page.waitForFunction(() => Boolean(window.fanotes && document.querySelector('.file-tree__row')), null, { timeout: 60_000 })
 
+  await page.emulateMedia({ colorScheme: 'light' })
   // Downloads the app starts (anchor with a blob) are kept in the page instead of written.
   await page.evaluate(() => {
     window.__exports = []
@@ -201,6 +202,14 @@ try {
     await page.keyboard.press('Enter')
   }
 
+  const exportViaDialog = async () => {
+    await palette('Notiz exportieren')
+    const dialog = page.locator('.note-export-dialog')
+    await dialog.waitFor({ state: 'visible', timeout: 10_000 })
+    await dialog.locator('button[data-format="pdf"]').click()
+    await dialog.getByRole('button', { name: 'Exportieren', exact: true }).click()
+  }
+
   // ---- Handwriting note ----
   await page.locator('.file-tree__row', { hasText: 'Export' }).first().click()
   await page.waitForFunction(() => document.querySelector('.cm-content')?.textContent?.includes('Getippter Absatz') && [...document.querySelectorAll('.lw-drawing-board canvas')].some((canvas) => canvas.width > 0), null, { timeout: 60_000 })
@@ -213,9 +222,10 @@ try {
   console.log(`sheet ${sheet.width} x ${sheet.height}`)
 
   const started = Date.now()
-  await palette('Notiz als PDF exportieren')
+  await exportViaDialog()
   const first = await exported(1)
   const exportMs = Date.now() - started
+  if (process.env.INK_EXPORT_DUMP) fs.writeFileSync(process.env.INK_EXPORT_DUMP, first.bytes)
   ok('the export is a PDF named after the note', first.name === 'Export.pdf' && first.bytes.subarray(0, 5).toString() === '%PDF-', first.name)
   const pdf = await openPdf(first.bytes)
   const lowest = ink.strokes.reduce((value, stroke) => Math.max(value, ...stroke.points.map((point) => point.y)), 0) * sheet.height
@@ -276,7 +286,13 @@ try {
 
   // Ink placement: page 1 (rendered by pdf.js) against the sheet on screen, as dark-pixel masks on a coarse grid.
   if (pagePng) {
+    // The sheet is taller than the window: a taller window shows (and paints) all of it at once.
+    await page.setViewportSize({ width: 1440, height: sheet.height + 400 }).catch(() => {})
+    await sleep(2500)
+    await page.evaluate(() => { const scroller = document.querySelector('.unified-note-view'); if (scroller) scroller.scrollTop = 0 })
+    await sleep(800)
     const shot = await page.locator('.unified-paper').first().screenshot({ type: 'png' })
+    if (process.env.INK_EXPORT_DUMP) fs.writeFileSync(`${process.env.INK_EXPORT_DUMP}.sheet.png`, shot)
     const verdict = await page.evaluate(async ({ pdfPng, sheetPng, sheetWidth, cap }) => {
       const load = (data) => new Promise((resolve, reject) => {
         const image = new Image()
@@ -368,7 +384,7 @@ try {
   for (let step = 1; step <= 14; step += 1) await page.mouse.move(from.x + (to.x - from.x) * step / 14, from.y + (to.y - from.y) * step / 14 + Math.sin(step) * 6)
   await page.mouse.up()
   await sleep(1200)
-  await palette('Notiz als PDF exportieren')
+  await exportViaDialog()
   const second = await exported(2)
   const notePdf = await openPdf(second.bytes)
   ok('the annotated PDF note keeps its page count', notePdf.numPages === 2, `${notePdf.numPages}`)

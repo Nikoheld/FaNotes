@@ -838,7 +838,7 @@ export type DrawingBoardHandle = {
   /** Picture of the open sheet. Null when the page cannot be drawn. */
   exportOpenCanvas: (pdfTitle?: string) => Promise<Uint8Array | null>
   /** Vector PDF or DOCX of the open sheet (strokes as paths, text boxes as real text). Null when it cannot be built. */
-  exportInkDocument: (format: 'pdf' | 'docx', options: NoteExportOptions) => Promise<Uint8Array | null>
+  exportInkDocument: (format: 'pdf' | 'docx', options: NoteExportOptions, documentTitle?: string) => Promise<Uint8Array | null>
   /** Ink, text boxes and page boxes of a PDF note, for drawing them onto the PDF's own pages. */
   exportPdfNoteMarks: () => Promise<PdfNoteMarksSnapshot | null>
   /** Paint the restored sheet once heading folds are back. */
@@ -7819,11 +7819,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   /** Stroke list as the screen paints it: stamps carry their path data. */
   const exportStrokes = useCallback(() => strokesRef.current.map((stroke) => ({ ...stroke, symbolPaths: placedSymbolPaths(stroke) })), [])
 
-  const exportInkDocument = useCallback((format: 'pdf' | 'docx', options: NoteExportOptions) => runOpenSheet<Uint8Array>(title, async ({ paper, cssWidth, cssHeight }) => {
+  const exportInkDocument = useCallback((format: 'pdf' | 'docx', options: NoteExportOptions, documentTitle?: string) => runOpenSheet<Uint8Array>(title, async ({ paper, cssWidth, cssHeight }) => {
     const { buildInkDocument } = await import('../lib/noteExport/inkDocument')
     return buildInkDocument(format, options, {
       paper,
-      title,
+      title: documentTitle ?? title,
       width: cssWidth,
       height: cssHeight,
       strokes: exportStrokes(),

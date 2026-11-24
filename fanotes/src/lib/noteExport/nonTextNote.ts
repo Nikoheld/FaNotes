@@ -73,7 +73,7 @@ export const exportNonTextNoteBytes = async (
   context: NonTextNoteContext,
 ): Promise<Uint8Array> => {
   if (kind === 'pdf') return exportPdfNoteBytes(format, options, context)
-  const bytes = await context.board?.exportInkDocument(format, options)
+  const bytes = await context.board?.exportInkDocument(format, options, context.title)
   if (!bytes) throw new Error(format === 'docx' ? 'DOCX-Export fehlgeschlagen.' : 'PDF-Export fehlgeschlagen.')
   return bytes
 }

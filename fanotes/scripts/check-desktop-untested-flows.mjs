@@ -269,16 +269,6 @@ section('split', async () => {
 })
 
 // ---- Export as PDF and LaTeX, PDF import -------------------------------------------------------------------
-/** Text of every page of a simple FaNotes-style PDF: the `( ... ) Tj` literals, octal escapes decoded as Latin-1. */
-const pdfPageTexts = (bytes) => {
-  const text = Buffer.from(bytes).toString('latin1')
-  const pages = text.split(/\/Type \/Page /u).slice(1)
-  const stream = (chunk) => [...chunk.matchAll(/stream\r?\n([\s\S]*?)endstream/gu)].map((match) => match[1]).join('\n')
-  const literal = (raw) => raw.replace(/\\([0-7]{3})/gu, (_, octal) => String.fromCharCode(parseInt(octal, 8))).replace(/\\([()\\])/gu, '$1')
-  const streams = [...text.matchAll(/stream\r?\n([\s\S]*?)endstream/gu)].map((match) => match[1])
-  return { pages: pages.length, lines: streams.map((body) => [...body.matchAll(/\(((?:\\.|[^\\)])*)\) Tj/gu)].map((match) => literal(match[1]))), stream }
-}
-
 section('export', async () => {
   const profile = createProfile('flow-export-')
   fs.mkdirSync(path.join(profile.vault, 'Biologie'))
@@ -294,19 +284,27 @@ section('export', async () => {
     await withApp(profile, async (page) => {
       await openFile(page, 'Notiz')
       await page.waitForSelector('.cm-content', { timeout: 30_000 })
-      const exportVia = async (label) => captureDownload(page, profile, async () => {
+      const dialog = page.locator('.note-export-dialog')
+      const exportVia = async (format) => {
         await page.locator('button[aria-label="Weitere Notizaktionen"]').first().click()
-        await page.locator(`[role=menuitem][aria-label="${label}"]`).click()
-      })
-      const pdfFile = await exportVia('Als PDF exportieren')
+        await page.locator('[role=menuitem][aria-label="Exportieren …"]').click()
+        await dialog.waitFor({ state: 'visible', timeout: 15_000 })
+        await dialog.locator(`[data-format="${format}"]`).click()
+        const file = await captureDownload(page, profile, () => dialog.locator('.primary-button').click())
+        await dialog.waitFor({ state: 'hidden', timeout: 15_000 })
+        return file
+      }
+      const pdfFile = await exportVia('pdf')
       const pdfBytes = fs.readFileSync(pdfFile)
-      const parsed = pdfPageTexts(pdfBytes)
-      const allLines = parsed.lines.flat()
-      ok('Export as PDF writes a valid PDF named after the note', path.basename(pdfFile) === 'Notiz.pdf' && pdfBytes.subarray(0, 5).toString() === '%PDF-' && pdfBytes.toString('latin1').trimEnd().endsWith('%%EOF'))
-      ok('the PDF keeps umlauts and the note text', allLines.includes('# Größe & Maß') && allLines.some((line) => line.includes('Rabatt 100 % und a_b mit #Tag')), allLines.slice(0, 3).join(' | '))
-      ok('the PDF paginates a 60-line note and wraps the long line', parsed.pages >= 2 && allLines.every((line) => line.length <= 90) && allLines.includes('Zeile 60'), `${parsed.pages} pages, longest ${Math.max(...allLines.map((line) => line.length))}`)
-      ok('the PDF page ends do not lose lines (all 60 rows present once)', rows.every((row) => allLines.filter((line) => line === row).length === 1))
-      const texFile = await exportVia('Als LaTeX-Code exportieren')
+      const pdfjs = await import(path.join(root, 'node_modules/pdfjs-dist/legacy/build/pdf.mjs'))
+      const pdfDocument = await pdfjs.getDocument({ data: new Uint8Array(pdfBytes), verbosity: 0 }).promise
+      let pdfText = ''
+      for (let number = 1; number <= pdfDocument.numPages; number += 1) pdfText += `${(await (await pdfDocument.getPage(number)).getTextContent()).items.map((item) => item.str).join(' ')} `
+      const flat = pdfText.replace(/\s+/gu, '')
+      ok('Export as PDF writes a valid PDF named after the note', path.basename(pdfFile) === 'Notiz.pdf' && pdfBytes.subarray(0, 5).toString() === '%PDF-' && pdfDocument.numPages >= 1, `${pdfDocument.numPages} pages`)
+      ok('the PDF keeps umlauts and the note text as selectable text', flat.includes('Größe&Maß') && flat.includes('Rabatt100%'), flat.slice(0, 80))
+      ok('the PDF holds every row of the note', rows.every((row) => flat.includes(row.replace(/\s+/gu, ''))) && flat.includes('Ende'))
+      const texFile = await exportVia('latex')
       const tex = fs.readFileSync(texFile, 'utf8')
       ok('Export as LaTeX is a complete document with the note title', path.basename(texFile) === 'Notiz.tex' && tex.startsWith('\\documentclass{article}') && tex.includes('\\title{Notiz}') && tex.trimEnd().endsWith('\\end{document}'))
       ok('LaTeX escapes text specials and keeps the formula and umlauts', tex.includes('100 \\% und a\\_b mit \\#Tag') && tex.includes('$x^2 + y^2$') && tex.includes('Größe \\& Maß'), tex.split('\n').slice(6, 9).join(' / '))
@@ -315,12 +313,15 @@ section('export', async () => {
       await openFile(page, 'Blatt', 'Biologie')
       await waitPdfRendered(page)
       await sleep(800)
-      const pdfNoteExport = await exportVia('Als PDF exportieren')
+      const pdfNoteExport = await exportVia('pdf')
       const exported = fs.readFileSync(pdfNoteExport)
       ok('exporting a PDF note saves the PDF itself (its pages and text), not an empty sheet', exported.equals(fs.readFileSync(path.join(profile.vault, 'Biologie', 'Blatt.pdf'))), `${exported.length} bytes`)
       await page.locator('button[aria-label="Weitere Notizaktionen"]').first().click()
-      ok('LaTeX export is not offered for a PDF note', await page.locator('[role=menuitem][aria-label="Als LaTeX-Code exportieren"]').isDisabled())
+      await page.locator('[role=menuitem][aria-label="Exportieren …"]').click()
+      await dialog.waitFor({ state: 'visible', timeout: 15_000 })
+      ok('LaTeX export is not offered for a PDF note, and Word is disabled', await dialog.locator('[data-format="latex"]').count() === 0 && await dialog.locator('[data-format="docx"]').isDisabled())
       await page.keyboard.press('Escape')
+      await dialog.waitFor({ state: 'hidden', timeout: 5000 })
 
       // Import through the import action; the native file dialog is answered by the test stub.
       profile.answerDialogs({ open: [importSource] })
