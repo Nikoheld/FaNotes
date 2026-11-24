@@ -2,7 +2,7 @@ name: Desktop flows
 
 # Desktop features the QA reports could not cover, driven in the real app (Electron under Xvfb, temp profile,
 # synthetic vault) and verified on disk: PDF annotate/highlight/erase/undo and text fields, split view with a PDF
-# in either pane, Export as PDF/LaTeX and PDF import, version history restore, trash restore.
+# in either pane, the export dialog (PDF/Word/LaTeX/Markdown) and PDF import, version history restore, trash restore.
 # About two minutes. The account, share and "Sync attachments" flows (npm run check:desktop-flows:account) run a
 # local fanotes-site and take longer; run them locally when touching sync or shares.
 on:
@@ -11,6 +11,7 @@ on:
       - 'fanotes/src/**'
       - 'fanotes/electron/**'
       - 'fanotes/scripts/check-desktop-untested-flows.mjs'
+      - 'fanotes/scripts/check-note-export*.mjs'
       - 'fanotes/scripts/electron-test-stub.cjs'
       - 'fanotes/scripts/lib/desktop-flow.mjs'
       - '.github/workflows/desktop-flows.yml'
@@ -48,3 +49,7 @@ jobs:
           test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
       - name: Desktop flows
         run: npm run check:desktop-flows || { echo "::warning::desktop flows failed once; retrying"; npm run check:desktop-flows; }
+      - name: Note export (unit)
+        run: npm run check:note-export-unit
+      - name: Note export (PDF and Word through the real dialog)
+        run: npm run check:note-export || { echo "::warning::note export check failed once; retrying"; npm run check:note-export; }
