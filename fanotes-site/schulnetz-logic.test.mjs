@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import test from 'node:test'
 import { createCipheriv, generateKeyPairSync, randomBytes } from 'node:crypto'
-import { createSchulnetzRuntime, openToken, sealToken } from './schulnetz-api.mjs'
+import { createSchulnetzRuntime, openToken, renewedSsoCookies, sealToken } from './schulnetz-api.mjs'
 import { notifyAccountDeleted, setAccountDeletedHook } from './sync-api.mjs'
 import { connectionRouteKey, fcmDataMessage, fcmDropToken, fcmPriorityForChanges, isValidFcmToken, serviceAccountJwt } from './fcm.mjs'
 import {
@@ -1131,7 +1131,7 @@ test('a redirect to loopback and a microsoft lookalike are not fetched', async (
   }
 })
 
-test('stored cookies keep only the login names and expire after 14 days', async () => {
+test('stored cookies keep only the login names and do not expire on the server\'s own clock', async () => {
   const root = await mkdtemp(join(tmpdir(), 'schulnetz-cookie-'))
   const key = randomBytes(32)
   let clock = Date.parse('2026-01-01T00:00:00Z')
@@ -1140,7 +1140,7 @@ test('stored cookies keep only the login names and expire after 14 days', async 
     key,
     autostart: false,
     now: () => new Date(clock),
-    fetch: async () => { throw new Error('fetched after expiry') },
+    fetch: async () => { throw Object.assign(new Error('offline'), { code: 'ECONNRESET' }) },
   })
   const accountId = '1'.repeat(32)
   try {
@@ -1152,16 +1152,27 @@ test('stored cookies keep only the login names and expire after 14 days', async 
     assert.equal(stored.cookiesSavedAt, '2026-01-01T00:00:00.000Z')
     const cookies = JSON.parse(openToken(key, stored.sso))
     assert.deepEqual(cookies, { 'login.microsoftonline.com': 'ESTSAUTH=keep-me' })
-    clock += 15 * 24 * 60 * 60 * 1000
-    const expired = await runtime.pollAccount(accountId)
-    assert.equal(expired.needsReauth, true)
+    clock += 90 * 24 * 60 * 60 * 1000
+    await runtime.pollAccount(accountId).catch(() => {})
     const after = JSON.parse(await readFile(join(root, 'accounts', accountId, 'link.json'), 'utf8'))
-    assert.equal(after.sso, null)
+    assert.equal(after.needsReauth, false)
+    assert.deepEqual(JSON.parse(openToken(key, after.sso)), { 'login.microsoftonline.com': 'ESTSAUTH=keep-me' })
     await runtime.unlink(accountId)
     await assert.rejects(stat(join(root, 'accounts', accountId, 'link.json')))
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('renewed Microsoft cookies replace the stored ones, login names only', () => {
+  const stored = { 'login.microsoftonline.com': 'ESTSAUTH=old; ESTSAUTHPERSISTENT=keep' }
+  assert.equal(renewedSsoCookies(stored, {}), null)
+  assert.equal(renewedSsoCookies(stored, { 'login.microsoftonline.com': 'ESTSAUTH=old; buid=x' }), null)
+  assert.equal(renewedSsoCookies(stored, { 'login.microsoftonline.com': 'ESTSAUTH=' }), null, 'an emptied cookie keeps its value')
+  assert.deepEqual(renewedSsoCookies(stored, { 'login.microsoftonline.com': 'ESTSAUTH=new; fpc=drop', 'www.schulnetz-ag.ch': 'ESTSAUTH=foreign' }),
+    { 'login.microsoftonline.com': 'ESTSAUTH=new; ESTSAUTHPERSISTENT=keep' })
+  assert.deepEqual(renewedSsoCookies({}, { 'login.live.com': 'ESTSAUTHLIGHT=l' }), { 'login.live.com': 'ESTSAUTHLIGHT=l' })
+  assert.equal(renewedSsoCookies(stored, { 'login.microsoftonline.com': `ESTSAUTH=${'x'.repeat(17_000)}` }), null, 'size cap')
 })
 
 test('schulnetz routes are rate limited per account', async () => {

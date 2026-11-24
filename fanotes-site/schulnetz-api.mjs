@@ -98,9 +98,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   commuteLessonEnd: true,
   guessGrades: false,
 })
-const COOKIE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
-/** The server keeps a web sign-in for COOKIE_MAX_AGE_MS. This long before it ends, the phone is reminded once, so grade checks never lapse unnoticed. */
-export const COOKIE_REMIND_BEFORE_MS = 2 * 24 * 60 * 60 * 1000
+// The server keeps a web sign-in until Microsoft or Schulnetz ends it, the user disconnects, or the account is deleted.
+// It has no deadline of its own: when the sign-in does end, the phone is told once (alertReauthOnce / 'reauth').
 const SSO_HOSTS = new Set(['login.microsoftonline.com', 'login.microsoft.com', 'login.live.com', 'login.windows.net'])
 const SSO_COOKIE_NAMES = new Set(['ESTSAUTH', 'ESTSAUTHPERSISTENT', 'ESTSAUTHLIGHT', 'SignInStateCookie', 'x-ms-RefreshTokenCredential'])
 const LINK_LIMIT = 5
@@ -175,6 +174,31 @@ const keptSsoHeader = (value) => String(value || '')
   .map((part) => part.trim())
   .filter((part) => SSO_COOKIE_NAMES.has(part.slice(0, part.indexOf('='))))
   .join('; ')
+
+/**
+ * The stored Microsoft cookies with the values Microsoft set again during [jar]'s sign-in, or null when nothing changed.
+ * Only the kept login cookie names on the Microsoft hosts are taken; an emptied cookie keeps its old value.
+ */
+export const renewedSsoCookies = (stored, jar) => {
+  const next = { ...(stored || {}) }
+  let changed = false
+  let bytes = 0
+  for (const host of SSO_HOSTS) {
+    const fresh = keptSsoHeader(jar?.[host])
+    if (!fresh) { bytes += String(next[host] || '').length; continue }
+    const merged = new Map(String(next[host] || '').split(';').map((part) => part.trim()).filter(Boolean).map((part) => [part.slice(0, part.indexOf('=')), part]))
+    for (const part of fresh.split(';').map((item) => item.trim()).filter(Boolean)) {
+      const cut = part.indexOf('=')
+      if (cut <= 0 || !part.slice(cut + 1)) continue
+      if (merged.get(part.slice(0, cut)) !== part) { merged.set(part.slice(0, cut), part); changed = true }
+    }
+    next[host] = [...merged.values()].join('; ')
+    bytes += next[host].length
+  }
+  // The same cap a sign-in from the phone has.
+  if (!changed || bytes > 16_000) return null
+  return next
+}
 
 const changeLogs = new Map()
 
@@ -359,11 +383,8 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
   const saveLink = async (accountId, link) => writeJson(resolve(accountDir(accountId), 'link.json'), stripLegacyPush(link))
 
-  const signInExpiresAt = (link) => {
-    if (link?.mode !== 'web' || link.needsReauth === true) return ''
-    const savedAt = Date.parse(link.cookiesSavedAt || '')
-    return Number.isFinite(savedAt) ? new Date(savedAt + COOKIE_MAX_AGE_MS).toISOString() : ''
-  }
+  // Kept for the app's "sign in again by" line: a web sign-in has no end date any more, so it stays empty.
+  const signInExpiresAt = () => ''
   const publicStatus = (link) => {
     if (!link) return { linked: false, settings: DEFAULT_SETTINGS }
     return {
@@ -1204,8 +1225,12 @@ export const createSchulnetzRuntime = (options = {}) => {
     const overduePushes = latencies.filter((ms) => ms > GRADE_SLA_MS).length
     const errors = scheduler.pollErrors
     const codes = [...(errors?.codes || [])].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])).slice(0, 8)
+    // Every server-read connection signed out means no grade is checked at all, which is not ok either.
+    const stopped = accounts === 0 && needsReauth > 0
     return {
-      status: overdue ? 'degraded' : 'ok',
+      status: overdue || stopped ? 'degraded' : 'ok',
+      // Why the promise does not hold: 'overdue' (checks are late) or 'signed-out' (no connection can be checked).
+      reason: overdue ? 'overdue' : stopped ? 'signed-out' : '',
       slaSeconds: GRADE_SLA_MS / 1000,
       gradeChecks: { accounts, maxAgeSeconds: Number.isFinite(maxAge) ? Math.round(maxAge / 1000) : null, overdue, needsReauth },
       pushes24h: {
@@ -1232,6 +1257,10 @@ export const createSchulnetzRuntime = (options = {}) => {
     if (now().getTime() - runtimeStarted < GRADE_SLA_MS) return state
     if (state.status === 'ok' || now().getTime() - slaWarnedAt < GRADE_SLA_MS) return state
     slaWarnedAt = now().getTime()
+    if (state.reason === 'signed-out') {
+      log('warn', `Notenprüfung gestoppt: alle ${state.gradeChecks.needsReauth} Verbindungen brauchen eine neue Anmeldung`)
+      return state
+    }
     log('warn', `Notenprüfung überfällig: ${state.gradeChecks.overdue} von ${state.gradeChecks.accounts} Konten seit über ${GRADE_SLA_MS / 60_000} Minuten nicht geprüft (älteste ${state.gradeChecks.maxAgeSeconds ?? '–'} s)`)
     return state
   }
@@ -1248,25 +1277,6 @@ export const createSchulnetzRuntime = (options = {}) => {
     // The phone reads a device link itself; there is nothing on the server to sign in with.
     if (link.mode === 'device') return { skipped: true }
     if (link.mode === 'web') {
-      const savedAt = Date.parse(link.cookiesSavedAt || '')
-      if (!Number.isFinite(savedAt) || now().getTime() - savedAt > COOKIE_MAX_AGE_MS) {
-        link.sso = null
-        link.cookiesSavedAt = ''
-        link.serverSession = null
-        link.needsReauth = true
-        link.lastError = 'cookie-expired'
-        await saveLink(accountId, link)
-        // The grade promise cannot hold without a sign-in: tell the user once instead of going quiet.
-        await alertReauthOnce(accountId, link)
-        return { needsReauth: true }
-      }
-      if (now().getTime() - savedAt > COOKIE_MAX_AGE_MS - COOKIE_REMIND_BEFORE_MS && link.expirySoonPushSent !== true) {
-        // Once per sign-in: a new sign-in writes a fresh link without this flag.
-        link.expirySoonPushSent = true
-        await saveLink(accountId, link)
-        await ping(accountId, link, 'reauth-soon')
-        log('info', `Anmeldung läuft bald ab ${accountId.slice(0, 8)}: Erinnerung gesendet`)
-      }
       return pollWeb(accountId, link, material, { gradesOnly })
     }
     const baseUrl = normalizeSchoolBase(link.baseUrl)
@@ -1462,6 +1472,12 @@ export const createSchulnetzRuntime = (options = {}) => {
         return { needsReauth: true }
       }
       link.serverSession = sealToken(material, JSON.stringify({ php: established.php, id: established.id, transid: established.transid }))
+      // Microsoft renews its sign-in cookies when they are used. Keeping the renewed ones lets the sign-in last.
+      const renewed = renewedSsoCookies(cookies, established.jar)
+      if (renewed) {
+        link.sso = sealToken(material, JSON.stringify(renewed))
+        cookies = renewed
+      }
       await saveLink(accountId, link)
       scraped = await scrape({ php: established.php, id: established.id, transid: established.transid, userAgent })
       if (scraped.problem === 'microsoft') {
