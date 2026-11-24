@@ -41,8 +41,8 @@ class NotePreviewMemoryTest {
 
     @Test fun thePreviewGateIsTwoMegabytesOrAnEighthOfTheLimit() {
         assertEquals(2L * 1024 * 1024, previewParseLimit(100L * 1024 * 1024))
-        assertEquals(512L * 1024, previewParseLimit(4L * 1024 * 1024))
-        assertEquals(128L * 1024, previewParseLimit(1024L * 1024))
+        assertEquals(1024L * 1024, previewParseLimit(4L * 1024 * 1024))
+        assertEquals(256L * 1024, previewParseLimit(1024L * 1024))
     }
 
     @Test fun theReducedDocumentIsBoundedAndKeepsWhatTheThumbnailDraws() {

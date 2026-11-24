@@ -120,6 +120,9 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     private val searchCache = object : android.util.LruCache<String, Pair<Long, String>>(8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Pair<Long, String>) = value.second.length.coerceAtMost(Int.MAX_VALUE / 2) * 2
     }
+    /** One preview decodes at a time: rows of a scrolled list would otherwise parse several notes in parallel. */
+    private val previewDispatcher = Dispatchers.IO.limitedParallelism(1)
+
     /** Previews are counted by estimated bytes, not entries: a few MB in all, however many notes scroll past. */
     private val previewCache = object : android.util.LruCache<String, Pair<Long, NotePreview>>(PREVIEW_CACHE_BYTES) {
         override fun sizeOf(key: String, value: Pair<Long, NotePreview>) = value.second.estimatedBytes()
@@ -468,7 +471,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     private data class Reloaded(val tree: List<VaultNode>, val folder: String, val notes: List<VaultNode>, val tasks: Result<List<HomeworkTask>>,
         val calendar: Result<CalendarDocument>, val guesses: List<HypotheticalGrade>, val book: GradeBook, val count: Int, val desk: DeskPrefs, val hidden: List<HiddenLesson>, val colors: Map<String, String>, val planned: List<ch.fasrv.fanotes.schulnetz.PlannedAbsence> = emptyList())
 
-    suspend fun loadPreview(node: VaultNode): NotePreview = withContext(Dispatchers.IO) {
+    suspend fun loadPreview(node: VaultNode): NotePreview = withContext(previewDispatcher) {
         val hit = previewCache.get(node.path)
         if (hit != null && hit.first == node.modifiedAt) return@withContext hit.second
         // Only a note has text and handwriting; a media file or a story is never decoded as a note.
@@ -1738,13 +1741,14 @@ data class NotePreview(val text: String, val ink: InkDocument, val largeInk: Boo
 }
 
 /** Total bytes the preview cache may hold. */
-const val PREVIEW_CACHE_BYTES = 3 * 1024 * 1024
+const val PREVIEW_CACHE_BYTES = 8 * 1024 * 1024
 
 /**
- * Largest handwriting file a list preview parses: 2 MB, or an eighth of the open limit when that is smaller.
+ * Largest handwriting file a list preview parses: 2 MB, or a quarter of the open limit when that is smaller.
+ * Previews decode one at a time (previewDispatcher), so this is the only preview parse in flight.
  * Anything above is shown as large handwriting without a thumbnail.
  */
-fun previewParseLimit(readLimit: Long): Long = minOf(2L * 1024 * 1024, readLimit / 8)
+fun previewParseLimit(readLimit: Long): Long = minOf(2L * 1024 * 1024, readLimit / 4)
 
 /** A short, name-free id for a path, for the diagnostic log. */
 fun shortHash(path: String): String = Integer.toHexString(path.hashCode())

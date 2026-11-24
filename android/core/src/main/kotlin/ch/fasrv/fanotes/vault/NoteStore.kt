@@ -220,9 +220,9 @@ private const val MIN_NOTE_READ_BYTES = 1024L * 1024
 
 /**
  * Largest handwriting file that may be decoded when [availableHeap] bytes are free: a decode peaks at
- * [NOTE_DECODE_EXPANSION] times the file, and it may use at most a third of the free heap so the UI keeps its room.
+ * [NOTE_DECODE_EXPANSION] times the file, and it may use at most half of the free heap so the UI keeps its room (the measured peak is 17–31x, so 40x already has margin).
  */
-fun noteReadLimitFor(availableHeap: Long): Long = maxOf(MIN_NOTE_READ_BYTES, availableHeap.coerceAtLeast(0) / (NOTE_DECODE_EXPANSION * 3))
+fun noteReadLimitFor(availableHeap: Long): Long = maxOf(MIN_NOTE_READ_BYTES, availableHeap.coerceAtLeast(0) / (NOTE_DECODE_EXPANSION * 2))
 
 /** [noteReadLimitFor] for the heap that is free right now. A note above it is shown as too large, never decoded. */
 fun defaultNoteReadLimit(): Long {

@@ -95,7 +95,7 @@ class NoteReadMemoryTest {
         val gib = 1024L * 1024 * 1024
         assertEquals(1024L * 1024, noteReadLimitFor(0))
         assertEquals(1024L * 1024, noteReadLimitFor(10L * 1024 * 1024))
-        assertEquals(gib / (NOTE_DECODE_EXPANSION * 3), noteReadLimitFor(gib))
+        assertEquals(gib / (NOTE_DECODE_EXPANSION * 2), noteReadLimitFor(gib))
         // 512 MB free: about 7 MB, so a 65 MB or 16 MB note is refused instead of crashing.
         assertTrue(noteReadLimitFor(512L * 1024 * 1024) < 16L * 1024 * 1024)
     }
