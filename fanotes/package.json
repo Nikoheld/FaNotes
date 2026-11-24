@@ -199,6 +199,7 @@
     "check:famd-open-stable": "node scripts/check-famd-open-stable.mjs",
     "check:ink-open-flicker": "node scripts/check-ink-open-flicker.mjs",
     "check:text-field-position": "node scripts/check-text-field-position.mjs",
+    "check:zoom-ink-registration": "node scripts/check-zoom-ink-registration.mjs",
     "check:paper-zoom": "node scripts/check-paper-zoom.mjs",
     "check:note-canvas": "node scripts/check-note-canvas.mjs",
     "check:paper-grow": "node scripts/check-paper-grow.mjs",
