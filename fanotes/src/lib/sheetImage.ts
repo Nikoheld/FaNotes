@@ -12,6 +12,8 @@ export const SHEET_IMAGE_MIN_WIDTH = 0.08
 export const SHEET_IMAGE_MAX_WIDTH = 1
 /** Widest a fresh picture starts, so it never covers the whole page. */
 export const SHEET_IMAGE_START_WIDTH = 0.85
+/** Lowest top edge in paper widths; matches the main-process validator. */
+export const SHEET_IMAGE_MAX_Y = 2000
 const MIN_ASPECT = 0.02
 const MAX_ASPECT = 50
 
@@ -25,7 +27,7 @@ export const clampSheetPlacement = (placement: WorksheetPlacement): WorksheetPla
   return {
     width,
     x: Math.min(1 - width, Math.max(0, finite(placement.x, 0))),
-    y: Math.min(60, Math.max(0, finite(placement.y, 0))),
+    y: Math.min(SHEET_IMAGE_MAX_Y, Math.max(0, finite(placement.y, 0))),
   }
 }
 
