@@ -180,6 +180,26 @@ const session = async (theme, full) => {
       return bar && layer ? { insideLayer: bar.left >= layer.left && bar.right <= layer.right && bar.top >= layer.top && bar.bottom <= layer.bottom, insideWidth: bar.left >= 0 && bar.right <= innerWidth } : null
     })
     ok(`${label} PDF chip and remove button stay inside the page and the window width`, chrome?.insideLayer && chrome?.insideWidth, JSON.stringify(chrome))
+    // Scroll so that page 2 fills the view and hover there: the chip and the remove button follow the view.
+    await page.evaluate(() => {
+      const second = document.querySelectorAll('.worksheet-pdf-page')[1]
+      let node = second?.parentElement
+      while (node && !(node.scrollHeight > node.clientHeight + 4 && /auto|scroll/u.test(getComputedStyle(node).overflowY))) node = node.parentElement
+      if (!second || !node) return
+      node.scrollTop += second.getBoundingClientRect().top - node.getBoundingClientRect().top - 30
+    })
+    await sleep(400)
+    const page2 = await rectOf(page, '.worksheet-pdf-page:nth-of-type(2)') ?? await page.evaluate(() => { const r = document.querySelectorAll('.worksheet-pdf-page')[1].getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height } })
+    await page.mouse.move(page2.left + page2.width / 2, page2.top + 200)
+    await sleep(600)
+    const followed = await page.evaluate(() => {
+      const chip = document.querySelector('.sheet-doc-chip')?.getBoundingClientRect()
+      const remove = document.querySelector('.sheet-doc-bar button')?.getBoundingClientRect()
+      const layer = document.querySelector('.worksheet-layer.is-document')?.getBoundingClientRect()
+      const inside = (box) => Boolean(box && layer) && box.top >= 0 && box.bottom <= innerHeight && box.left >= 0 && box.right <= innerWidth && box.top >= layer.top && box.bottom <= layer.bottom
+      return { chip: inside(chip), remove: inside(remove), chipTop: chip?.top, layerTop: layer?.top }
+    })
+    ok(`${label} scrolled to page 2: the chip and the remove button stay in view and inside the worksheet`, followed.chip && followed.remove && followed.layerTop < 0, JSON.stringify(followed))
     await page.screenshot({ path: path.join(shots, `pdf-worksheet-${theme}.png`) })
 
     // --- Paste: a floating, selected object ------------------------------------------------------------------------
@@ -249,6 +269,7 @@ const session = async (theme, full) => {
       // Reopen the note: same place.
       await page.waitForTimeout?.(900)
       const title = fs.readdirSync(profile.vault).find((name) => name.endsWith('.md') && !['Altes Bild.md', 'Aufgaben.md'].includes(name))
+      await sleep(4500) // a picture pasted a moment ago still counts as fresh (and selected) when its layer remounts
       await openFile(page, 'Altes Bild')
       await until(() => page.locator('.sheet-image:not(.is-floating)').count().then((n) => n === 1), 'other note shown')
       await openFile(page, title.replace(/\.md$/u, ''))

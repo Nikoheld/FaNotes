@@ -534,6 +534,37 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
     if (shift) bar.style.setProperty('--bar-shift', `${shift / zoom}px`)
   }, [selected, placement, floating, loading])
 
+  // The chip and remove button of a document ride along at the top of the part that is in view (never below the
+  // layer's end), so a long PDF keeps them within reach. The offset is computed from the paper scroller's position
+  // (rAF-throttled, only while the worksheet is hovered, focused or selected), which also holds under the zoomed plane.
+  const chromeRef = useRef<HTMLDivElement>(null)
+  const [chromeActive, setChromeActive] = useState(false)
+  useEffect(() => {
+    const layer = layerRef.current
+    const chrome = chromeRef.current
+    if (isImage || !layer || !chrome || (!chromeActive && !selected)) return
+    const view = resolvePaperZoomScroller(layer)
+    let frame = 0
+    const place = () => {
+      frame = 0
+      const layerBox = layer.getBoundingClientRect()
+      const viewBox = view?.getBoundingClientRect()
+      const zoom = layer.offsetHeight > 0 ? layerBox.height / layer.offsetHeight : 1
+      const wanted = ((Math.max(viewBox?.top ?? 0, 0) - layerBox.top) / (zoom || 1)) + 10
+      const limit = Math.max(10, layer.offsetHeight - chrome.offsetHeight - 10)
+      chrome.style.top = `${Math.min(limit, Math.max(10, wanted))}px`
+    }
+    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(place) }
+    place()
+    view?.addEventListener('scroll', schedule, { passive: true })
+    window.addEventListener('resize', schedule)
+    return () => {
+      view?.removeEventListener('scroll', schedule)
+      window.removeEventListener('resize', schedule)
+      if (frame) window.cancelAnimationFrame(frame)
+    }
+  }, [chromeActive, isImage, selected, loading, pdf])
+
   const selectObject = useCallback(() => {
     setSelected(true)
     // Keys must reach the object, not a text caret that is still blinking in the note.
@@ -892,7 +923,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
   ) : null
 
   const documentChrome = !isImage && !error && !loading && !inputDisabled ? (
-    <div className="sheet-doc-chrome">
+    <div className="sheet-doc-chrome" ref={chromeRef}>
       <span className="sheet-doc-chip" title={document.title}>
         <FileText size={13} aria-hidden="true" />
         <span>{infoLabel}</span>
@@ -910,6 +941,10 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
       ref={layerRef}
       className={layerClass}
       aria-label={`Arbeitsblatt ${document.title}`}
+      onPointerEnter={isImage ? undefined : () => setChromeActive(true)}
+      onPointerLeave={isImage ? undefined : () => setChromeActive(false)}
+      onFocus={isImage ? undefined : () => setChromeActive(true)}
+      onBlur={isImage ? undefined : () => setChromeActive(false)}
       onClick={(event) => {
         if (isImage || inputDisabled) return
         if ((event.target as HTMLElement).closest('.worksheet-textbox, .worksheet-highlight')) return
