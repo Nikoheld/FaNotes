@@ -13,6 +13,8 @@ import {
 
 const require = createRequire(import.meta.url)
 const JSZip = require('jszip')
+// A machine without a CJK font prints no glyphs for 日本 (Chromium drops them): only assert it when one is installed.
+const cjkFont = process.platform !== 'linux' || spawnSync('sh', ['-c', 'fc-list :lang=ja'], { encoding: 'utf8' }).stdout.trim().length > 0
 const xvfb = spawnSync('sh', ['-c', 'command -v xvfb-run'], { encoding: 'utf8' }).stdout.trim()
 const skipReason = process.env.FANOTES_SKIP_BROWSER === '1' ? 'FANOTES_SKIP_BROWSER=1'
   : !xvfb ? 'no xvfb-run'
@@ -116,7 +118,7 @@ try {
   const pages = await readPdf(pdfFile)
   const all = squash(pages.map((entry) => entry.text).join(' '))
   ok('PDF: named after the note and a real PDF with at least one page', path.basename(pdfFile) === 'Probe.pdf' && bytes.subarray(0, 5).toString() === '%PDF-' && pages.length > 0, `${pages.length} page(s), ${bytes.length} bytes`)
-  ok('PDF: Unicode text is selectable (x ≤ 1, α→β, 日本)', ['x≤1', 'α→β', '日本'].every((text) => all.includes(text)), all.slice(0, 160))
+  ok(`PDF: Unicode text is selectable (x ≤ 1, α→β${cjkFont ? ', 日本' : ''})`, ['x≤1', 'α→β', ...(cjkFont ? ['日本'] : [])].every((text) => all.includes(text)), all.slice(0, 160))
   ok('PDF: heading, table cells and code are in the text', ['Exportprobe', 'Tabelle', 'Alpha', '17', 'Beta', '42', 'constanswer=42'.replace('constanswer', 'const answer').replace(/\s/gu, '')].every((text) => all.includes(squash(text))), all.slice(0, 200))
   const formula = all.slice(all.indexOf('display:'))
   ok('PDF: math is rendered with KaTeX (inline a, b, c and the display sum)', ['a', 'b', 'c', '=', '∑', 'i=1'].every((text) => formula.includes(text)), formula.slice(0, 60))

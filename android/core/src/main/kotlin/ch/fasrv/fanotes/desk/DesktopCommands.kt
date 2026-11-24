@@ -105,6 +105,8 @@ fun normalizeDesktopCommand(id: String): String = when (id) {
     "tasks" -> "homework"
     "split-orient" -> "split-orientation"
     "sync" -> "sync-now"
+    // The desktop export dialog; on Android the note goes out as the PDF it already exports.
+    "export-note" -> "export-pdf"
     else -> id
 }
 
