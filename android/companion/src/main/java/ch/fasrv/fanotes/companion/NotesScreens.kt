@@ -70,7 +70,7 @@ fun NoteRow(model: CompanionModel, node: VaultNode, onMore: (() -> Unit)? = null
         val shownName = if (node.kind.isNote) displayNoteTitle(node.name, t(R.string.untitled_note)) else node.name
         Column(Modifier.weight(1f)) {
             Text(shownName, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val excerpt = if (node.kind.isNote) preview?.text.orEmpty() else kindLabel(node.kind)
+            val excerpt = if (node.kind.isNote) preview?.text.orEmpty().ifBlank { if (preview?.largeInk == true) t(R.string.large_handwriting) else "" } else kindLabel(node.kind)
             if (excerpt.isNotBlank()) Text(excerpt, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
             Text(listOf(node.path.substringBeforeLast('/', "").ifBlank { t(R.string.my_notes) }, formatSchoolStamp(Instant.ofEpochMilli(node.modifiedAt).atZone(ZoneId.systemDefault()), "d MMM")).joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
         }

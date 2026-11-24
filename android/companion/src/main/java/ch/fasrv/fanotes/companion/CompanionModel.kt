@@ -120,7 +120,15 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     private val searchCache = object : android.util.LruCache<String, Pair<Long, String>>(8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Pair<Long, String>) = value.second.length.coerceAtMost(Int.MAX_VALUE / 2) * 2
     }
-    private val previewCache = object : android.util.LruCache<String, Pair<Long, NotePreview>>(24) {}
+    /** Previews are counted by estimated bytes, not entries: a few MB in all, however many notes scroll past. */
+    private val previewCache = object : android.util.LruCache<String, Pair<Long, NotePreview>>(PREVIEW_CACHE_BYTES) {
+        override fun sizeOf(key: String, value: Pair<Long, NotePreview>) = value.second.estimatedBytes()
+    }
+
+    /** Frees every preview and thumbnail cache so a note that is about to be parsed has the most heap. */
+    fun releaseListMemory() {
+        previewCache.evictAll(); searchCache.evictAll(); CompanionImageCache.clearInk()
+    }
 
     fun select(destination: Destination) {
         selectNav(when (destination) {
@@ -253,7 +261,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         if (fileKindOf(path) != null || ch.fasrv.fanotes.vault.StoryFiles.isStoryFolder(path)) { openFile(path); return }
         editorTarget = target
         editorPath = path
-        editor = NoteEditorController(graph, viewModelScope, path)
+        editor = NoteEditorController(graph, viewModelScope, path, beforeParse = ::releaseListMemory)
         navigate(Page.Editor)
     }
     fun closeEditor() {
@@ -465,8 +473,19 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         if (hit != null && hit.first == node.modifiedAt) return@withContext hit.second
         // Only a note has text and handwriting; a media file or a story is never decoded as a note.
         if (!node.kind.isNote) return@withContext NotePreview("", newInkDocument(node.name, "blank", ""))
-        val note = graph.store.readNote(node.path)
-        NotePreview(noteExcerpt(note.markdown, note.title), note.document).also { previewCache.put(node.path, node.modifiedAt to it) }
+        // A big note is never parsed for a thumbnail: only its text head is read and the row shows a placeholder.
+        val limit = previewParseLimit(graph.store.readLimit())
+        try {
+            val note = graph.store.readNote(node.path, limit)
+            if (note.inkTooLarge) {
+                graph.schulnetzLog.info("notes preview skipped for size id=${shortHash(node.path)} bytes=${graph.store.inkFileBytes(node.path)} previewLimit=$limit ${heapSummary()}")
+                NotePreview(noteExcerpt(note.markdown, note.title), newInkDocument(note.title, "blank", ""), largeInk = true)
+            } else NotePreview(noteExcerpt(note.markdown, note.title), reduceForThumbnail(note.document))
+        } catch (_: OutOfMemoryError) {
+            previewCache.evictAll()
+            graph.schulnetzLog.info("notes preview out of memory id=${shortHash(node.path)} ${heapSummary()}")
+            NotePreview("", newInkDocument(node.name, "blank", ""), largeInk = true)
+        }.also { previewCache.put(node.path, node.modifiedAt to it) }
     }
     suspend fun findNotes(query: String): List<NoteResult> = withContext(Dispatchers.IO) {
         flattenNotes(tree).mapNotNull { node ->
@@ -1709,5 +1728,30 @@ internal fun phpSessionCookie(baseUrl: String, slot: String = PRIMARY_SLOT): Str
     return Regex("PHPSESSID=([^;]+)").find(raw)?.groupValues?.get(1).orEmpty()
 }
 
-data class NotePreview(val text: String, val ink: InkDocument)
+/** [ink] is a reduced document (see [reduceForThumbnail]); [largeInk] means the handwriting was not parsed for size. */
+data class NotePreview(val text: String, val ink: InkDocument, val largeInk: Boolean = false) {
+    /** Rough heap this preview holds, for the size-bounded cache. */
+    fun estimatedBytes(): Int {
+        val points = ink.strokes.sumOf { it.points.size.toLong() }
+        return (text.length * 2L + points * 80L + ink.strokes.size * 200L + 400L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+}
+
+/** Total bytes the preview cache may hold. */
+const val PREVIEW_CACHE_BYTES = 3 * 1024 * 1024
+
+/**
+ * Largest handwriting file a list preview parses: 2 MB, or an eighth of the open limit when that is smaller.
+ * Anything above is shown as large handwriting without a thumbnail.
+ */
+fun previewParseLimit(readLimit: Long): Long = minOf(2L * 1024 * 1024, readLimit / 8)
+
+/** A short, name-free id for a path, for the diagnostic log. */
+fun shortHash(path: String): String = Integer.toHexString(path.hashCode())
+
+/** Heap numbers for the diagnostic log (MB). */
+fun heapSummary(): String {
+    val r = Runtime.getRuntime()
+    return "heapMaxMb=${r.maxMemory() shr 20} heapUsedMb=${(r.totalMemory() - r.freeMemory()) shr 20}"
+}
 data class NoteResult(val node: VaultNode, val excerpt: String)

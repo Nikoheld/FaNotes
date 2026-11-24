@@ -14,7 +14,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** Owns drafts and serialized writes across recomposition, rotation, and editor mode changes. */
-class NoteEditorController(private val graph: CompanionGraph, private val scope: CoroutineScope, val path: String) {
+class NoteEditorController(private val graph: CompanionGraph, private val scope: CoroutineScope, val path: String,
+    /** Runs before a note is parsed: frees the list caches so the parse has the most heap. */
+    private val beforeParse: () -> Unit = {},
+) {
     var note by mutableStateOf<OpenNote?>(null); private set
     var markdown by mutableStateOf(""); private set
     var document by mutableStateOf<InkDocument?>(null); private set
@@ -44,7 +47,12 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
             try {
                 val loaded = withContext(Dispatchers.IO) {
                     check(graph.vault.exists(path)) { t(R.string.note_gone) }
-                    graph.store.readNote(path)
+                    beforeParse()
+                    val bytes = graph.store.inkFileBytes(path)
+                    val limit = graph.store.readLimit()
+                    graph.store.readNote(path, limit).also {
+                        graph.schulnetzLog.info("notes open id=${shortHash(path)} bytes=$bytes limit=$limit tooLarge=${it.inkTooLarge} ${heapSummary()}")
+                    }
                 }
                 note = loaded
                 // Remove only the ink marker, preserving worksheet markers and surrounding prose.
@@ -57,6 +65,7 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: OutOfMemoryError) {
                 // A huge file must not take the app down: say so and leave the note unchanged.
+                graph.schulnetzLog.info("notes open out of memory id=${shortHash(path)} ${heapSummary()}")
                 graph.busyPaths -= protected
                 error = t(R.string.too_large_for_memory)
             }

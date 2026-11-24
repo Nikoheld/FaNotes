@@ -27,6 +27,11 @@ object CompanionImageCache {
         synchronized(bitmaps) { bitmaps.put("ink:$key:${width}x$height", bitmap) }
     }
 
+    /** Drops the list thumbnails (not the decoded photos) so a note that opens has the most room. */
+    fun clearInk() {
+        synchronized(bitmaps) { bitmaps.snapshot().keys.filter { it.startsWith("ink:") }.forEach { bitmaps.remove(it) } }
+    }
+
     fun image(path: String, modifiedAt: Long): Bitmap? =
         synchronized(bitmaps) { bitmaps.get("img:$path:$modifiedAt") }
 
@@ -155,4 +160,27 @@ suspend fun decodeFileThumbnail(file: File, widthPx: Int, heightPx: Int): Bitmap
         val decoded = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = max(sample, imageSampleSize(bounds.outWidth, bounds.outHeight)) })
         decoded?.also { CompanionImageCache.putImage(key, modified, it) }
     } catch (_: Exception) { null } catch (_: OutOfMemoryError) { null }
+}
+
+/** Most strokes and points a list thumbnail draws; [reduceForThumbnail] keeps no more. */
+private const val THUMBNAIL_STROKES = 400
+private const val THUMBNAIL_POINTS_PER_STROKE = 200
+private const val THUMBNAIL_POINT_BUDGET = 12_000
+
+/**
+ * What [rasterizeInkThumbnail] draws of [document] and nothing else: the first 400 strokes, each with its points
+ * thinned to at most 200 (and about 12000 in all), no extras. A cached preview holds this, never the whole document.
+ */
+fun reduceForThumbnail(document: InkDocument): InkDocument {
+    val strokes = document.strokes.take(THUMBNAIL_STROKES)
+    val perStroke = minOf(THUMBNAIL_POINTS_PER_STROKE, maxOf(8, THUMBNAIL_POINT_BUDGET / strokes.size.coerceAtLeast(1)))
+    val reduced = strokes.map { stroke ->
+        val points = stroke.points
+        val kept = if (points.size <= perStroke) points.toList() else {
+            // Even steps, always ending on the last point.
+            List(perStroke) { i -> points[(i.toLong() * (points.size - 1) / (perStroke - 1)).toInt()] }
+        }
+        stroke.copy(points = kept, figurePaths = emptyList())
+    }
+    return document.copy(strokes = reduced, extras = ch.fasrv.fanotes.json.JsonValue.Obj())
 }
