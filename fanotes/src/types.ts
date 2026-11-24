@@ -27,6 +27,8 @@ export type PaperStyle = 'blank' | 'dots' | 'squares' | 'grid' | 'lines' | 'mill
 export type UiLanguagePreference = 'system' | 'de' | 'en'
 
 export type SpellingLanguage = 'de' | 'en'
+/** Languages the editor spellchecks. French has a dictionary for spelling only (no handwriting recognition). */
+export type TextLanguage = SpellingLanguage | 'fr'
 export type DetectedTextLanguage = SpellingLanguage | 'fr' | 'mixed' | 'unknown'
 
 export type SpellingFilterManifest = {
@@ -45,16 +47,20 @@ export type SpellingFilterManifest = {
       sha256: string
     }
   }>
+  /** Optional French dictionary (`fr.bloom`, `fr.words`); older builds do not carry it. */
+  french?: SpellingFilterManifest['languages'][SpellingLanguage]
 }
 
 export type SpellingResources = {
   manifest: SpellingFilterManifest
   de: Uint8Array
   en: Uint8Array
+  /** The French Bloom filter when the manifest lists one and it passed validation. */
+  fr?: Uint8Array
 }
 
 export type SpellingWordCandidatesResource = {
-  language: SpellingLanguage
+  language: TextLanguage
   descriptor: SpellingFilterManifest['languages'][SpellingLanguage]['candidates']
   bytes: Uint8Array
 }
@@ -653,7 +659,7 @@ export type FaNotesApi = {
   readAssetDataUrl: (relativePath: string) => Promise<string>
   readAssetBytes: (relativePath: string) => Promise<Uint8Array>
   loadSpellingResources: () => Promise<SpellingResources>
-  loadSpellingWordCandidates: (language: SpellingLanguage) => Promise<SpellingWordCandidatesResource>
+  loadSpellingWordCandidates: (language: TextLanguage) => Promise<SpellingWordCandidatesResource>
   loadHandwritingRecognitionResources: () => Promise<HandwritingRecognitionResources>
   recognizeNativeHandwritingLine?: (request: {
     input: Float32Array

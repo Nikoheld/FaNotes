@@ -1,4 +1,4 @@
-import type { SpellingLanguage } from '../types'
+import type { TextLanguage } from '../types'
 
 /**
  * Correction candidates for a misspelled word, checked against an exact word
@@ -13,18 +13,30 @@ export type SpellingSuggestion = {
   distance: 1 | 2
   /** Lower is likelier. */
   score: number
-  language: SpellingLanguage
+  language: TextLanguage
 }
 
 export type SuggestionLexicon = {
-  hasWord: (language: SpellingLanguage, normalizedWord: string) => boolean
+  hasWord: (language: TextLanguage, normalizedWord: string) => boolean
   /** Extra score for a word `hasWord` accepted less than certainly (e.g. only as a compound of parts); 0 for listed words. */
-  candidatePenalty?: (language: SpellingLanguage, normalizedWord: string) => number
+  candidatePenalty?: (language: TextLanguage, normalizedWord: string) => number
 }
 
-const ALPHABETS: Record<SpellingLanguage, string> = {
+const ALPHABETS: Record<TextLanguage, string> = {
   de: 'abcdefghijklmnopqrstuvwxyzäöü',
   en: 'abcdefghijklmnopqrstuvwxyz',
+  fr: 'abcdefghijklmnopqrstuvwxyzàâçéèêëîïôùûüÿœ',
+}
+
+/** Accent slips in French: a missing or wrong accent costs as little as a missing umlaut. */
+const FRENCH_ACCENTS: Record<string, string[]> = {
+  a: ['à', 'â'], à: ['a', 'â'], â: ['a', 'à'],
+  c: ['ç'], ç: ['c'],
+  e: ['é', 'è', 'ê', 'ë'], é: ['e', 'è', 'ê', 'ë'], è: ['e', 'é', 'ê', 'ë'], ê: ['e', 'é', 'è', 'ë'], ë: ['e', 'é', 'è', 'ê'],
+  i: ['î', 'ï'], î: ['i', 'ï'], ï: ['i', 'î'],
+  o: ['ô', 'œ'], ô: ['o'], œ: ['o'],
+  u: ['ù', 'û', 'ü'], ù: ['u', 'û', 'ü'], û: ['u', 'ù', 'ü'], ü: ['u', 'ù', 'û'],
+  y: ['ÿ'], ÿ: ['y'],
 }
 
 // Swiss/German QWERTZ rows; y/z are also treated as neighbours so a QWERTY
@@ -52,11 +64,19 @@ const keyNeighbours = (() => {
 
 const UMLAUT_PAIRS: Record<string, string> = { a: 'ä', ä: 'a', o: 'ö', ö: 'o', u: 'ü', ü: 'u' }
 
+/** The accent variants of a letter that count as one cheap slip: umlauts for German, accents for French. */
+const accentVariants = (letter: string, language: TextLanguage | undefined): string[] => {
+  if (language === 'fr') return FRENCH_ACCENTS[letter] ?? []
+  const umlaut = UMLAUT_PAIRS[letter]
+  return umlaut ? [umlaut] : []
+}
+
 // The word lists carry no frequencies. These everyday words win ties against
 // rare dictionary entries ("the" over "eth", "nicht" over "nichte").
-const COMMON_WORDS: Record<SpellingLanguage, Set<string>> = {
+const COMMON_WORDS: Record<TextLanguage, Set<string>> = {
   de: new Set(('der die das und ist in den von zu mit sich des auf für nicht ein eine einer eines einem einen als auch es an werden aus er hat dass sie nach wird bei noch wie einem über einen so zum war haben nur oder aber vor zur bis mehr durch man sein wurde sei wenn ich wir ihr euch uns mir mich dir dich kann können muss müssen soll sollen will wollen darf dürfen mag mögen heute morgen gestern dann denn doch schon sehr viel viele wenig mal jetzt hier dort immer nie wieder alle alles etwas nichts keine kein was wer wo wann warum welche welcher welches dieser diese dieses jener seine ihre unser unsere ihrer seiner haus hause schule schüler lehrer aufgabe aufgaben stunde stunden woche wochen tag tage jahr jahre zeit mensch menschen leben arbeit text buch seite frage antwort beispiel wichtig gut schlecht neu alt gross klein lang kurz').split(' ')),
   en: new Set(('the of and to in a is that for it as was with be by on not he i this are or his from at which but have an had they you were their one all we can her has there been if more when will would who so no she about their them than then some into only other could time these two may first any my now such like our over man me even most made after also did many before must through back years where much your way well down should because each just those people how too little state good very make world still own see men work long get here between both life being under never day same another know while last might us great old year off come since against go came right used take three').split(' ')),
+  fr: new Set(('le la les un une des de du et est en que qui dans pour pas sur au avec ce il elle je tu nous vous ils elles ne se son sa ses mais ou où donc car comme plus par être avoir fait faire dit très bien tout tous aussi cette ces mon ma mes ton ta tes leur leurs notre votre nos vos si y a été était sont ont suis es sommes êtes ai as avons avez peu peut sans sous entre chez vers avant après depuis pendant toujours jamais rien déjà encore alors maison école élève professeur livre cahier chien chat homme femme enfant ami ville pays monde jour nuit temps année semaine mois heure eau pain lait grand petit nouveau bon beau vieux jeune français allemand anglais').split(' ')),
 }
 const COMMON_WORD_BONUS = 25
 
@@ -79,7 +99,7 @@ type Edit = { word: string; kind: EditKind }
  * doubled or swapped letters, a neighbouring key, a missing umlaut) and skips
  * the full-alphabet replacements and insertions.
  */
-export const editsAtDistanceOne = (word: string, alphabet: string, likelyOnly = false): Edit[] => {
+export const editsAtDistanceOne = (word: string, alphabet: string, likelyOnly = false, language?: TextLanguage): Edit[] => {
   const letters = [...word]
   const edits: Edit[] = []
   for (let index = 0; index < letters.length; index += 1) {
@@ -92,14 +112,16 @@ export const editsAtDistanceOne = (word: string, alphabet: string, likelyOnly = 
       edits.push({ word: before + letters[index + 1] + letters[index] + letters.slice(index + 2).join(''), kind: 'transpose' })
     }
     edits.push({ word: before + removed + removed + after, kind: 'double' })
-    const umlaut = UMLAUT_PAIRS[removed]
-    if (umlaut && alphabet.includes(umlaut)) edits.push({ word: before + umlaut + after, kind: 'umlaut' })
+    const variants = accentVariants(removed, language)
+    for (const variant of variants) {
+      if (alphabet.includes(variant)) edits.push({ word: before + variant + after, kind: 'umlaut' })
+    }
     for (const near of keyNeighbours.get(removed) ?? []) {
-      if (alphabet.includes(near) && UMLAUT_PAIRS[removed] !== near) edits.push({ word: before + near + after, kind: 'near' })
+      if (alphabet.includes(near) && !variants.includes(near)) edits.push({ word: before + near + after, kind: 'near' })
     }
     if (likelyOnly) continue
     for (const letter of alphabet) {
-      if (letter === removed || UMLAUT_PAIRS[removed] === letter || keyNeighbours.get(removed)?.has(letter)) continue
+      if (letter === removed || variants.includes(letter) || keyNeighbours.get(removed)?.has(letter)) continue
       edits.push({ word: before + letter + after, kind: 'replace' })
     }
   }
@@ -117,8 +139,10 @@ export const editsAtDistanceOne = (word: string, alphabet: string, likelyOnly = 
 
 const MAX_DISTANCE_TWO_PROBES = 60_000
 
-export const restoreWordCase = (typed: string, replacement: string, language: SpellingLanguage) => {
-  const locale = language === 'de' ? 'de-CH' : 'en-US'
+const localeOf = (language: TextLanguage) => (language === 'de' ? 'de-CH' : language === 'fr' ? 'fr-FR' : 'en-US')
+
+export const restoreWordCase = (typed: string, replacement: string, language: TextLanguage) => {
+  const locale = localeOf(language)
   const letters = [...typed].filter((character) => /\p{L}/u.test(character))
   if (letters.length > 1 && letters.every((character) => character === character.toLocaleUpperCase(locale) && character !== character.toLocaleLowerCase(locale))) {
     return replacement.toLocaleUpperCase(locale)
@@ -130,8 +154,8 @@ export const restoreWordCase = (typed: string, replacement: string, language: Sp
   return replacement
 }
 
-const normalizedForm = (word: string, language: SpellingLanguage) => {
-  const lower = word.normalize('NFC').toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US')
+const normalizedForm = (word: string, language: TextLanguage) => {
+  const lower = word.normalize('NFC').toLocaleLowerCase(localeOf(language))
   return language === 'de' ? lower.replaceAll('ß', 'ss') : lower
 }
 
@@ -142,12 +166,12 @@ const normalizedForm = (word: string, language: SpellingLanguage) => {
  */
 export const suggestCorrections = (
   typed: string,
-  languages: SpellingLanguage[],
+  languages: TextLanguage[],
   lexicon: SuggestionLexicon,
   { limit = 6, maxDistance = 2 }: { limit?: number; maxDistance?: 1 | 2 } = {},
 ): SpellingSuggestion[] => {
   const results = new Map<string, SpellingSuggestion>()
-  const consider = (candidate: string, language: SpellingLanguage, distance: 1 | 2, cost: number, typedLower: string) => {
+  const consider = (candidate: string, language: TextLanguage, distance: 1 | 2, cost: number, typedLower: string) => {
     if (!candidate || candidate === typedLower || !lexicon.hasWord(language, candidate)) return
     const firstLetterPenalty = candidate[0] === typedLower[0] ? 0 : 5
     const lengthPenalty = Math.abs(candidate.length - typedLower.length)
@@ -162,7 +186,7 @@ export const suggestCorrections = (
     const lower = normalizedForm(typed, language)
     if (!/^\p{L}+$/u.test(lower)) continue
     const alphabet = ALPHABETS[language]
-    const firstEdits = editsAtDistanceOne(lower, alphabet)
+    const firstEdits = editsAtDistanceOne(lower, alphabet, false, language)
     for (const edit of firstEdits) consider(edit.word, language, 1, EDIT_COST[edit.kind], lower)
     // "auchdas" → "auch das": a missing space between two known words.
     for (let split = 2; split <= lower.length - 2; split += 1) {
@@ -183,7 +207,7 @@ export const suggestCorrections = (
       // Likely slips first, so the probe cap trims the improbable pairs.
       const ordered = [...firstEdits].sort((left, right) => EDIT_COST[left.kind] - EDIT_COST[right.kind])
       outer: for (const first of ordered) {
-        for (const second of editsAtDistanceOne(first.word, alphabet, true)) {
+        for (const second of editsAtDistanceOne(first.word, alphabet, true, language)) {
           if (seen.has(second.word)) continue
           seen.add(second.word)
           probes += 1
@@ -200,7 +224,7 @@ export const suggestCorrections = (
 
 export type AutocorrectContext = {
   /** Language the surrounding line was recognised as; null when unknown. */
-  language: SpellingLanguage | null
+  language: TextLanguage | null
   /** The word opens a sentence (start of line or after . ! ? : ). */
   sentenceStart: boolean
   /** Known proper names never get "corrected" into a dictionary word. */
@@ -225,7 +249,7 @@ export const decideAutocorrect = (
   if (upper.length === 1 && !capitalised) return null
   if (context.isProperName(normalizedForm(typed, 'en'))) return null
   // A capitalised word inside an English sentence is most likely a name.
-  if (capitalised && context.language === 'en' && !context.sentenceStart) return null
+  if (capitalised && (context.language === 'en' || context.language === 'fr') && !context.sentenceStart) return null
   const nearest = suggestions.filter((suggestion) => suggestion.distance === 1 && !suggestion.word.includes(' '))
   if (!nearest.length) return null
   const [best, runnerUp] = nearest

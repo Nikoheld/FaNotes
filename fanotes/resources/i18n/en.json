@@ -5194,6 +5194,7 @@
   "Unterstreichen": "Underline",
   "Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch.": "Underlines typos in red locally and detects German or English automatically.",
   "Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt.": "Underlines typos locally in red and automatically recognizes German or English. Mathematics and code remain untouched.",
+  "Unterstreicht Tippfehler lokal rot und erkennt Deutsch, Englisch und Französisch automatisch, auch gemischt in einer Notiz. Mathematik und Code bleiben unberührt.": "Underlines typos locally in red and automatically recognizes German, English and French, even mixed within one note. Mathematics and code remain untouched.",
   "Unterstrich": "Underscore",
   "Unterstützt werden .one, .onetoc2, OneDrive-ZIP und .onepkg.": "Supported are .one, .onetoc2, OneDrive-ZIP and .onepkg.",
   "Update": "Update",
