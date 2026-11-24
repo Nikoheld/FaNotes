@@ -505,6 +505,23 @@ const ZOOM_COVER_FOLD_MS = 250
  * (layout px) against scrollTop (visual px) put the slice below the sheet at
  * 250% and the bottom of the page had no ink canvas at all.
  */
+/**
+ * Everything a section band shows, as one string: the bands are built again
+ * when it changes. Section edges are moved in place (page growth, rescale),
+ * so the array alone would not tell.
+ */
+const sectionBandsSignature = (sections: readonly InkSection<InkStroke>[]) => sections.map((section) => [
+  section.id,
+  section.parentId ?? '',
+  section.left,
+  section.width,
+  section.top.y,
+  section.bodyTop.y,
+  section.collapsed ? 1 : 0,
+  section.title,
+  section.hidden ? section.hidden.strokes.length + section.hidden.sections.reduce((sum, child) => sum + (child.hidden?.strokes.length ?? 0), 0) : -1,
+].join('\u0001')).join('\u0002')
+
 const measureInkWindow = (paper: HTMLElement, scroller: HTMLElement, rotation: number) => {
   const paperRect = paper.getBoundingClientRect()
   const scrollerRect = scroller.getBoundingClientRect()
@@ -5825,6 +5842,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     handle.addEventListener('pointercancel', onUp)
   }, [bumpRevision, pointFromEvent, setDirty, setSubsectionLeft, setSubsectionWidth])
 
+  /** The section bands are memoized (see sectionBands): they call these through the ref, never a stale copy. */
+  const sectionActionsNow = { toggleMergePick, toggleSection, beginSectionReorderDrag, moveSectionTo, removeSection, setSectionTitle, beginSubsectionWidthDrag, setSubsectionLeft, setSubsectionWidth, setDirty, bumpRevision }
+  const sectionActions = useRef(sectionActionsNow)
+  sectionActions.current = sectionActionsNow
+
   useEffect(() => {
     if (!sectionPlacing) return
     const surface = surfaceRef.current
@@ -9665,8 +9687,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         maxLength={SECTION_TITLE_MAX}
         autoComplete="off"
         spellCheck={false}
-        onChange={(event) => setSectionTitle(section.id, event.target.value)}
-        onBlur={(event) => setSectionTitle(section.id, event.target.value.trim())}
+        onChange={(event) => sectionActions.current.setSectionTitle(section.id, event.target.value)}
+        onBlur={(event) => sectionActions.current.setSectionTitle(section.id, event.target.value.trim())}
         onKeyDown={(event) => {
           event.stopPropagation()
           if (event.key === 'Enter' || event.key === 'Escape') {
@@ -9697,14 +9719,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         aria-label={isSub ? 'Breite des Unterabschnitts' : 'Breite des Abschnitts'}
         title="Breite ziehen · die Schrift bleibt, wo sie ist"
         tabIndex={0}
-        onPointerDown={(event) => beginSubsectionWidthDrag(section.id, event)}
+        onPointerDown={(event) => sectionActions.current.beginSubsectionWidthDrag(section.id, event)}
         onKeyDown={(event) => {
           if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
           event.preventDefault()
           event.stopPropagation()
-          if (setSubsectionLeft(section.id, bandLeft + (event.key === 'ArrowLeft' ? -0.02 : 0.02))) {
-            setDirty(true)
-            bumpRevision()
+          if (sectionActions.current.setSubsectionLeft(section.id, bandLeft + (event.key === 'ArrowLeft' ? -0.02 : 0.02))) {
+            sectionActions.current.setDirty(true)
+            sectionActions.current.bumpRevision()
           }
         }}
       />
@@ -9717,19 +9739,180 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         aria-label={isSub ? 'Breite des Unterabschnitts' : 'Breite des Abschnitts'}
         title="Breite ziehen · die Schrift bleibt, wo sie ist"
         tabIndex={0}
-        onPointerDown={(event) => beginSubsectionWidthDrag(section.id, event)}
+        onPointerDown={(event) => sectionActions.current.beginSubsectionWidthDrag(section.id, event)}
         onKeyDown={(event) => {
           if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
           event.preventDefault()
           event.stopPropagation()
-          if (setSubsectionWidth(section.id, bandRight + (event.key === 'ArrowLeft' ? -0.02 : 0.02))) {
-            setDirty(true)
-            bumpRevision()
+          if (sectionActions.current.setSubsectionWidth(section.id, bandRight + (event.key === 'ArrowLeft' ? -0.02 : 0.02))) {
+            sectionActions.current.setDirty(true)
+            sectionActions.current.bumpRevision()
           }
         }}
       />
     </>
   )
+
+  // The bands do not follow the zoom. A zoom's settle renders the board
+  // (toolbar, percentage), and re-rendering every header with its icons,
+  // input and handles made that render about ten times longer on a note with
+  // many sections. They are built again only when the sections or what they
+  // show change. Their handlers call the current callbacks through a ref.
+  const sectionBandsKey = sectionBandsSignature(sections)
+  const sectionBands = useMemo(() => (
+    (sections.length > 0 || sectionPlacing) && <div className="lw-ink-sections" aria-label="Abschnitte">
+      {sections.map((section) => {
+        const isSub = section.parentId !== null
+        const bandRight = clampSectionWidth(section.width)
+        const bandLeft = clampSectionLeft(section.left, bandRight)
+        const bodyEnd = section.collapsed ? section.bodyTop.y : (nextSectionTop(sections, section) ?? 1)
+        const hiddenCount = section.hidden
+          ? section.hidden.strokes.length + section.hidden.sections.reduce((sum, child) => sum + (child.hidden?.strokes.length ?? 0), 0)
+          : 0
+        const noun = isSub ? 'Unterabschnitt' : 'Abschnitt'
+        const canMove = sections.some((other) => other !== section && other.parentId === section.parentId)
+        const mergeIncluded = mergePicking && (section.id === mergeKeeperId || mergePickIds.includes(section.id) || Boolean(mergePlan?.removeIds.includes(section.id)))
+        return (
+          <Fragment key={section.id}>
+            <div
+              className={`lw-ink-section-header${isSub ? ' is-subsection' : ''}${section.collapsed ? ' is-collapsed' : ''}${mergePicking ? ' is-merge-armed' : ''}${mergeIncluded ? (section.id === mergeKeeperId ? ' is-merge-keeper' : ' is-merge-picked') : ''}`}
+              onClick={mergePicking ? (event) => {
+                const target = event.target
+                if (!(target instanceof Element) || target.closest('.lw-ink-section-control, .lw-ink-section-title')) return
+                sectionActions.current.toggleMergePick(section.id)
+              } : undefined}
+              style={{
+                top: `${section.top.y * 100}%`,
+                height: `${(section.bodyTop.y - section.top.y) * 100}%`,
+                left: `${bandLeft * 100}%`,
+                width: `${(bandRight - bandLeft) * 100}%`,
+                right: 'auto',
+              }}
+            >
+              <button
+                type="button"
+                className="lw-ink-section-control lw-ink-section-toggle"
+                aria-expanded={!section.collapsed}
+                aria-label={section.collapsed ? `${noun} ausklappen` : `${noun} einklappen`}
+                title={section.collapsed ? `${noun} ausklappen` : `${noun} einklappen`}
+                onClick={() => sectionActions.current.toggleSection(section.id)}
+              >
+                {section.collapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
+              </button>
+              {canMove && <button
+                type="button"
+                className="lw-ink-section-control lw-ink-section-move"
+                aria-label={isSub ? 'Unterabschnitt verschieben' : 'Abschnitt verschieben'}
+                title="Ziehen, um die Reihenfolge zu ändern"
+                onPointerDown={(event) => sectionActions.current.beginSectionReorderDrag(section.id, event)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  const layout = sectionMoveLayout(strokesRef.current, sectionsRef.current, section.id, sheetPx())
+                  if (!layout) return
+                  const toIndex = layout.fromIndex + (event.key === 'ArrowUp' ? -1 : 1)
+                  if (toIndex >= 0 && toIndex < layout.spans.length) sectionActions.current.moveSectionTo(section.id, toIndex)
+                }}
+              >
+                <GripVertical size={14} />
+              </button>}
+              {!(inline && !inputActive) && sectionTitleField(section, isSub)}
+              {section.collapsed && <span className="lw-ink-section-badge" title={`${hiddenCount} Striche`}>Eingeklappt</span>}
+              <button
+                type="button"
+                className="lw-ink-section-control lw-ink-section-remove"
+                aria-label={`${noun} auflösen`}
+                title={`${noun} auflösen · die Tinte bleibt auf der Seite`}
+                onClick={() => sectionActions.current.removeSection(section.id)}
+              >
+                <X size={13} />
+              </button>
+              {mergePicking && <button
+                type="button"
+                className="lw-ink-section-control lw-ink-section-pick"
+                aria-pressed={mergeIncluded}
+                aria-label="Abschnitt zum Zusammenführen auswählen"
+                title="Abschnitte antippen · der oberste bleibt und deckt die anderen ab"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  sectionActions.current.toggleMergePick(section.id)
+                }}
+              >
+                {mergeIncluded ? <Check size={13} /> : null}
+              </button>}
+              {!(inline && !inputActive) && sectionWidthHandles(section, isSub, bandLeft, bandRight)}
+            </div>
+            {!section.collapsed && bodyEnd > section.bodyTop.y && <div
+              className={`lw-ink-section-rail${isSub ? ' is-subsection' : ''}`}
+              style={{ top: `${section.bodyTop.y * 100}%`, height: `${(bodyEnd - section.bodyTop.y) * 100}%`, left: `calc(${bandLeft * 100}% + ${isSub ? 40 : 28}px)` }}
+            />}
+            {!section.collapsed && bodyEnd > section.bodyTop.y && bandLeft > 0 && <div
+              className="lw-ink-section-edge"
+              style={{
+                top: `${section.bodyTop.y * 100}%`,
+                height: `${(bodyEnd - section.bodyTop.y) * 100}%`,
+                left: `${bandLeft * 100}%`,
+              }}
+            />}
+            {!section.collapsed && bodyEnd > section.bodyTop.y && <div
+              className="lw-ink-section-edge"
+              style={{
+                top: `${section.bodyTop.y * 100}%`,
+                height: `${(bodyEnd - section.bodyTop.y) * 100}%`,
+                left: `${bandRight * 100}%`,
+              }}
+            />}
+          </Fragment>
+        )
+      })}
+      {sectionPlacing && <div ref={sectionGuideRef} className="lw-ink-section-guide" style={{ top: '-9999px', opacity: 0 }}><span>{sectionPlacing === 'subsection' ? 'Neuer Unterabschnitt' : 'Neuer Abschnitt'}</span></div>}
+      {sectionDropY !== null && <div className="lw-ink-section-guide is-drop" style={{ top: `${sectionDropY * 100}%`, opacity: 1 }}><span>Neue Position</span></div>}
+    </div>
+  // sectionBandsKey stands for `sections`, also when their edges were moved in place.
+  ), [sectionBandsKey, sectionPlacing, sectionDropY, mergePicking, mergePickIds, mergePlan, mergeKeeperId, inline, inputActive, titledSectionIds])
+  const sectionTitleBands = useMemo(() => (
+    inline && !inputActive && sectionTitleHost ? createPortal(
+      <div className="lw-ink-section-titles">
+        {sections.map((section) => {
+          const bandRight = clampSectionWidth(section.width)
+          const bandLeft = clampSectionLeft(section.left, bandRight)
+          const mergeIncluded = mergePicking && (section.id === mergeKeeperId || mergePickIds.includes(section.id) || Boolean(mergePlan?.removeIds.includes(section.id)))
+          const bandStyle = {
+            top: `${section.top.y * 100}%`,
+            height: `${Math.max(0, section.bodyTop.y - section.top.y) * 100}%`,
+            left: `${bandLeft * 100}%`,
+            width: `${(bandRight - bandLeft) * 100}%`,
+          }
+          return (
+            <Fragment key={section.id}>
+              <div
+                className={`lw-ink-section-title-slot${mergeIncluded ? (section.id === mergeKeeperId ? ' is-merge-keeper' : ' is-merge-picked') : ''}`}
+                style={bandStyle}
+              >
+                {sectionTitleField(section, section.parentId !== null)}
+                {mergePicking && <button
+                  type="button"
+                  className="lw-ink-section-merge-key"
+                  aria-pressed={mergeIncluded}
+                  aria-label="Abschnitt zum Zusammenführen auswählen"
+                  title="Abschnitte antippen · der oberste bleibt und deckt die anderen ab"
+                  onClick={() => sectionActions.current.toggleMergePick(section.id)}
+                >
+                  {mergeIncluded ? <Check size={14} /> : null}
+                </button>}
+              </div>
+              <div className="lw-ink-section-width-slot" style={bandStyle}>
+                {sectionWidthHandles(section, section.parentId !== null, bandLeft, bandRight)}
+              </div>
+            </Fragment>
+          )
+        })}
+      </div>,
+      sectionTitleHost,
+    ) : null
+  // sectionBandsKey stands for `sections`, also when their edges were moved in place.
+  ), [sectionBandsKey, sectionTitleHost, mergePicking, mergePickIds, mergePlan, mergeKeeperId, inline, inputActive, titledSectionIds])
 
   const paintToolClass = selectionMode
     ? 'tool-select'
@@ -10516,154 +10699,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 onActivate={activateDraftingTool}
               />
             )}
-            {(sections.length > 0 || sectionPlacing) && <div className="lw-ink-sections" aria-label="Abschnitte">
-              {sections.map((section) => {
-                const isSub = section.parentId !== null
-                const bandRight = clampSectionWidth(section.width)
-                const bandLeft = clampSectionLeft(section.left, bandRight)
-                const bodyEnd = section.collapsed ? section.bodyTop.y : (nextSectionTop(sections, section) ?? 1)
-                const hiddenCount = section.hidden
-                  ? section.hidden.strokes.length + section.hidden.sections.reduce((sum, child) => sum + (child.hidden?.strokes.length ?? 0), 0)
-                  : 0
-                const noun = isSub ? 'Unterabschnitt' : 'Abschnitt'
-                const canMove = sections.some((other) => other !== section && other.parentId === section.parentId)
-                const mergeIncluded = mergePicking && (section.id === mergeKeeperId || mergePickIds.includes(section.id) || Boolean(mergePlan?.removeIds.includes(section.id)))
-                return (
-                  <Fragment key={section.id}>
-                    <div
-                      className={`lw-ink-section-header${isSub ? ' is-subsection' : ''}${section.collapsed ? ' is-collapsed' : ''}${mergePicking ? ' is-merge-armed' : ''}${mergeIncluded ? (section.id === mergeKeeperId ? ' is-merge-keeper' : ' is-merge-picked') : ''}`}
-                      onClick={mergePicking ? (event) => {
-                        const target = event.target
-                        if (!(target instanceof Element) || target.closest('.lw-ink-section-control, .lw-ink-section-title')) return
-                        toggleMergePick(section.id)
-                      } : undefined}
-                      style={{
-                        top: `${section.top.y * 100}%`,
-                        height: `${(section.bodyTop.y - section.top.y) * 100}%`,
-                        left: `${bandLeft * 100}%`,
-                        width: `${(bandRight - bandLeft) * 100}%`,
-                        right: 'auto',
-                      }}
-                    >
-                      <button
-                        type="button"
-                        className="lw-ink-section-control lw-ink-section-toggle"
-                        aria-expanded={!section.collapsed}
-                        aria-label={section.collapsed ? `${noun} ausklappen` : `${noun} einklappen`}
-                        title={section.collapsed ? `${noun} ausklappen` : `${noun} einklappen`}
-                        onClick={() => toggleSection(section.id)}
-                      >
-                        {section.collapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
-                      </button>
-                      {canMove && <button
-                        type="button"
-                        className="lw-ink-section-control lw-ink-section-move"
-                        aria-label={isSub ? 'Unterabschnitt verschieben' : 'Abschnitt verschieben'}
-                        title="Ziehen, um die Reihenfolge zu ändern"
-                        onPointerDown={(event) => beginSectionReorderDrag(section.id, event)}
-                        onKeyDown={(event) => {
-                          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
-                          event.preventDefault()
-                          event.stopPropagation()
-                          const layout = sectionMoveLayout(strokesRef.current, sectionsRef.current, section.id, sheetPx())
-                          if (!layout) return
-                          const toIndex = layout.fromIndex + (event.key === 'ArrowUp' ? -1 : 1)
-                          if (toIndex >= 0 && toIndex < layout.spans.length) moveSectionTo(section.id, toIndex)
-                        }}
-                      >
-                        <GripVertical size={14} />
-                      </button>}
-                      {!(inline && !inputActive) && sectionTitleField(section, isSub)}
-                      {section.collapsed && <span className="lw-ink-section-badge" title={`${hiddenCount} Striche`}>Eingeklappt</span>}
-                      <button
-                        type="button"
-                        className="lw-ink-section-control lw-ink-section-remove"
-                        aria-label={`${noun} auflösen`}
-                        title={`${noun} auflösen · die Tinte bleibt auf der Seite`}
-                        onClick={() => removeSection(section.id)}
-                      >
-                        <X size={13} />
-                      </button>
-                      {mergePicking && <button
-                        type="button"
-                        className="lw-ink-section-control lw-ink-section-pick"
-                        aria-pressed={mergeIncluded}
-                        aria-label="Abschnitt zum Zusammenführen auswählen"
-                        title="Abschnitte antippen · der oberste bleibt und deckt die anderen ab"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          toggleMergePick(section.id)
-                        }}
-                      >
-                        {mergeIncluded ? <Check size={13} /> : null}
-                      </button>}
-                      {!(inline && !inputActive) && sectionWidthHandles(section, isSub, bandLeft, bandRight)}
-                    </div>
-                    {!section.collapsed && bodyEnd > section.bodyTop.y && <div
-                      className={`lw-ink-section-rail${isSub ? ' is-subsection' : ''}`}
-                      style={{ top: `${section.bodyTop.y * 100}%`, height: `${(bodyEnd - section.bodyTop.y) * 100}%`, left: `calc(${bandLeft * 100}% + ${isSub ? 40 : 28}px)` }}
-                    />}
-                    {!section.collapsed && bodyEnd > section.bodyTop.y && bandLeft > 0 && <div
-                      className="lw-ink-section-edge"
-                      style={{
-                        top: `${section.bodyTop.y * 100}%`,
-                        height: `${(bodyEnd - section.bodyTop.y) * 100}%`,
-                        left: `${bandLeft * 100}%`,
-                      }}
-                    />}
-                    {!section.collapsed && bodyEnd > section.bodyTop.y && <div
-                      className="lw-ink-section-edge"
-                      style={{
-                        top: `${section.bodyTop.y * 100}%`,
-                        height: `${(bodyEnd - section.bodyTop.y) * 100}%`,
-                        left: `${bandRight * 100}%`,
-                      }}
-                    />}
-                  </Fragment>
-                )
-              })}
-              {sectionPlacing && <div ref={sectionGuideRef} className="lw-ink-section-guide" style={{ top: '-9999px', opacity: 0 }}><span>{sectionPlacing === 'subsection' ? 'Neuer Unterabschnitt' : 'Neuer Abschnitt'}</span></div>}
-              {sectionDropY !== null && <div className="lw-ink-section-guide is-drop" style={{ top: `${sectionDropY * 100}%`, opacity: 1 }}><span>Neue Position</span></div>}
-            </div>}
-            {inline && !inputActive && sectionTitleHost ? createPortal(
-              <div className="lw-ink-section-titles">
-                {sections.map((section) => {
-                  const bandRight = clampSectionWidth(section.width)
-                  const bandLeft = clampSectionLeft(section.left, bandRight)
-                  const mergeIncluded = mergePicking && (section.id === mergeKeeperId || mergePickIds.includes(section.id) || Boolean(mergePlan?.removeIds.includes(section.id)))
-                  const bandStyle = {
-                    top: `${section.top.y * 100}%`,
-                    height: `${Math.max(0, section.bodyTop.y - section.top.y) * 100}%`,
-                    left: `${bandLeft * 100}%`,
-                    width: `${(bandRight - bandLeft) * 100}%`,
-                  }
-                  return (
-                    <Fragment key={section.id}>
-                      <div
-                        className={`lw-ink-section-title-slot${mergeIncluded ? (section.id === mergeKeeperId ? ' is-merge-keeper' : ' is-merge-picked') : ''}`}
-                        style={bandStyle}
-                      >
-                        {sectionTitleField(section, section.parentId !== null)}
-                        {mergePicking && <button
-                          type="button"
-                          className="lw-ink-section-merge-key"
-                          aria-pressed={mergeIncluded}
-                          aria-label="Abschnitt zum Zusammenführen auswählen"
-                          title="Abschnitte antippen · der oberste bleibt und deckt die anderen ab"
-                          onClick={() => toggleMergePick(section.id)}
-                        >
-                          {mergeIncluded ? <Check size={14} /> : null}
-                        </button>}
-                      </div>
-                      <div className="lw-ink-section-width-slot" style={bandStyle}>
-                        {sectionWidthHandles(section, section.parentId !== null, bandLeft, bandRight)}
-                      </div>
-                    </Fragment>
-                  )
-                })}
-              </div>,
-              sectionTitleHost,
-            ) : null}
+            {sectionBands}
+            {sectionTitleBands}
             <div className="lw-page-overlay">
             {selectionLoop.length > 1 && selectionPurpose === 'edit' && <svg className="lw-selection-loop" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
               <polygon points={selectionLoop.map((point) => `${point.x},${point.y}`).join(' ')} />
@@ -11248,6 +11285,8 @@ const drawingBoardStyles = `
 .lw-ink-sections{position:absolute;inset:0;z-index:3;pointer-events:none}
 .lw-drawing-board.is-inline .lw-ink-sections{inset:var(--paper-scroll-room,0px);width:calc(100% - 2 * var(--paper-scroll-room,0px));height:calc(100% - 2 * var(--paper-scroll-room,0px))}
 .lw-ink-section-header{position:absolute;left:0;right:0;box-sizing:border-box;border-top:1px solid rgba(var(--accent-rgb),.3);border-bottom:1px solid rgba(var(--accent-rgb),.3);background:linear-gradient(90deg,rgba(var(--accent-rgb),.11),rgba(var(--accent-rgb),.045) 55%,rgba(var(--accent-rgb),.02));pointer-events:none}
+/* A zoom restyles everything on the sheet. Bands far from the view skip their buttons, icons and titles until they come near (the boxes have fixed sizes). Not the pen-mode header: its edge grips stick out past it. */
+.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-header,.lw-ink-section-title-slot,.lw-ink-section-control{content-visibility:auto}
 .lw-ink-section-header.is-subsection{right:auto;border-left:3px solid rgba(var(--accent-rgb),.55);background:linear-gradient(90deg,rgba(var(--accent-rgb),.18),rgba(var(--accent-rgb),.07) 72%,rgba(var(--accent-rgb),.03))}
 .lw-ink-section-header.is-collapsed{border-bottom:2px dashed rgba(var(--accent-rgb),.45);background:linear-gradient(90deg,rgba(var(--accent-rgb),.16),rgba(var(--accent-rgb),.06) 55%,rgba(var(--accent-rgb),.03))}
 .lw-ink-section-width{position:absolute;top:0;right:-6px;width:14px;height:100%;padding:0;border:0;background:transparent;cursor:ew-resize;pointer-events:auto;touch-action:none}
