@@ -121,6 +121,7 @@ fun GradesScreen(model: CompanionModel) {
         sortCourses(official, model.desk.gradeSort).sortedBy { if (it.marks.any { mark -> mark.targetId in model.highlightIds }) 0 else 1 }.filter { courseAlias(it.label, model.desk.courseAliases).contains(query, true) }
     }
     val totals = remember(official) { promotionTotals(official) }
+    val highlights = remember(official) { gradeHighlights(official) }
     val hiddenCount = remember(model.snapshot.grades, model.unrevealedIds, model.settings.guessGrades) { model.snapshot.grades.count { model.isUnrevealed(gradeTargetId(it)) } }
     RefreshableScreenList(model.syncing, { model.pullRefresh() }) {
         item(key = "summary") {
@@ -131,6 +132,19 @@ fun GradesScreen(model: CompanionModel) {
                             MetricBlock(t(R.string.overall_average), uiMark(overallAverage(official), model.desk.gradeDecimals), large = true)
                             if (model.desk.showPluspunkte) MetricBlock(t(R.string.promotion_points_2), uiPlus(totals.total), large = true,
                                 valueColor = if (totals.total >= 0) LocalCompanionSemantics.current.success else MaterialTheme.colorScheme.error)
+                        }
+                        if (highlights.averaged > 0) FlowRow(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column {
+                                MetricBlock(t(R.string.below_four), "${highlights.belowFour}",
+                                    valueColor = if (highlights.belowFour > 0) MaterialTheme.colorScheme.error else LocalCompanionSemantics.current.success)
+                                Text(tp(R.plurals.below_four_of, highlights.averaged, highlights.averaged), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            highlights.best?.let { best ->
+                                Column(Modifier.widthIn(max = 220.dp)) {
+                                    MetricBlock(t(R.string.best_subject), uiMark(best.average, model.desk.gradeDecimals))
+                                    Text(courseAlias(best.label, model.desk.courseAliases), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
                         }
                         Text(t(R.string.school_marks_plus_your_own_grades_what_if_scenar), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
                         if (hiddenCount > 0) StatusLine(tp(R.plurals.hidden_marks_waiting, hiddenCount, hiddenCount), StateTone.Neutral, Modifier.padding(top = 10.dp))
@@ -222,6 +236,11 @@ fun CourseScreen(model: CompanionModel) {
                     if (model.desk.showPluspunkte) MetricBlock(t(R.string.points), if (course.promotion) uiPlus(course.pluspunkte) else "–", Modifier.weight(1f))
                 }
             }
+        }
+        item(key = "trend") {
+            val points = remember(course.marks) { trendPoints(course.marks) }
+            SectionLabel(t(R.string.grade_trend))
+            GradeTrendChart(points, courseAlias(course.label, model.desk.courseAliases), decimals)
         }
         item(key = "school-head") { SectionLabel(t(R.string.school_marks), count = schoolMarks.size.takeIf { it > 0 }) }
         if (schoolMarks.isEmpty()) item(key = "school-empty") { Text(t(R.string.no_school_marks_yet), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -323,6 +342,8 @@ fun CourseScreen(model: CompanionModel) {
     }
 }
 
+private const val CHANGES_PAGE = 20
+
 @Composable
 fun SchoolRecordScreen(model: CompanionModel, page: Page) {
     val tally = remember(model.snapshot) { model.absencePoints() }
@@ -331,9 +352,16 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
     // Back clears an active search before it leaves the screen.
     BackHandler(enabled = query.isNotEmpty()) { query = "" }
     var filter by rememberSaveable(page) { mutableStateOf("all") }
+    var kind by rememberSaveable(page) { mutableStateOf("exam") }
+    var tab by rememberSaveable(page) { mutableStateOf("news") }
+    var visibleChanges by rememberSaveable(page) { mutableStateOf(CHANGES_PAGE) }
     var selected by remember { mutableStateOf<AgendaEntry?>(null) }
     val today = LocalDate.now()
     val online = LocalOnline.current
+    val stored = remember(model.snapshot, model.changeTick, model.unrevealedIds, model.settings.guessGrades, page) {
+        if (page == Page.Updates) historyForDisplay(model.graph.changeHistory(), model.settings.guessGrades, model.hiddenGradeIds(), model.snapshot) else emptyList()
+    }
+    val history = stored.filter { "${it.title} ${it.body}".contains(query, true) }
     RefreshableScreenList(model.syncing, { model.pullRefresh() }) {
         item(key = "head") {
             val stamp = updatedLabel(model.snapshot.fetchedAt)
@@ -342,12 +370,16 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
         }
         when (page) {
             Page.Exams -> {
+                item(key = "kind") { ChoiceRow(listOf("all" to t(R.string.all), "exam" to t(R.string.exams), "event" to t(R.string.appointments)), kind, { kind = it }, Modifier.padding(top = 6.dp)) }
                 item(key = "filter") { ChoiceRow(listOf("all" to t(R.string.all), "upcoming" to t(R.string.upcoming)), filter, { filter = it }, Modifier.padding(vertical = 6.dp)) }
-                val events = (model.snapshot.exams + model.snapshot.events.filter { it.isExamLike() }).distinctBy(::lessonTargetId).filter { "${it.label} ${preferredEventTitle(it)} ${it.comment}".contains(query, true) && (filter == "all" || examHasDate(it.start).not() || (parseDisplayDate(it.start) ?: today) >= today) }.sortedWith(compareBy<AgendaEvent> { if (lessonTargetId(it) in model.highlightIds) 0 else 1 }.thenBy { examAlleKey(it.start) })
+                val examPool = if (kind == "event") emptyList() else model.snapshot.exams + model.snapshot.events.filter { it.isExamLike() }
+                // Appointments are the school's non-exam, non-lesson events (what Updates lists as school events).
+                val eventPool = if (kind == "exam") emptyList() else model.snapshot.events.filter { !it.isLesson() && !it.isExamLike() }
+                val events = (examPool + eventPool).distinctBy(::lessonTargetId).filter { "${it.label} ${preferredEventTitle(it)} ${it.comment}".contains(query, true) && (filter == "all" || examHasDate(it.start).not() || (parseDisplayDate(it.start) ?: today) >= today) }.sortedWith(compareBy<AgendaEvent> { if (lessonTargetId(it) in model.highlightIds) 0 else 1 }.thenBy { examAlleKey(it.start) })
                 if (events.isEmpty() && query.isBlank() && model.busy && model.snapshot.fetchedAt.isBlank()) item(key = "loading") { SkeletonRows(3, t(R.string.loading_exams)) }
                 else if (events.isEmpty()) item(key = "empty") { EmptyState(Icons.AutoMirrored.Outlined.Assignment, t(R.string.no_exams_to_show), t(R.string.available_exam_dates_appear_after_your_school_is)) }
                 itemsIndexed(events, key = { _, it -> lessonTargetId(it) }) { index, event ->
-                    val entry = AgendaEntry("exam:${lessonTargetId(event)}", preferredEventTitle(event), AgendaKind.Exam, parseDisplayDate(event.start) ?: today, eventClock(event), detail = cleanSchulnetzText(event.room), school = event)
+                    val entry = AgendaEntry("exam:${lessonTargetId(event)}", preferredEventTitle(event), if (event in eventPool && event !in examPool) AgendaKind.Event else AgendaKind.Exam, parseDisplayDate(event.start) ?: today, eventClock(event), detail = cleanSchulnetzText(event.room), school = event)
                     AgendaRow(model, entry, railPosition(index, events.size), showDay = true) { selected = entry }
                 }
                 schoolError(model, "Prüfungen:")
@@ -422,6 +454,15 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
                 schoolError(model, "Absenzen:")
             }
             Page.Updates -> {
+                item(key = "tabs") { ChoiceRow(listOf("news" to t(R.string.messages), "changes" to t(R.string.changes)), tab, { tab = it }, Modifier.padding(vertical = 6.dp)) }
+                if (tab == "changes") {
+                    val shown = history.take(visibleChanges)
+                    if (history.isEmpty()) item(key = "changes-empty") { EmptyState(Icons.Outlined.Forum, t(R.string.no_changes_yet), t(R.string.school_announcements_messages_and_dates_will_app)) }
+                    itemsIndexed(shown, key = { index, it -> "change:$index:${it.id}" }) { index, change -> GroupItem(index, shown.size) { ChangeRow(change) } }
+                    if (history.size > shown.size) item(key = "changes-more") {
+                        TextButton(onClick = { visibleChanges += CHANGES_PAGE }, modifier = Modifier.padding(top = 8.dp)) { Text(t(R.string.show_more)) }
+                    }
+                } else {
                 val messages = model.snapshot.messages.filter { "${it.title} ${it.body}".contains(query, true) }.sortedBy { if (messageTargetId(it) in model.highlightIds) 0 else 1 }
                 if (messages.isNotEmpty()) item(key = "messages-head") { SectionLabel(t(R.string.messages), count = messages.size) }
                 itemsIndexed(messages, key = { _, it -> messageTargetId(it) }) { index, message ->
@@ -444,6 +485,7 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
                 if (messages.isEmpty() && announcements.isEmpty() && events.isEmpty() && vacations.isEmpty()) item(key = "empty") {
                     if (query.isBlank() && model.busy && model.snapshot.fetchedAt.isBlank()) SkeletonRows(3, t(R.string.loading_updates))
                     else EmptyState(Icons.Outlined.Forum, t(R.string.all_quiet_here), t(R.string.school_announcements_messages_and_dates_will_app))
+                }
                 }
             }
             Page.Statement -> {

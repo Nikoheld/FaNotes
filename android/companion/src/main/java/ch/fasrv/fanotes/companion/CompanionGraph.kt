@@ -1,6 +1,10 @@
 package ch.fasrv.fanotes.companion
 
 import ch.fasrv.fanotes.schulnetz.PlannedAbsence
+import ch.fasrv.fanotes.schulnetz.serializeChangeHistory
+import ch.fasrv.fanotes.schulnetz.recordChanges
+import ch.fasrv.fanotes.schulnetz.parseChangeHistory
+import ch.fasrv.fanotes.schulnetz.SchulnetzChange
 import ch.fasrv.fanotes.schulnetz.parsePlannedAbsences
 import ch.fasrv.fanotes.schulnetz.serializePlannedAbsences
 import ch.fasrv.fanotes.schulnetz.withOwnExams
@@ -321,6 +325,9 @@ class CompanionGraph(private val context: Context, val client: SchulnetzClient =
 
     /** Bumped when settings or hidden grades of a connection changed from the browser side. */
     val sharedChanges = MutableStateFlow(0)
+
+    /** Bumped when the stored change history ("Änderungen") of a connection grew. */
+    val historyTick = MutableStateFlow(0)
     private fun sharedChanged() { sharedChanges.value = sharedChanges.value + 1 }
 
     /*
@@ -440,6 +447,7 @@ class CompanionGraph(private val context: Context, val client: SchulnetzClient =
     fun notifySettings(): NotifySettings = current().notifySettings()
     fun setNotifySettings(settings: NotifySettings) = current().setNotifySettings(settings)
     fun unrevealedGradeIds(): Set<String> = current().unrevealedGradeIds()
+    fun changeHistory(): List<SchulnetzChange> = current().changeHistory()
     fun addUnrevealedGrades(ids: Collection<String>) = current().addUnrevealedGrades(ids)
     fun revealGrade(id: String) = current().revealGrade(id)
     fun hypothetical(): List<HypotheticalGrade> = current().hypothetical()
@@ -956,6 +964,7 @@ class CompanionGraph(private val context: Context, val client: SchulnetzClient =
         const val GUESS_GRADES_PREF = NotifyPrefs.GUESS
         const val COMMUTE_ACCOUNT_PREF = "commute-account"
         const val UNREVEALED_PREF = "unrevealed-grades"
+        const val CHANGE_HISTORY_PREF = "change-history"
         const val PLANNER_HOLD_PREF = "hold-planner-upload"
         const val DIAGNOSTIC_MODE_PREF = "diagnostic-mode"
         const val DEMO_PREF = "demo-mode"
@@ -1005,7 +1014,7 @@ class CompanionGraph(private val context: Context, val client: SchulnetzClient =
         /** Keys of one connection (namespaced in further slots), removed when its storage is wiped. */
         val SLOT_KEYS = listOf(
             "web-session", "schulnetz-base", "school-linked", "school-disconnected", "push-topic", "push-server",
-            "change-cursor", "last-check", "last-check-error", SILENT_AT, SEEN_CHANGES_PREF, UNREVEALED_PREF,
+            "change-cursor", "last-check", "last-check-error", SILENT_AT, SEEN_CHANGES_PREF, UNREVEALED_PREF, CHANGE_HISTORY_PREF,
             "fcm-sent-token", "fcm-sent-account", "fcm-sent-at", "tam-signed-in-at", TAM_ICS_PREF, TAM_PERSON_PREF,
             SETTINGS_DIRTY_PREF, SETTINGS_AT_PREF, REVEALED_PENDING_PREF, REVEALS_SYNCED_PREF, TAM_DEVICE_LINK_PREF, TAM_DEVICE_LINK_AT_PREF,
         )
@@ -1301,6 +1310,17 @@ class CompanionGraph(private val context: Context, val client: SchulnetzClient =
         }
 
         fun unrevealedGradeIds(): Set<String> = prefs.getStringSet(UNREVEALED_PREF, emptySet()).orEmpty().toSet()
+
+        /** The last notices the change feed delivered here (newest first), as stored. Redaction happens when shown. */
+        fun changeHistory(): List<SchulnetzChange> = parseChangeHistory(prefs.getString(CHANGE_HISTORY_PREF, null))
+
+        private fun recordHistory(items: List<SchulnetzChange>, guessGrades: Boolean) {
+            if (demoActive() || items.isEmpty()) return
+            val now = java.time.Instant.now().toString()
+            val next = recordChanges(changeHistory(), items, now, guessGrades, snapshot.value)
+            prefs.edit().putString(CHANGE_HISTORY_PREF, serializeChangeHistory(next)).apply()
+            historyTick.value = historyTick.value + 1
+        }
 
         fun addUnrevealedGrades(ids: Collection<String>) {
             val next = ids.filter { it.isNotBlank() }
@@ -2057,6 +2077,8 @@ class CompanionGraph(private val context: Context, val client: SchulnetzClient =
                 }
                 changeFromObj(change)
             }
+            // The history keeps every delivered notice, whether or not an alert is shown for it.
+            recordHistory(items, notifySettings().guessGrades)
             if (!CompanionAlerts.notificationsAllowed(context)) {
                 if (readGradeLedger(context, slot) == null) CompanionAlerts.settledChanges(alerts, context, items, snapshot.value.grades)
                 return

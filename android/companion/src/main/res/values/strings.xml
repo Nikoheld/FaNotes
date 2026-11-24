@@ -1525,4 +1525,22 @@
     <string name="note_ink_too_large_body">This note\'s handwriting is too large to show on this phone. It stays unchanged. Open it in FaNotes on a computer.</string>
     <string name="too_large_for_memory">This note is too large for this phone\'s memory. It was left unchanged.</string>
     <string name="too_large_for_memory_body">This file is too large for this phone\'s memory, so it cannot be shown here. The original file is unchanged.</string>
+    <string name="grade_trend">Progress</string>
+    <string name="running_average">Running average</string>
+    <string name="pass_mark_4">Pass mark 4</string>
+    <plurals name="trend_description">
+        <item quantity="one">Marks over time in %1$s: %2$d mark, current average %3$s</item>
+        <item quantity="other">Marks over time in %1$s: %2$d marks, current average %3$s</item>
+    </plurals>
+    <string name="below_four">Below 4</string>
+    <plurals name="below_four_of">
+        <item quantity="one">of %d subject</item>
+        <item quantity="other">of %d subjects</item>
+    </plurals>
+    <string name="best_subject">Best subject</string>
+    <string name="changes">Changes</string>
+    <string name="no_changes_yet">No changes in this app yet.</string>
+    <string name="show_more">Show more</string>
+    <string name="appointments">Events</string>
+    <string name="trend_needs_marks">The chart appears once there are marks.</string>
 </resources>
