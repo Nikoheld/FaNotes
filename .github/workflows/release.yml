@@ -447,6 +447,10 @@ jobs:
           cp "$apk" "Kanti-Plus-${version}-android.apk"
           cp "$aab" "Kanti-Plus-${version}-android.aab"
           cp "$symbols" "Kanti-Plus-${version}-native-debug-symbols.zip"
+          # The R8 mapping de-obfuscates crash stack traces. It only names classes of this public repository.
+          mapping="companion/build/outputs/mapping/release/mapping.txt"
+          test -s "$mapping"
+          cp "$mapping" "Kanti-Plus-${version}-mapping.txt"
       - uses: actions/upload-artifact@v6
         with:
           name: android-companion
@@ -455,6 +459,7 @@ jobs:
             android/Kanti-Plus-*-android.apk
             android/Kanti-Plus-*-android.aab
             android/Kanti-Plus-*-native-debug-symbols.zip
+            android/Kanti-Plus-*-mapping.txt
 
   publish:
     name: Publish GitHub release

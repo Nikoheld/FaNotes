@@ -212,15 +212,22 @@ const val INK_TOO_LARGE_MESSAGE = "This note's handwriting is too large to open 
 /** Most text a note body may have before only its start is shown (the same cap as a sync document). */
 private const val NOTE_TEXT_HEAD_BYTES = 1024 * 1024
 
+/** Peak heap a handwriting decode needs per file byte (measured, see NoteReadMemoryTest), rounded up. */
+const val NOTE_DECODE_EXPANSION = 40
+
+/** Smallest read limit: a phone with almost no free heap still opens ordinary notes and refuses only big ones. */
+private const val MIN_NOTE_READ_BYTES = 1024L * 1024
+
 /**
- * Largest handwriting file [NoteStore.readNote] decodes: the sync document cap, or more when the heap has room.
- * Decoding costs about twelve times the file (UTF-16 text plus the parsed tree), so a big phone opens a 30 MB note
- * that a small one shows as too large.
+ * Largest handwriting file that may be decoded when [availableHeap] bytes are free: a decode peaks at
+ * [NOTE_DECODE_EXPANSION] times the file, and it may use at most half of the free heap so the UI keeps its room (the measured peak is 17–31x, so 40x already has margin).
  */
+fun noteReadLimitFor(availableHeap: Long): Long = maxOf(MIN_NOTE_READ_BYTES, availableHeap.coerceAtLeast(0) / (NOTE_DECODE_EXPANSION * 2))
+
+/** [noteReadLimitFor] for the heap that is free right now. A note above it is shown as too large, never decoded. */
 fun defaultNoteReadLimit(): Long {
     val runtime = Runtime.getRuntime()
-    val available = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
-    return maxOf(MAX_SYNC_DOCUMENT_BYTES.toLong(), available / 12)
+    return noteReadLimitFor(runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory()))
 }
 
 class NoteStore(
@@ -231,7 +238,20 @@ class NoteStore(
     /** [includeFiles] also lists images, audio and video as [NoteKind.IMAGE], [NoteKind.AUDIO] and [NoteKind.VIDEO]. */
     fun tree(includeFiles: Boolean = false): List<VaultNode> = buildTree("", includeFiles)
 
-    fun readNote(path: String): OpenNote {
+    /** The read limit in force right now, in bytes (see [noteReadLimitFor]). */
+    fun readLimit(): Long = noteReadLimit()
+
+    /** Size of the handwriting file a note decodes (its `.famd` sidecar, or the file itself for a plain note), or -1 when there is none. */
+    fun inkFileBytes(path: String): Long {
+        val normalized = normalize(path)
+        return io.size(if (extensionOf(normalized) == FAMD_EXTENSION) normalized else companionPath(normalized, FAMD_EXTENSION))
+    }
+
+    /**
+     * [limit] is the largest handwriting file this call decodes. A list preview passes a small one, so a big note
+     * comes back with [OpenNote.inkTooLarge] (and only the head of its text) instead of being parsed.
+     */
+    fun readNote(path: String, limit: Long = noteReadLimit()): OpenNote {
         val normalized = normalize(path)
         val extension = extensionOf(normalized)
         // Media and story folders are no notes: never decode them as text.
@@ -244,7 +264,6 @@ class NoteStore(
             FAMD_EXTENSION -> companionPath(normalized, ".md").takeIf { io.exists(it) }
             else -> normalized
         }
-        val limit = noteReadLimit()
         var tooLarge = false
         // A sidecar over the sync cap is never decoded: the phone could not hold the text and the parsed document.
         val famdBytes = if (io.size(famdPath) > limit) {
