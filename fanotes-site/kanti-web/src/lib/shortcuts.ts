@@ -1,8 +1,8 @@
 // Keyboard shortcuts. The mapping is pure (key event in, action out) so it is tested without a page.
 
-export type View = 'today' | 'timetable' | 'grades' | 'agenda' | 'absences' | 'updates' | 'mensa' | 'notes' | 'commute' | 'settings'
+export type View = 'today' | 'timetable' | 'grades' | 'agenda' | 'absences' | 'updates' | 'mensa' | 'commute' | 'notes' | 'settings'
 /** Every view in menu order, the optional Mensa included. */
-export const ALL_VIEWS: View[] = ['today', 'timetable', 'grades', 'agenda', 'absences', 'updates', 'mensa', 'notes', 'commute', 'settings']
+export const ALL_VIEWS: View[] = ['today', 'timetable', 'grades', 'agenda', 'absences', 'updates', 'mensa', 'commute', 'notes', 'settings']
 /** The views in the menu while the Mensa is off (the default); the number keys count along this list. */
 export const VIEWS: View[] = ALL_VIEWS.filter((view) => view !== 'mensa')
 /** The views the menu, the number keys and the search offer: Mensa only when the person switched it on. */

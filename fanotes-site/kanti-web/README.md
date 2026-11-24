@@ -118,4 +118,10 @@ cd fanotes-site/kanti-web && npm ci && npm test && npm run build   # -> dist/
 ```
 
 The `dist/` folder is deployed to `/opt/fanotes-site/kanti-web/`. nginx serves it for
-`schulnetz.fasrv.ch` (see `deploy/nginx/schulnetz-fasrv.conf`).
+`schulnetz.fasrv.ch` (see `fanotes-site/deploy/schulnetz-fasrv.conf`, which also proxies the sync routes the
+vault needs and sends the CSP with `media-src 'self' blob:`).
+
+**Staging for a build outside the repository** (for example `git archive HEAD fanotes-site ... | tar -x -C <dir>`):
+the build also reads `android/companion/docs/brand`, `android/companion/src/main/res/font` and, for the vault,
+`fanotes/src/lib/sync` (`crypto.ts` and `api.ts`, imported through the `@sync` alias). Include all of them next
+to `fanotes-site`, otherwise `npm run build` cannot resolve its imports.
