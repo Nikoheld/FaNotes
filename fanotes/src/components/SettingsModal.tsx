@@ -1451,6 +1451,16 @@ export function SettingsModal({
                   </div>
                 )}
 
+                {updateState.installNotCompleted && !updateState.rolledBack && (
+                  <div className="update-rollback-note" role="alert">
+                    <div className="setting-import-status is-error">
+                      <X size={15} />
+                      <span><strong>FaNotes {updateState.installNotCompleted.version} wurde nicht installiert.</strong> {updateState.installNotCompleted.message} Die bisherige Version {updateState.currentVersion} läuft weiter und das Update wird nicht erneut automatisch versucht.</span>
+                    </div>
+                    <small>Details stehen im Update-Protokoll unter updates/install.log.</small>
+                  </div>
+                )}
+
                 {updateState.rolledBack && (
                   <div className="update-rollback-note" role="alert">
                     <div className="setting-import-status is-error">

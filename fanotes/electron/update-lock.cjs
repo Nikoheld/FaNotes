@@ -152,6 +152,12 @@ function createUpdateLocks(updaterRoot, options = {}) {
     releaseInstall() {
       releaseIfOwned(installPath, pid)
     },
+    /** A helper that never came up: drop the lock whether it still names this process or the dead helper. */
+    abandonInstall(helperPid) {
+      const read = readLockFile(installPath)
+      const holder = read.value?.pid
+      if (holder === pid || (Number.isSafeInteger(helperPid) && holder === helperPid && !alive(helperPid))) fs.rmSync(installPath, { force: true })
+    },
     installHolder() {
       return liveHolder(installPath, INSTALL_LOCK_MAX_AGE_MS, { alive, now })
     },

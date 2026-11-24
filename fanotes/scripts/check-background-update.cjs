@@ -24,7 +24,7 @@ const path = require('node:path')
 const { EventEmitter } = require('node:events')
 const { spawn, spawnSync } = require('node:child_process')
 const { createDeltaPatch } = require('./create-delta.cjs')
-const { createUpdateManager, githubReleaseAssetUrl, stableStringify, WINDOWS_INSTALLER_HELPER, WINDOWS_SWAP_HELPER } = require('../electron/updater.cjs')
+const { createUpdateManager, githubReleaseAssetUrl, stableStringify, WINDOWS_INSTALLER_HELPER, WINDOWS_LAUNCHER, WINDOWS_SWAP_HELPER } = require('../electron/updater.cjs')
 const { createUpdateLocks, waitForInstallToFinish } = require('../electron/update-lock.cjs')
 const { BACKOFF_BASE_MS, LOG_FILE, MAX_LOG_BYTES, appendLog, backoffDelay, detectMeteredConnection, loopbackFetch, readStatus, readUpdateSettings, runBackgroundUpdate } = require('../electron/background-update.cjs')
 
@@ -658,12 +658,49 @@ function forgetRememberedVersions(profile) {
   return profile
 }
 
-function fakeChild(pid = 4242) {
+function fakeChild(pid = 4242, onSpawn = () => undefined) {
   const child = new EventEmitter()
   child.pid = pid
   child.unref = () => undefined
-  setImmediate(() => child.emit('spawn'))
+  setImmediate(() => { child.emit('spawn'); onSpawn() })
   return child
+}
+
+/** A short-lived child with output (the Windows launcher). */
+function fakeProcess({ stdout = '', code = 0, pid = 777 } = {}) {
+  const child = new EventEmitter()
+  child.pid = pid
+  child.kill = () => undefined
+  child.stdout = new EventEmitter()
+  child.stderr = new EventEmitter()
+  setImmediate(() => {
+    child.emit('spawn')
+    if (stdout) child.stdout.emit('data', stdout)
+    child.emit('close', code)
+  })
+  return child
+}
+
+const optionValue = (args, name) => args[args.indexOf(`-${name}`) + 1]
+/** The helper's own arguments, which the launcher receives as base64 JSON. */
+const launchedHelperArgs = (args) => JSON.parse(Buffer.from(optionValue(args, 'Arguments'), 'base64').toString('utf8'))
+const writeStartedMarker = (updaterRoot, helperArgs, pid = 4242) => {
+  fs.writeFileSync(path.join(updaterRoot, 'helper-started.json'), JSON.stringify({ attempt: optionValue(helperArgs, 'AttemptId'), pid }))
+}
+
+/**
+ * Stands in for powershell.exe. `launcher`: 'ok' prints the helper pid, 'fail' exits 3.
+ * `helper`: 'starts' writes the started marker like the real helper's first line, 'silent' never does.
+ */
+const windowsSpawn = (spawned, updaterRoot, { launcher = 'ok', helper = 'starts' } = {}) => (command, args, options) => {
+  spawned.push({ command, args, options })
+  if (args.includes('-Arguments')) {
+    if (launcher !== 'ok') return fakeProcess({ code: 3 })
+    if (helper === 'starts') writeStartedMarker(updaterRoot, launchedHelperArgs(args))
+    return fakeProcess({ stdout: 'pid=4242 via=start-process\r\n' })
+  }
+  // The old detached path, used when the launcher fails.
+  return fakeChild(4243, () => { if (helper === 'starts') writeStartedMarker(updaterRoot, args, 4243) })
 }
 
 async function checkWindowsLogic(temporary, github, fetchImpl, key) {
@@ -702,7 +739,7 @@ async function checkWindowsLogic(temporary, github, fetchImpl, key) {
     await fsp.writeFile(path.join(installDirectory, 'FaNotes.exe'), 'MZ fake')
     return { ...profile, installDirectory, resourcesPath }
   }
-  const run = async (profile, extra) => {
+  const run = async (profile, extra, behaviour) => {
     const spawned = []
     const status = await runBackgroundUpdate({
       updaterRoot: profile.updaterRoot,
@@ -713,16 +750,15 @@ async function checkWindowsLogic(temporary, github, fetchImpl, key) {
         forceSupported: true, platform: 'win32', resourcesPath: profile.resourcesPath, portableExecutable: null,
         executablePath: path.join(profile.installDirectory, 'FaNotes.exe'),
         publicKeyPemOverride: key.publicPem, expectedKeyId: key.keyId, updaterRoot: profile.updaterRoot,
-        spawnImpl: (command, args, options) => {
-          spawned.push({ command, args, options })
-          return fakeChild()
-        },
+        spawnImpl: windowsSpawn(spawned, profile.updaterRoot, behaviour),
+        helperStartTimeoutMs: 400,
+        isAlive: () => false,
         ...extra,
       }),
     })
     return { status, spawned }
   }
-  const argument = (args, name) => args[args.indexOf(`-${name}`) + 1]
+  const argument = optionValue
 
   // NSIS: no delta base (app.asar differs), full installer, quiet helper.
   {
@@ -730,11 +766,15 @@ async function checkWindowsLogic(temporary, github, fetchImpl, key) {
     const { status, spawned } = await run(profile)
     assert.equal(status.result, 'installing', status.message)
     assert.equal(spawned.length, 1)
-    const [{ command, args, options }] = spawned
+    const [{ command, args: launcherArgs, options }] = spawned
     assert.equal(command, 'powershell.exe')
     assert.equal(options.windowsHide, true)
     assert.equal(Object.keys(options.env).some((name) => name.toLowerCase() === 'psmodulepath'), false)
-    assert.equal(options.detached, true)
+    // Never a detached (console-less) PowerShell: it can exit without running its script.
+    assert.notEqual(options.detached, true)
+    assert.equal(await fsp.readFile(argument(launcherArgs, 'File'), 'utf8'), WINDOWS_LAUNCHER)
+    const args = launchedHelperArgs(launcherArgs)
+    assert.match(argument(args, 'AttemptId'), /^[a-f0-9]{24}$/u)
     assert.equal(argument(args, 'Mode'), 'quiet')
     assert.equal(argument(args, 'Installer'), path.join(profile.updaterRoot, '2.17.0', 'FaNotes-Setup-2.17.0-x64.exe'))
     assert.equal(argument(args, 'ExpectedSha'), sha256(installer))
@@ -748,7 +788,7 @@ async function checkWindowsLogic(temporary, github, fetchImpl, key) {
     const profile = await windowsProfile('windows-delta', { asar: asarSource })
     const { status, spawned } = await run(profile)
     assert.equal(status.result, 'installing', status.message)
-    const [{ args }] = spawned
+    const args = launchedHelperArgs(spawned[0].args)
     assert.equal(await fsp.readFile(argument(args, 'File'), 'utf8'), WINDOWS_SWAP_HELPER)
     assert.equal(argument(args, 'Target'), path.join(profile.resourcesPath, 'app.asar'))
     assert.equal(argument(args, 'Executable'), path.join(profile.installDirectory, 'FaNotes.exe'))
@@ -765,7 +805,7 @@ async function checkWindowsLogic(temporary, github, fetchImpl, key) {
     const deltaDownloads = github.downloads('.fndelta')
     const { status, spawned } = await run(profile, { portableExecutable: portableExe })
     assert.equal(status.result, 'installing', status.message)
-    const [{ args }] = spawned
+    const args = launchedHelperArgs(spawned[0].args)
     assert.equal(await fsp.readFile(argument(args, 'File'), 'utf8'), WINDOWS_SWAP_HELPER)
     assert.equal(argument(args, 'Target'), portableExe)
     assert.equal(argument(args, 'Executable'), portableExe)
@@ -779,6 +819,96 @@ async function checkWindowsLogic(temporary, github, fetchImpl, key) {
     })
     assert.equal(checkedState.installationKind, 'windows-portable')
     checkedState.stop()
+  }
+  // The launcher fails: the old detached start is tried, and its started marker counts.
+  {
+    const profile = await windowsProfile('windows-launcher-fails', { asar: Buffer.alloc(1024, 1) })
+    const { status, spawned } = await run(profile, {}, { launcher: 'fail' })
+    assert.equal(status.result, 'installing', status.message)
+    assert.deepEqual(spawned.map(({ args }) => (args.includes('-Arguments') ? argument(args, 'Method') : 'detached')), ['auto', 'cim', 'detached'])
+    assert.equal(spawned[2].options.detached, true)
+    assert.equal(argument(spawned[2].args, 'Mode'), 'quiet')
+    assert.equal(JSON.parse(fs.readFileSync(path.join(profile.updaterRoot, 'install.lock'), 'utf8')).pid, 4243)
+  }
+  // The helper never comes up (the Windows 11 26200 report): no install is claimed, the lock is
+  // released, the version is marked failed, and the next start does not try it again.
+  {
+    const profile = await windowsProfile('windows-helper-silent', { asar: Buffer.alloc(1024, 1) })
+    const { status, spawned: tried } = await run(profile, {}, { helper: 'silent' })
+    assert.equal(status.result, 'error')
+    assert.equal(tried.length, 3, 'Jeder Startweg wird einmal versucht, dann bleibt FaNotes offen.')
+    assert.match(status.message, /Installationshelfer ist nicht gestartet/u)
+    assert.equal(fs.existsSync(path.join(profile.updaterRoot, 'install.lock')), false, 'Die Sperre eines nie gestarteten Helfers wird freigegeben.')
+    assert.equal(fs.existsSync(path.join(profile.updaterRoot, 'install-attempt.json')), false)
+    const persisted = JSON.parse(fs.readFileSync(path.join(profile.updaterRoot, 'state.json'), 'utf8'))
+    assert.deepEqual([persisted.failedInstall.version, persisted.failedInstall.reason], ['2.17.0', 'helper-did-not-start'])
+    assert.equal(persisted.pendingInstall?.version === '2.17.0', false)
+
+    const spawned = []
+    const next = createUpdateManager({
+      app: fakeApp(profile, '2.16.0'), getWindow: () => null, getSettings: () => DEFAULT_SETTINGS, logger: quietLogger, fetchImpl,
+      forceSupported: true, platform: 'win32', resourcesPath: profile.resourcesPath, portableExecutable: null,
+      executablePath: path.join(profile.installDirectory, 'FaNotes.exe'),
+      publicKeyPemOverride: key.publicPem, expectedKeyId: key.keyId, updaterRoot: profile.updaterRoot,
+      spawnImpl: windowsSpawn(spawned, profile.updaterRoot), helperStartTimeoutMs: 400, isAlive: () => false,
+    })
+    await next.initialize()
+    const launch = await next.applyPendingInstallOnLaunch()
+    assert.equal(launch.installStarted, false)
+    assert.equal(launch.ready, false, 'Beim nächsten Start wird nicht erneut für diese Version beendet.')
+    assert.equal(launch.state.failedInstallVersion, '2.17.0')
+    assert.match(launch.state.error, /konnte nicht installiert werden/u)
+    assert.equal(spawned.length, 0)
+    next.stop()
+  }
+  // An attempt that quit FaNotes but left no result and no newer version behind (the helper died
+  // after its marker, the install was interrupted) blocks that version once, in the app and the background run.
+  {
+    const managerFor = (profile, version = '2.16.0') => createUpdateManager({
+      app: fakeApp(profile, version), getWindow: () => null, getSettings: () => DEFAULT_SETTINGS, logger: quietLogger, fetchImpl,
+      forceSupported: true, platform: 'win32', resourcesPath: profile.resourcesPath, portableExecutable: null,
+      publicKeyPemOverride: key.publicPem, expectedKeyId: key.keyId, updaterRoot: profile.updaterRoot,
+      spawnImpl: () => { throw new Error('In diesem Fall startet kein Helfer.') },
+    })
+    const attempt = (profile, version) => fs.writeFileSync(path.join(profile.updaterRoot, 'install-attempt.json'), JSON.stringify({ version, attempt: 'ab', at: new Date().toISOString() }))
+    const profile = await windowsProfile('windows-attempt', { asar: Buffer.alloc(1024, 1) })
+    await fsp.mkdir(profile.updaterRoot, { recursive: true })
+    attempt(profile, '2.17.0')
+    // A helper that still holds install.lock is at work: nothing is decided yet.
+    const helper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' })
+    createUpdateLocks(profile.updaterRoot).handInstallTo(helper.pid, { version: '2.17.0' })
+    const busy = managerFor(profile)
+    await busy.initialize()
+    assert.equal(busy.getState().failedInstallVersion, null)
+    assert.equal(fs.existsSync(path.join(profile.updaterRoot, 'install-attempt.json')), true)
+    busy.stop()
+    helper.kill()
+    await new Promise((resolve) => { helper.once('exit', resolve) })
+
+    // The background run records the failure and leaves the note for the app.
+    const background = managerFor(profile)
+    await background.initialize({ consumeInstallResult: false })
+    assert.equal(background.getState().failedInstallVersion, '2.17.0')
+    assert.equal(fs.existsSync(path.join(profile.updaterRoot, 'install-attempt.json')), true)
+    background.stop()
+    const app = managerFor(profile)
+    await app.initialize()
+    assert.equal(app.getState().failedInstallVersion, '2.17.0')
+    assert.equal(app.getState().installNotCompleted?.version, '2.17.0')
+    assert.equal(app.getState().installNotCompleted?.reason, 'install-incomplete')
+    assert.equal(fs.existsSync(path.join(profile.updaterRoot, 'install-attempt.json')), false)
+    app.stop()
+
+    // The attempt did install: the new version starts and the marker is just removed.
+    const installed = await windowsProfile('windows-attempt-ok', { asar: Buffer.alloc(1024, 1) })
+    await fsp.mkdir(installed.updaterRoot, { recursive: true })
+    attempt(installed, '2.17.0')
+    const updated = managerFor(installed, '2.17.0')
+    await updated.initialize()
+    assert.equal(updated.getState().failedInstallVersion, null)
+    assert.equal(updated.getState().installNotCompleted, null)
+    assert.equal(fs.existsSync(path.join(installed.updaterRoot, 'install-attempt.json')), false)
+    updated.stop()
   }
 }
 
@@ -855,6 +985,88 @@ async function checkWindowsHelpers(temporary) {
     assert.equal(readResult(directory).ok, true)
     assert.equal(fs.existsSync(installerPath), false, 'Der Installer wird nach dem Erfolg entfernt.')
   }
+  await checkWindowsRealSpawn(root)
+}
+
+const REAL_SPAWN_FLAG = '--windows-helper-parent'
+const realSpawnLayout = (base) => {
+  const userData = path.join(base, 'user-data')
+  const updaterRoot = path.join(userData, 'updates')
+  const installDirectory = path.join(base, 'Programs', 'FaNotes')
+  return {
+    profile: { base, userData, home: path.join(base, 'home'), updaterRoot },
+    installDirectory,
+    resourcesPath: path.join(installDirectory, 'resources'),
+    staged: path.join(updaterRoot, '2.17.0', 'FaNotes-Setup-2.17.0-x64.exe'),
+    report: path.join(base, 'parent.json'),
+  }
+}
+
+/**
+ * The real start path on Windows: an app process (this script in parent mode) installs a staged
+ * update on quit with the real spawn, removes the installer and exits at once. The helper must
+ * outlive it, find the installer missing and report that (the path that ends with exit 19).
+ * A regression guard: the runner may not reproduce the Windows 11 26200 failure of detached PowerShell.
+ */
+async function checkWindowsRealSpawn(root) {
+  const base = path.join(root, 'real-spawn')
+  const layout = realSpawnLayout(base)
+  const installer = Buffer.alloc(PACKAGE_BYTES, 0x4d)
+  await fsp.mkdir(path.dirname(layout.staged), { recursive: true })
+  await fsp.mkdir(layout.resourcesPath, { recursive: true })
+  await fsp.mkdir(layout.profile.home, { recursive: true })
+  await fsp.writeFile(path.join(layout.installDirectory, 'FaNotes.exe'), 'MZ fake')
+  await fsp.writeFile(layout.staged, installer)
+  await fsp.writeFile(path.join(layout.profile.updaterRoot, 'state.json'), JSON.stringify({
+    schemaVersion: 3,
+    highestSeenVersions: {},
+    pendingInstall: { channel: 'stable', version: '2.17.0', fileName: path.basename(layout.staged), sha256: sha256(installer), sizeBytes: installer.length, usedDelta: false },
+    failedInstall: null,
+  }))
+  const parent = spawn(process.execPath, [__filename, REAL_SPAWN_FLAG, base], { stdio: 'ignore', windowsHide: true })
+  const parentCode = await new Promise((resolve) => { parent.once('exit', resolve) })
+  const parentExitedAt = Date.now()
+  const report = JSON.parse(fs.readFileSync(layout.report, 'utf8'))
+  assert.equal(parentCode, 0, report.error)
+  assert.equal(report.started, true, report.error)
+  assert.equal(report.installerRemoved, true)
+  assert.equal(report.warnings.some((line) => /Installationshelfer/u.test(line)), false, `Der Starter muss den Helfer auf dem ersten Weg starten:\n${report.warnings.join('\n')}`)
+  const result = await waitForInstall(layout.profile, 120_000)
+  const log = await fsp.readFile(path.join(layout.profile.updaterRoot, 'install.log'), 'utf8')
+  assert.ok(Date.parse(result.at) >= parentExitedAt - 1000, 'Der Helfer arbeitet weiter, nachdem FaNotes beendet ist.')
+  assert.equal(result.ok, false)
+  assert.equal(result.reason, 'installer-failed')
+  assert.equal(result.version, '2.17.0')
+  assert.match(log, /FaNotes installer helper started \(quiet\)/u)
+  assert.match(log, /The staged installer is missing\./u, log)
+  assert.equal(JSON.parse(fs.readFileSync(path.join(layout.profile.updaterRoot, 'helper-started.json'), 'utf8')).pid, report.helperPid, 'Die Sperre ging an den echten Helfer.')
+  assert.equal(fs.existsSync(path.join(layout.profile.updaterRoot, 'install.lock')), false)
+  console.log('Windows: echter Helferstart über den Starter; der Helfer überlebt die App und meldet den fehlenden Installer.')
+}
+
+/** Parent mode of checkWindowsRealSpawn: the quitting app. */
+async function windowsHelperParent(base) {
+  const layout = realSpawnLayout(base)
+  const report = {}
+  try {
+    const warnings = []
+    const manager = createUpdateManager({
+      app: fakeApp(layout.profile, '2.16.0'), getWindow: () => null, getSettings: () => DEFAULT_SETTINGS,
+      logger: { ...quietLogger, warn: (...parts) => warnings.push(parts.join(' ')) },
+      forceSupported: true, platform: 'win32', resourcesPath: layout.resourcesPath, portableExecutable: null,
+      executablePath: path.join(layout.installDirectory, 'FaNotes.exe'), updaterRoot: layout.profile.updaterRoot,
+    })
+    await manager.initialize()
+    report.started = await manager.installOnQuit()
+    report.helperPid = JSON.parse(fs.readFileSync(path.join(layout.profile.updaterRoot, 'install.lock'), 'utf8')).pid
+    report.warnings = warnings
+    fs.rmSync(layout.staged, { force: true })
+    report.installerRemoved = !fs.existsSync(layout.staged)
+  } catch (error) {
+    report.error = String(error?.stack ?? error)
+  }
+  fs.writeFileSync(layout.report, JSON.stringify(report))
+  process.exit(report.error ? 1 : 0)
 }
 
 /**
@@ -985,7 +1197,9 @@ async function measureElectron(temporary, github, origin, key) {
 
 module.exports = { createFakeGithub, fakeAppImage, testKey }
 
-if (require.main === module) {
+if (require.main === module && process.argv[2] === REAL_SPAWN_FLAG) {
+  void windowsHelperParent(process.argv[3])
+} else if (require.main === module) {
   main().catch((error) => {
     console.error(error)
     process.exitCode = 1
