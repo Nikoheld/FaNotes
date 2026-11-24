@@ -1,5 +1,13 @@
 # Änderungsverlauf
 
+## 2026.11.4-beta.2
+
+- Desktop: share presence as small avatars in the tab row instead of a bottom bar (#1463)
+- Kanti+: zoomable read view, crash-safe PDF reader, all desktop file types (#1464)
+- Desktop: vector PDF and Word export for handwriting notes, annotated PDF-note export (#1462)
+- Note export dialog: real PDF and Word export for text notes (#1461)
+- Desktop: handwriting stays on the paper while and after a zoom (#1460)
+
 ## 2026.11.4-beta.1
 
 - Desktop: no freezes from the share poll; anonymous stall statistics (#1459)
