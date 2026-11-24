@@ -71,14 +71,23 @@ export const createProfile = (prefix, extraSettings = {}) => {
 export const launch = (profile) => {
   const port = 19_300 + Math.floor(Math.random() * 600)
   const child = spawn('xvfb-run', ['-a', '-s', '-screen 0 1440x1000x24', electronBinary, '-r', path.join(root, 'scripts', 'electron-test-stub.cjs'), root, `--remote-debugging-port=${port}`, '--no-sandbox'], {
-    env: { ...process.env, HOME: profile.home, XDG_CONFIG_HOME: profile.configHome, XDG_RUNTIME_DIR: profile.runtime, FANOTES_TEST_DIALOGS: profile.dialogs },
+    env: { ...process.env, HOME: profile.home, XDG_CONFIG_HOME: profile.configHome, XDG_RUNTIME_DIR: profile.runtime, FANOTES_TEST_DIALOGS: profile.dialogs, FANOTES_TEST_DIAG: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   })
   let output = ''
   child.stdout.on('data', (chunk) => { output += chunk })
   child.stderr.on('data', (chunk) => { output += chunk })
-  return { child, port, output: () => output }
+  const app = { child, port, output: () => output, exit: null, startedAt: Date.now() }
+  child.on('exit', (code, signal) => { app.exit = { code, signal, afterMs: Date.now() - app.startedAt } })
+  return app
+}
+
+/** One line with what is known about a dead or dying app: exit code/signal and the tail of its output. */
+export const describeApp = (app) => {
+  const state = app.exit ? `exited code=${app.exit.code} signal=${app.exit.signal} after ${Math.round(app.exit.afterMs / 1000)}s` : 'still running'
+  const tail = app.output().split('\n').filter((line) => line.trim() !== '' && !/dbus|Fontconfig|ALSA/u.test(line)).slice(-12).join(' | ')
+  return `app ${state}; output tail: ${tail.slice(-1200)}`
 }
 
 export const connect = async (app) => {

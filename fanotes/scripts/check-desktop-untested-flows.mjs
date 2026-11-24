@@ -16,7 +16,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import {
   captureDownload, connect, createProfile, createReporter, dismissNotices, electronBinary, launch, makePdf, openFile,
-  root, routeSyncTo, sleep, startSite, stop, until, waitPdfRendered,
+  describeApp, root, routeSyncTo, sleep, startSite, stop, until, waitPdfRendered,
 } from './lib/desktop-flow.mjs'
 
 const require = createRequire(import.meta.url)
@@ -56,6 +56,9 @@ const withApp = async (profile, body, { site = null } = {}) => {
     await body(connected.page, app)
     // Settings and the session are written with a short delay: let them land before the app is stopped.
     await sleep(5000)
+  } catch (error) {
+    if (/closed|crash|Target/iu.test(String(error))) console.log(`diagnostics: ${describeApp(app)}`)
+    throw error
   } finally {
     await stop(app, browser)
   }

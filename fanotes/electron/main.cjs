@@ -244,7 +244,10 @@ process.on('uncaughtException', (error) => {
   diagnosticsService()?.recordMainException('uncaughtException', error)
 })
 let appQuitting = false
+// FANOTES_TEST_DIAG (test harness only) makes every process loss and window close visible on stderr.
+const testDiag = (...parts) => { if (process.env.FANOTES_TEST_DIAG) console.error('[test-diag]', ...parts) }
 app.on('child-process-gone', (_event, details) => {
+  testDiag('child-process-gone', JSON.stringify(details ?? {}))
   diagnosticsService()?.recordProcessGone('child-process-gone', details)
   if (!details || details.type === 'Utility') return
   console.warn(`FaNotes: Hilfsprozess beendet (${details.type}, ${details.reason}).`)
@@ -6698,6 +6701,7 @@ async function createWindow() {
   let rendererCrashReloads = 0
   let lastRendererCrashAt = 0
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    testDiag('render-process-gone', JSON.stringify(details ?? {}))
     if (!details || details.reason === 'clean-exit') return
     diagnosticsService()?.recordProcessGone('render-process-gone', details)
     console.error(`FaNotes: Renderer beendet (${details.reason}, exit=${details.exitCode ?? '?'}).`)
@@ -6823,7 +6827,14 @@ if (!app.requestSingleInstanceLock()) {
   })
 }
 
+app.on('browser-window-created', (_event, win) => {
+  if (!process.env.FANOTES_TEST_DIAG) return
+  const id = win.id
+  testDiag('window created', id)
+  win.on('closed', () => testDiag('window closed', id))
+})
 app.on('window-all-closed', () => {
+  testDiag('window-all-closed')
   if (process.platform !== 'darwin') app.quit()
 })
 
