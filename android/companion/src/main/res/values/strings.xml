@@ -1487,6 +1487,8 @@
     <string name="mensa_price_short">CHF %1$s</string>
     <string name="teacher_absences_row">Absent teachers</string>
     <string name="teacher_absences_excursion_inline">on excursion: %1$s</string>
+    <string name="teacher_absences_show_all">Show all %1$d</string>
+    <string name="teacher_absences_show_less">Show less</string>
     <string name="file_title">File</string>
     <string name="file_noun">file</string>
     <string name="file_unavailable">This file is not available</string>
