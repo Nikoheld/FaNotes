@@ -10,7 +10,8 @@ import {
   type Extension,
 } from '@codemirror/state'
 import { Decoration, EditorView, keymap, showTooltip, tooltips, type DecorationSet, type Tooltip, type TooltipView } from '@codemirror/view'
-import type { SpellingLanguage } from '../types'
+import type { TextLanguage } from '../types'
+import { languageTag, type LanguageEvidence } from './languageDetect'
 import {
   addPersonalWord,
   declineAutocorrect,
@@ -49,12 +50,71 @@ export const primeSpellingCorrections = () => {
   return primePromise
 }
 
-export type SpellingCorrectionsOptions = {
-  autocorrectEnabled: () => boolean
-  /** Language the spellchecker assigned to the line at `pos`, if it has run there. */
-  languageAt: (state: EditorState, pos: number) => SpellingLanguage | null
+/** Gets the engine ready for the languages a note uses, so the first correction there is not lost to
+ * loading the French word list (about 5 MB) while the user keeps typing. */
+export const warmSpellingLanguages = (languages: readonly TextLanguage[]) => {
+  if (!languages.includes('fr')) return
+  void primeSpellingCorrections().then((engine) => engine.prepare?.(['fr'])).catch(() => undefined)
 }
 
+export type SpellingCorrectionsOptions = {
+  autocorrectEnabled: () => boolean
+}
+
+/** The language profile of the note from the last spelling pass (`checkSpelling`); autocorrect and the menu read it. */
+export const setLanguageProfile = StateEffect.define<LanguageEvidence>()
+export const languageProfileField = StateField.define<LanguageEvidence | null>({
+  create: () => null,
+  update(value, transaction) {
+    for (const effect of transaction.effects) if (effect.is(setLanguageProfile)) return effect.value
+    return value
+  },
+})
+
+const ALL_LANGUAGES: readonly TextLanguage[] = ['de', 'en', 'fr']
+const PARAGRAPH_LOOKBEHIND = 3
+const PARAGRAPH_LOOKAHEAD = 2
+
+/** What is known about the passage around `pos`, decided now from the text as it is: its language,
+ * whether that is certain, and the languages a word there may be valid in. Null until the dictionaries loaded. */
+export type PassageContext = {
+  language: TextLanguage | null
+  confident: boolean
+  /** A language without dictionary (Italian, ...), or mostly unknown words: never autocorrected. */
+  foreign: boolean
+  unsupported: boolean
+  allowed: TextLanguage[]
+}
+
+const passageContextAt = (state: EditorState, pos: number): PassageContext | null => {
+  const module = spellingModule
+  if (!module) return null
+  const line = state.doc.lineAt(pos)
+  const previous: string[] = []
+  for (let number = line.number - 1; number >= 1 && previous.length < PARAGRAPH_LOOKBEHIND; number -= 1) {
+    const text = state.doc.line(number).text
+    if (!text.trim()) break
+    previous.push(text)
+  }
+  const next: string[] = []
+  for (let number = line.number + 1; number <= state.doc.lines && next.length < PARAGRAPH_LOOKAHEAD; number += 1) {
+    const text = state.doc.line(number).text
+    if (!text.trim()) break
+    next.push(text)
+  }
+  const resolved = module.resolvePassageAt({
+    text: line.text,
+    offset: pos - line.from,
+    previous,
+    next,
+    profile: state.field(languageProfileField, false) ?? null,
+  })
+  if (!resolved) return null
+  return { ...resolved.passage, allowed: resolved.allowed }
+}
+
+/** French elision prefix: "l'" in "l'homem" stays while the word behind it is corrected. */
+const FRENCH_ELISION = /^((?:[cdjlmnst]|qu|jusqu|lorsqu|puisqu|quoiqu)['’])(\p{L}+)$/iu
 const BOUNDARY = /^[\s.,;:!?]$/u
 const IGNORED_NODE = /^(?:CodeBlock|FencedCode|InlineCode|CodeText|URL|LinkDestination|Autolink|HTMLBlock|HTMLTag|Comment|LinkTitle|Image)$/u
 const LETTER = /[\p{L}\p{M}]/u
@@ -128,13 +188,15 @@ type AutocorrectRequest = {
   from: number
   to: number
   word: string
-  language: SpellingLanguage | null
+  language: TextLanguage
   sentenceStart: boolean
   properName: boolean
 }
 
-/** The misspelled word ending exactly at `wordEnd`, or null. */
-const requestAutocorrect = (state: EditorState, wordEnd: number, options: SpellingCorrectionsOptions): AutocorrectRequest | null => {
+/** The misspelled word ending exactly at `wordEnd`, or null. Autocorrect only acts when the passage's
+ * language is certain and the word is unknown in every language the note uses; with any doubt the
+ * word stays underlined and untouched. */
+const requestAutocorrect = (state: EditorState, wordEnd: number): AutocorrectRequest | null => {
   const module = spellingModule
   const engine = spellingEngine
   if (!module || !engine || state.readOnly) return null
@@ -146,14 +208,22 @@ const requestAutocorrect = (state: EditorState, wordEnd: number, options: Spelli
   // Part of a tag, path, e-mail, hyphenated or apostrophised token: leave it.
   if (start > 0 && /[\p{L}\p{M}\d'’\-_#@/\\.:&+]/u.test(line.text[start - 1])) return null
   const word = line.text.slice(start, offset)
-  if (isAutocorrectDeclined(word) || !engine.isMisspelled(word)) return null
+  if (isAutocorrectDeclined(word)) return null
   const from = line.from + start
+  const passage = passageContextAt(state, from)
+  // Reading the French word list takes a moment; start it as soon as a word is finished in a French passage,
+  // so the first typo there is already corrected.
+  if (passage?.language === 'fr') warmSpellingLanguages(['fr'])
+  if (!passage?.language || !passage.confident || passage.foreign || passage.unsupported) return null
+  // A word any dictionary knows is never rewritten, even one of a language this note has not shown yet
+  // ("soir" in a German line that turns French): underlining follows the note's languages, autocorrect all of them.
+  if (!engine.isMisspelled(word, ALL_LANGUAGES)) return null
   if (inIgnoredContext(state, from, wordEnd)) return null
   return {
     from,
     to: wordEnd,
     word,
-    language: options.languageAt(state, line.from),
+    language: passage.language,
     sentenceStart: opensSentence(state, from),
     properName: module.isCanonicalProperName(word.normalize('NFC').toLocaleLowerCase('en-US')),
   }
@@ -181,20 +251,32 @@ const commitAutocorrect = (view: EditorView, plan: PlannedAutocorrect, boundary:
  * is dropped when the text moved on in the meantime. `boundaryAt` reports how many characters
  * the boundary is long, or null when the document no longer looks like it did.
  */
+const decideRequest = (request: AutocorrectRequest) => {
+  const engine = spellingEngine
+  if (!engine) return Promise.resolve(null)
+  return engine.planAutocorrect(request.word, [request.language], {
+    language: request.language,
+    sentenceStart: request.sentenceStart,
+    properName: request.properName,
+  })
+}
+
+/** What autocorrect would do for the word ending at `wordEnd` in `state`, or null. Same decision as
+ * typing the boundary after the word; the check scripts drive it without a view. */
+export const planAutocorrectAt = async (state: EditorState, wordEnd: number): Promise<PlannedAutocorrect | null> => {
+  const request = requestAutocorrect(state, wordEnd)
+  if (!request) return null
+  const decision = await decideRequest(request)
+  return decision ? { from: request.from, to: request.to, word: request.word, replacement: decision.word } : null
+}
+
 const resolveAutocorrect = (
   view: EditorView,
   request: AutocorrectRequest,
   options: SpellingCorrectionsOptions,
   boundaryAt: (state: EditorState) => number | null,
 ) => {
-  const engine = spellingEngine
-  if (!engine) return
-  engine
-    .planAutocorrect(request.word, request.language ? [request.language] : null, {
-      language: request.language,
-      sentenceStart: request.sentenceStart,
-      properName: request.properName,
-    })
+  decideRequest(request)
     .then((decision) => {
       if (!decision || !view.dom.isConnected || !readyForAutocorrect(view, options)) return
       const state = view.state
@@ -231,7 +313,7 @@ type MenuState = {
   from: number
   to: number
   word: string
-  language: SpellingLanguage | null
+  language: TextLanguage | null
   /** null while suggestions are being computed */
   suggestions: SpellingSuggestion[] | null
   /** Set when the word is the result of an autocorrect, offering a revert. */
@@ -322,7 +404,7 @@ const renderMenu = (dom: HTMLElement, view: EditorView, menu: MenuState) => {
   const head = document.createElement('div')
   head.className = 'cm-spelling-menu__word'
   head.textContent = menu.word
-  head.lang = menu.language === 'en' ? 'en' : 'de-CH'
+  head.lang = languageTag(menu.language)
   dom.append(head)
 
   const list = document.createElement('div')
@@ -340,7 +422,7 @@ const renderMenu = (dom: HTMLElement, view: EditorView, menu: MenuState) => {
   } else {
     for (const suggestion of menu.suggestions) {
       const button = menuButton(suggestion.word, 'cm-spelling-menu__suggestion', () => replaceWith(suggestion.word))
-      button.lang = suggestion.language === 'en' ? 'en' : 'de-CH'
+      button.lang = languageTag(suggestion.language)
       list.append(button)
     }
   }
@@ -417,7 +499,8 @@ export const openSpellingMenuAt = (view: EditorView, pos: number, options: Spell
   if (!range) return false
   const record = view.state.field(lastAutocorrect)
   const autocorrected = record && record.from === range.from && record.to === range.to ? record : null
-  const language = options.languageAt(view.state, range.from)
+  const passage = passageContextAt(view.state, range.from)
+  const language = passage?.language ?? null
   const open = view.state.field(spellingMenu, false)
   if (open && open.word === range.word && open.from === range.from && open.to === range.to) {
     if (open.focusOnOpen !== focusOnOpen) view.dispatch({ effects: openMenu.of({ ...open, focusOnOpen }) })
@@ -427,9 +510,16 @@ export const openSpellingMenuAt = (view: EditorView, pos: number, options: Spell
   view.dispatch({ effects: openMenu.of(menu) })
   void primeSpellingCorrections()
     .then(async (engine) => {
-      const suggestions = engine.isMisspelled(range.word)
-        ? await engine.suggest(range.word, language ? [language] : null, { limit: 6 })
-        : []
+      const allowed = passage?.allowed ?? ['de', 'en']
+      // The menu offers words of the passage's language; when that is unsure, of every language the note uses.
+      const among = passage?.confident && language ? [language] : allowed
+      const elided = among.includes('fr') ? FRENCH_ELISION.exec(range.word) : null
+      let suggestions: SpellingSuggestion[] = []
+      if (engine.isMisspelled(range.word, allowed)) {
+        suggestions = await engine.suggest(elided ? elided[2] : range.word, among, { limit: 6 })
+        // "l'homem": the elision stays, the word after it is corrected.
+        if (elided) suggestions = suggestions.map((entry) => ({ ...entry, word: `${elided[1]}${entry.word}` }))
+      }
       const current = view.state.field(spellingMenu, false)
       if (!current || current.word !== range.word) return
       view.dispatch({ effects: menuSuggestions.of({ word: range.word, suggestions }) })
@@ -449,12 +539,13 @@ export const closeSpellingMenu = (view: EditorView) => {
 export function spellingCorrections(options: SpellingCorrectionsOptions): Extension {
   return [
     tooltips({ parent: spellingTooltipParent(), position: 'fixed' }),
+    languageProfileField,
     lastAutocorrect,
     spellingMenu,
     EditorView.inputHandler.of((view, from, to, text) => {
       if (from !== to || !BOUNDARY.test(text) || !readyForAutocorrect(view, options)) return false
       if (view.state.selection.main.head !== from) return false
-      const request = requestAutocorrect(view.state, from, options)
+      const request = requestAutocorrect(view.state, from)
       if (!request) return false
       // The boundary is typed as usual; the fix follows as its own step once the engine answered.
       resolveAutocorrect(view, request, options, (state) => (
@@ -472,7 +563,7 @@ export function spellingCorrections(options: SpellingCorrectionsOptions): Extens
         run: (view) => {
           if (!readyForAutocorrect(view, options)) return false
           const wordEnd = view.state.selection.main.head
-          const request = requestAutocorrect(view.state, wordEnd, options)
+          const request = requestAutocorrect(view.state, wordEnd)
           if (!request) return false
           // The newline is inserted by the regular Enter handling that runs after this one.
           resolveAutocorrect(view, request, options, (state) => {

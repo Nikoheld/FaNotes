@@ -9,6 +9,8 @@ on:
       - 'crates/fanotes-spell/**'
       - 'crates/fanotes-spell-wasm/**'
       - 'fanotes/src/lib/spell*.ts'
+      - 'fanotes/src/lib/languageDetect.ts'
+      - 'fanotes/scripts/build-spelling-filters.cjs'
       - 'fanotes/src/lib/spellWasm/**'
       - 'fanotes/src/lib/neuralWordContext.ts'
       - 'fanotes/scripts/check-spell*.mjs'
@@ -51,6 +53,7 @@ jobs:
       - run: node scripts/check-spelling.mjs
       - run: node scripts/check-spelling-suggest.mjs
       - run: node scripts/check-spell-wasm-parity.mjs
+      - run: node scripts/check-spelling-languages.mjs
       - run: node scripts/check-writing-assist.mjs
       - run: node scripts/check-context-recognition.mjs
       - run: node scripts/check-markdown.mjs

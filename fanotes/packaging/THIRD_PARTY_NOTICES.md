@@ -157,9 +157,10 @@ https://docs.openvino.ai/
 
 FaNotes local spelling filters
 ==============================
-The compact German and English Bloom filters shipped with FaNotes are derived
-at build time from dictionary-de 3.0.0, dictionary-en 4.0.0 and
-dictionary-en-gb 3.0.0. nspell 2.1.5 expands the Hunspell word forms.
+The compact German, English and French Bloom filters shipped with FaNotes are
+derived at build time from dictionary-de 3.0.0, dictionary-en 4.0.0,
+dictionary-en-gb 3.0.0 and dictionary-fr 3.0.0. nspell 2.1.5 expands the
+Hunspell word forms.
 SUBTLEXus frequencies, distributed through subtlex-word-frequencies 2.0.0,
 keep corpus-unsupported supplementary forms out of the OCR replacement prior;
 none of these build tools is loaded by FaNotes at runtime.
@@ -191,6 +192,20 @@ family of terms. The complete upstream attribution and redistribution terms
 are installed verbatim as `spell/LICENSE-dictionary-en-gb.txt`.
 
 Source: https://www.npmjs.com/package/dictionary-en-gb
+
+French word forms (dictionary-fr / Dicollecte, Grammalecte)
+------------------------------------------------------------
+Copyright (C) Olivier R. and the Dicollecte contributors, version 7.5.
+
+Licensed under the Mozilla Public License, version 2.0. The derived filter
+(`spell/fr.bloom`) and exact word list (`spell/fr.words`) contain only
+lower-cased word forms extracted from the Hunspell dictionary; they stay under
+the MPL-2.0. The upstream source files are the unmodified dictionary-fr 3.0.0
+package (https://www.npmjs.com/package/dictionary-fr, upstream project
+https://grammalecte.net/), which anyone can obtain to rebuild both files with
+`npm run build:spelling`. The Dicollecte notice is installed as
+`spell/NOTICE-dictionary-fr.txt` and the complete MPL-2.0 text as
+`spell/LICENSE-MPL-2.0.txt`.
 
 SUBTLEX word frequencies
 ------------------------

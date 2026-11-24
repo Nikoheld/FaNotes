@@ -14,7 +14,14 @@ execFileSync(process.execPath, [path.join(app, 'node_modules/vite/bin/vite.js'),
 fs.rmSync(target, { recursive: true, force: true })
 fs.mkdirSync(target, { recursive: true })
 fs.cpSync(out, target, { recursive: true })
-for (const folder of ['writing', 'spell']) fs.cpSync(path.join(app, 'public', folder), path.join(target, folder), { recursive: true })
+fs.cpSync(path.join(app, 'public', 'writing'), path.join(target, 'writing'), { recursive: true })
+// The French dictionary (about 6 MB) serves the desktop editor only; the Android app does not use it yet.
+fs.cpSync(path.join(app, 'public', 'spell'), path.join(target, 'spell'), { recursive: true, filter: (source) => !/[\\/]fr\.(?:bloom|words)$/u.test(source) })
+const spellManifest = path.join(target, 'spell', 'manifest.json')
+const spellEntries = JSON.parse(fs.readFileSync(spellManifest, 'utf8'))
+delete spellEntries.french
+if (spellEntries.generatedFrom) delete spellEntries.generatedFrom.fr
+fs.writeFileSync(spellManifest, `${JSON.stringify(spellEntries, null, 2)}\n`)
 let bytes = 0
 let files = 0
 const walk = (dir) => { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const full = path.join(dir, entry.name); if (entry.isDirectory()) walk(full); else { files += 1; bytes += fs.statSync(full).size } } }

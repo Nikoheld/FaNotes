@@ -19,7 +19,7 @@ const wordList = (file) => new Set(readFileSync(new URL(`../public/spell/${file}
 try {
   const suggest = await server.ssrLoadModule('/src/lib/spellingSuggest.ts')
   const text = await server.ssrLoadModule('/src/lib/textReplacement.ts')
-  const lists = { de: wordList('de.words'), en: wordList('en.words') }
+  const lists = { de: wordList('de.words'), en: wordList('en.words'), fr: wordList('fr.words') }
   // The exact lists hold no German compounds; the app's lexicon accepts them
   // through the Bloom compound split. Mirror that with a two-part split here.
   const isCompound = (word) => {
@@ -55,6 +55,15 @@ try {
   const two = suggest.suggestCorrections('Hausafgbaen', ['de'], lexicon)
   assert.ok(words(two).includes('Hausaufgaben'), `two edits found for a long word: ${words(two)}`)
   assert.deepEqual(suggest.suggestCorrections('Hausafgbaen', ['de'], lexicon, { maxDistance: 1 }).filter((entry) => entry.word === 'Hausaufgaben'), [], 'distance-one mode skips the two-edit search')
+  // French: accents are cheap slips, ties and capitalised names stay conservative.
+  const ecole = suggest.suggestCorrections('ecole', ['fr'], lexicon)
+  assert.equal(ecole[0].word, 'école', `a missing accent is the first suggestion: ${words(ecole)}`)
+  assert.equal(ecole[0].language, 'fr')
+  assert.equal(suggest.suggestCorrections('Ecole', ['fr'], lexicon)[0].word, 'École', 'French capitalisation is restored')
+  assert.ok(words(suggest.suggestCorrections('jardn', ['fr'], lexicon)).includes('jardin'))
+  assert.equal(suggest.suggestCorrections('chein', ['fr'], lexicon)[0].word, 'chien')
+  assert.equal(suggest.decideAutocorrect('chein', suggest.suggestCorrections('chein', ['fr'], lexicon, { limit: 4, maxDistance: 1 }), { language: 'fr', sentenceStart: false, isProperName: () => false })?.word, 'chien')
+  assert.equal(suggest.decideAutocorrect('Chein', suggest.suggestCorrections('Chein', ['fr'], lexicon, { limit: 4, maxDistance: 1 }), { language: 'fr', sentenceStart: false, isProperName: () => false }), null, 'a capitalised word inside a French sentence may be a name')
   const both = suggest.suggestCorrections('hte', ['de', 'en'], lexicon)
   assert.ok(words(both).includes('the'), `unknown line language searches both lists: ${words(both)}`)
   assert.ok(suggest.suggestCorrections('qzxwv', ['de', 'en'], lexicon).length === 0, 'garbage yields nothing')
@@ -121,18 +130,18 @@ try {
 
   // ── Source checks: the editor keeps the text it typed ────────────────────
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-  const saveBody = app.slice(app.indexOf('const saveContent = useCallback'), app.indexOf('const convertAllNotesToCurrentStandard'))
+  const saveBody = app.slice(app.indexOf('const saveContentUntracked = useCallback'), app.indexOf('const convertAllNotesToCurrentStandard'))
   assert.doesNotMatch(saveBody, /content: tab\.content === content \? visibleContent/u, 'saveContent must not push the trimmed body back into the editor')
   assert.match(saveBody, /savedContent: tab\.content === content \? content : visibleContent/u)
   const editor = readFileSync(new URL('../src/components/MarkdownEditor.tsx', import.meta.url), 'utf8')
   assert.match(editor, /const span = minimalReplacement\(current, content\)/u, 'external content is applied as the smallest change so the selection maps')
   assert.doesNotMatch(editor, /Math\.min\(anchor, nextLength\)/u, 'no more cursor clamping to the new document length')
-  assert.match(editor, /spellingCorrections\(\{\s*autocorrectEnabled: \(\) => autocorrectEnabledRef\.current,\s*languageAt: spellingLanguageAt,\s*\}\)/u)
+  assert.match(editor, /spellingCorrections\(\{\s*autocorrectEnabled: \(\) => autocorrectEnabledRef\.current,\s*\}\)/u)
   assert.match(editor, /const autocorrectEnabled = settings\.spellcheck && settings\.autocorrect && !readOnly/u)
   const spelling = readFileSync(new URL('../src/lib/spelling.ts', import.meta.url), 'utf8')
   assert.match(spelling, /language === 'de' && splitsIntoGermanParts\(normalized, exactPart\)/u, 'suggestion lexicon accepts German compounds only from exact-list parts')
-  assert.match(spelling, /return dictionaries\[language\]\.has\(normalized, language\) \? 4 : 15/u, 'a compound the dictionary knows as a whole ranks above one it does not')
-  assert.doesNotMatch(spelling.slice(spelling.indexOf('const lexiconFrom')), /\|\| dictionaries\[language\]\.has\(normalized, language\)/u, 'Bloom membership alone never admits a candidate')
+  assert.match(spelling, /return dictionaries\[language\]\?\.has\(normalized, language\) \? 4 : 15/u, 'a compound the dictionary knows as a whole ranks above one it does not')
+  assert.doesNotMatch(spelling.slice(spelling.indexOf('const lexiconFrom')), /\|\| dictionaries\[language\]\??\.has\(normalized, language\)/u, 'Bloom membership alone never admits a candidate')
   assert.match(spelling, /TECHNICAL_WORDS\.has\(normalized\) \|\| isUserAcceptedWord\(normalized\)/u, 'personal dictionary words are never underlined')
   assert.match(spelling, /Promise\.resolve\(\)\s*\.then\(\(\) => window\.fanotes\.loadSpellingWordCandidates\(language\)\)/u, 'a missing host word list falls back to the bundled dictionary')
   const corrections = readFileSync(new URL('../src/lib/spellingCorrections.ts', import.meta.url), 'utf8')

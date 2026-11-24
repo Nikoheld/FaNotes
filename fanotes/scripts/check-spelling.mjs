@@ -9,6 +9,8 @@ const de = new Uint8Array(await readFile(new URL('../public/spell/de.bloom', imp
 const en = new Uint8Array(await readFile(new URL('../public/spell/en.bloom', import.meta.url)))
 const deWords = new Uint8Array(await readFile(new URL('../public/spell/de.words', import.meta.url)))
 const enWords = new Uint8Array(await readFile(new URL('../public/spell/en.words', import.meta.url)))
+const fr = new Uint8Array(await readFile(new URL('../public/spell/fr.bloom', import.meta.url)))
+const frWords = new Uint8Array(await readFile(new URL('../public/spell/fr.words', import.meta.url)))
 
 assert.equal(manifest.format, 'fanotes-spelling-bloom-v2')
 assert.ok(de.byteLength + en.byteLength < 700 * 1024, 'Die Wörterbuchfilter müssen start- und speichereffizient bleiben.')
@@ -16,16 +18,20 @@ assert.equal(createHash('sha256').update(de).digest('hex'), manifest.languages.d
 assert.equal(createHash('sha256').update(en).digest('hex'), manifest.languages.en.sha256)
 assert.equal(createHash('sha256').update(deWords).digest('hex'), manifest.languages.de.candidates.sha256)
 assert.equal(createHash('sha256').update(enWords).digest('hex'), manifest.languages.en.candidates.sha256)
+assert.equal(createHash('sha256').update(fr).digest('hex'), manifest.french.sha256)
+assert.equal(createHash('sha256').update(frWords).digest('hex'), manifest.french.candidates.sha256)
+assert.deepEqual(manifest.generatedFrom.fr, ['dictionary-fr@3.0.0'])
+assert.ok(fr.byteLength < 800 * 1024, 'Der französische Filter bleibt klein.')
 assert.deepEqual(manifest.generatedFrom.en, ['dictionary-en@4.0.0', 'dictionary-en-gb@3.0.0'])
 assert.equal(manifest.minimumSupplementalOcrFrequency, 3)
 
 globalThis.window = {
   fanotes: {
-    loadSpellingResources: async () => ({ manifest, de, en }),
+    loadSpellingResources: async () => ({ manifest, de, en, fr }),
     loadSpellingWordCandidates: async (language) => ({
       language,
-      descriptor: manifest.languages[language].candidates,
-      bytes: language === 'de' ? deWords : enWords,
+      descriptor: language === 'fr' ? manifest.french.candidates : manifest.languages[language].candidates,
+      bytes: language === 'de' ? deWords : language === 'fr' ? frWords : enWords,
     }),
   },
 }
@@ -53,6 +59,30 @@ try {
   ] })
   assert.equal(mixed.detectedLanguage, 'mixed')
   assert.deepEqual(mixed.errors, [])
+
+  // French: a dictionary of its own, elisions and accents, and mixed notes.
+  const frenchText = await check('Le chien mange une pomme dans le jardin de l\'école et il est très content aujourd\'hui.')
+  assert.deepEqual(frenchText.errors, [], 'Korrektes Französisch (Elision, Akzente, aujourd\'hui) bleibt unmarkiert.')
+  assert.equal(frenchText.detectedLanguage, 'fr')
+  assert.deepEqual(frenchText.languages, ['fr'])
+  const frenchTypo = await check('Le chien mange une pomme dans le jardn de la maison.')
+  assert.deepEqual(frenchTypo.errors.map(({ word }) => word), ['jardn'])
+  assert.equal(frenchTypo.errors[0].language, 'fr')
+  const vocabulary = await checkSpelling({ segments: [
+    { from: 0, text: 'le chien – der Hund' },
+    { from: 20, text: 'the dog – der Hund' },
+    { from: 39, text: 'Das ist ein deutscher Satz über die Schule und die Hausaufgaben.' },
+  ] })
+  assert.deepEqual(vocabulary.errors, [], 'Vokabelpaare: jede Seite gilt in ihrer Sprache.')
+  assert.deepEqual(vocabulary.passages.slice(0, 4).map(({ language }) => language), ['fr', 'de', 'en', 'de'])
+  assert.equal(vocabulary.detectedLanguage, 'mixed')
+  assert.deepEqual([...vocabulary.languages].sort(), ['de', 'en', 'fr'])
+  const italian = await check('Il cane è molto grande e la casa è vicino al fiume.')
+  assert.deepEqual(italian.errors, [], 'Eine Sprache ohne Wörterbuch wird weder unterstrichen noch korrigiert.')
+  assert.equal(italian.passages[0].unsupported, true)
+  const swissGerman = await check('Die Strasse ist gross und der Fluss ist nass.')
+  assert.deepEqual(swissGerman.errors, [])
+  assert.equal(swissGerman.passages[0].language, 'de')
 
   const markdown = await check('Formel $exampel + Tset$ und `exampel` bleibt korrekt.')
   assert.deepEqual(markdown.errors, [])

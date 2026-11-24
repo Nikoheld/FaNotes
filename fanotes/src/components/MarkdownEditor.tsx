@@ -93,8 +93,8 @@ import { revealDocumentLine } from '../lib/noteOutline'
 import { fenceIsOpen, isFenceLine, toggleTaskLine } from '../lib/noteEveryday'
 import { clientYFromTextAnchor, registerPaperTextAnchorProvider, textAnchorFromView } from '../lib/paperTextAnchor'
 import { minimalReplacement } from '../lib/textReplacement'
-import { primeSpellingCorrections, rerunSpellingCheck, spellingCorrections } from '../lib/spellingCorrections'
-import type { SpellingLanguage } from '../types'
+import { primeSpellingCorrections, rerunSpellingCheck, setLanguageProfile, spellingCorrections, warmSpellingLanguages } from '../lib/spellingCorrections'
+import { languageTag } from '../lib/languageDetect'
 import { findStudyBlocks, hashText, STUDY_KIND_LABELS, type StudyBlockRef, type StudyKind } from '../lib/study/blocks'
 import { hydrateVaultImages } from '../lib/study/imageTools'
 import { readStudyBlock, renderStudyBlockHtml } from '../lib/study/registry'
@@ -1138,20 +1138,7 @@ const spellingDecorations = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 })
 
-/** The language the last spelling pass assigned to the line at `pos`, if any. */
-const spellingLanguageAt = (state: EditorState, pos: number): SpellingLanguage | null => {
-  const lineFrom = state.doc.lineAt(pos).from
-  let language: SpellingLanguage | null = null
-  state.field(spellingDecorations, false)?.between(lineFrom, lineFrom, (_from, _to, decoration) => {
-    const value = decoration.spec.attributes?.['data-spelling-language']
-    if (value === 'de' || value === 'en') {
-      language = value
-      return false
-    }
-    return undefined
-  })
-  return language
-}
+const LANGUAGE_NAMES = { de: 'Deutsch', en: 'Englisch', fr: 'Französisch' } as const
 
 function spellingExtensions(onLanguageDetected: (language: DetectedTextLanguage) => void): Extension {
   const plugin = ViewPlugin.fromClass(class {
@@ -1231,33 +1218,54 @@ function spellingExtensions(onLanguageDetected: (language: DetectedTextLanguage)
       }
       const cursorPositions = view.state.selection.ranges.flatMap((range) => [range.anchor, range.head])
       const { checkSpelling } = await import('../lib/spelling')
-      const result = await checkSpelling({ segments: visibleSegments, ignoredRanges, cursorPositions })
+      // The language profile reads the whole note, but only for lines it has not seen yet and within a time
+      // budget: a long note is taken in over a few passes instead of one long task.
+      const result = await checkSpelling({ segments: visibleSegments, ignoredRanges, cursorPositions, document: doc })
       if (this.destroyed || generation !== this.generation || view.state.doc !== doc) return
 
       const decorations: Range<Decoration>[] = []
       for (const line of result.lines) {
         decorations.push(Decoration.line({
           attributes: {
-            lang: line.language === 'de' ? 'de-CH' : 'en',
+            lang: languageTag(line.language),
             'data-spelling-language': line.language,
+            'data-spelling-confident': line.confident ? 'true' : 'false',
           },
         }).range(line.from))
+      }
+      // A line that mixes languages (a vocabulary pair, a quotation) also marks each passage.
+      const passagesByLine = new Map<number, typeof result.passages>()
+      for (const passage of result.passages) {
+        const lineFrom = doc.lineAt(passage.from).from
+        passagesByLine.set(lineFrom, [...(passagesByLine.get(lineFrom) ?? []), passage])
+      }
+      for (const passages of passagesByLine.values()) {
+        if (passages.length < 2 || passages.every((passage) => passage.language === passages[0].language)) continue
+        for (const passage of passages) {
+          if (!passage.language || passage.to <= passage.from) continue
+          decorations.push(Decoration.mark({
+            attributes: { lang: languageTag(passage.language), 'data-spelling-passage': passage.language },
+          }).range(passage.from, passage.to))
+        }
       }
       for (const error of result.errors) {
         decorations.push(Decoration.mark({
           class: 'cm-spelling-error',
           attributes: {
-            lang: error.language === 'de' ? 'de-CH' : 'en',
+            lang: languageTag(error.language),
             'data-spelling-word': error.word,
             'data-spelling-language': error.language,
-            title: `Möglicher Rechtschreibfehler · ${error.language === 'de' ? 'Deutsch' : 'Englisch'}`,
+            title: `Möglicher Rechtschreibfehler · ${LANGUAGE_NAMES[error.language]}`,
           },
         }).range(error.from, error.to))
       }
       view.dom.dataset.detectedLanguage = result.detectedLanguage
-      view.contentDOM.lang = result.detectedLanguage === 'en' ? 'en' : 'de-CH'
-      view.dispatch({ effects: setSpellingDecorations.of(Decoration.set(decorations, true)) })
+      view.dom.dataset.detectedLanguages = result.languages.join(',')
+      view.contentDOM.lang = languageTag(result.languages[0] ?? null)
+      view.dispatch({ effects: [setSpellingDecorations.of(Decoration.set(decorations, true)), setLanguageProfile.of(result.profile)] })
       onLanguageDetected(result.detectedLanguage)
+      warmSpellingLanguages(result.languages)
+      if (!result.profileComplete) this.schedule(view, 80)
     }
 
     destroy() {
@@ -2000,7 +2008,6 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           : []),
         spellingCorrections({
           autocorrectEnabled: () => autocorrectEnabledRef.current,
-          languageAt: spellingLanguageAt,
         }),
         EditorView.updateListener.of((update) => {
           if (foldPath) {

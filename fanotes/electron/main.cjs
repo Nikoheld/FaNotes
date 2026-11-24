@@ -6140,7 +6140,21 @@ function registerIpcHandlers() {
         return bytes
       }
       const [de, en] = await Promise.all([readFilter('de', 'de.bloom'), readFilter('en', 'en.bloom')])
-      return { manifest, de, en }
+      // French is an optional extra: when its filter is missing or damaged only French switches off.
+      const french = manifest?.french
+      let fr
+      if (french?.file === 'fr.bloom' && Number.isSafeInteger(french.bitCount) && /^[a-f0-9]{64}$/u.test(french.sha256)) {
+        try {
+          const bytes = await fsp.readFile(path.join(directory, 'fr.bloom'))
+          if (
+            bytes.length > 0 && bytes.length <= 2 * 1024 * 1024 && bytes.length * 8 === french.bitCount
+            && crypto.createHash('sha256').update(bytes).digest('hex') === french.sha256
+          ) fr = bytes
+        } catch {
+          fr = undefined
+        }
+      }
+      return fr ? { manifest, de, en, fr } : { manifest, de, en }
     })().catch((error) => {
       spellingResourcesPromise = null
       throw error
@@ -6150,7 +6164,7 @@ function registerIpcHandlers() {
 
   const spellingWordCandidatePromises = new Map()
   handle(IPC.loadSpellingWordCandidates, async (_event, language) => {
-    if (language !== 'de' && language !== 'en') throw new Error('Unbekannte Wörterbuchsprache.')
+    if (language !== 'de' && language !== 'en' && language !== 'fr') throw new Error('Unbekannte Wörterbuchsprache.')
     if (!spellingWordCandidatePromises.has(language)) {
       spellingWordCandidatePromises.set(language, (async () => {
         const directory = path.join(app.getAppPath(), 'dist', 'spell')
@@ -6159,7 +6173,7 @@ function registerIpcHandlers() {
         const manifest = JSON.parse(manifestBuffer.toString('utf8'))
         if (manifest?.format !== 'fanotes-spelling-bloom-v2') throw new Error('Unbekanntes Rechtschreibformat.')
         const expectedFile = `${language}.words`
-        const descriptor = manifest?.languages?.[language]?.candidates
+        const descriptor = language === 'fr' ? manifest?.french?.candidates : manifest?.languages?.[language]?.candidates
         if (
           descriptor?.file !== expectedFile ||
           !Number.isSafeInteger(descriptor.size) ||
