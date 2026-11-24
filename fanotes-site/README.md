@@ -63,3 +63,20 @@ GET /api/v1/updates/linux-x64?current=2026.10.2&channel=nightly
 ```
 
 Stable berücksichtigt ausschließlich vollständige Releases. Beta berücksichtigt zusätzlich neuere `-beta.N`-Vorabversionen. Nightly folgt jedem Commit auf main, der kein Stable- oder Beta-Release ist (`X.Y.Z-nightly.<UTC-Zeitstempel>.<Commit>`), und bevorzugt einen neueren Stable-Stand. Kanalgebundene Paket- und Delta-Pfade verhindern, dass ein Manifest versehentlich Dateien eines anderen Kanals lädt. Nightly liegt unter `/download/nightly/…` und `/download/delta/<plattform>-x64/nightly/<version>`. Jedes Manifest enthält die aktuelle Version, Release Notes, Downloadgrößen und SHA-256-Prüfsummen. Es wird nach Sprache und Kanal serverseitig mit Ed25519 signiert; FaNotes enthält ausschließlich den zugehörigen öffentlichen Schlüssel und verwirft unsignierte, veränderte oder für eine andere Plattform beziehungsweise einen anderen Kanal ausgestellte Antworten.
+
+## Web Push (Kanti+ im Browser)
+
+Benachrichtigungen bei geschlossenem Tab: VAPID (RFC 8292), Nutzdaten verschlüsselt nach RFC 8291 (`aes128gcm`), Zustellung nach RFC 8030, alles mit `node:crypto` in `web-push.mjs`; der Meldungstext kommt aus `web-push-notice.mjs`.
+
+| Was | Wert |
+|---|---|
+| Schlüsseldatei | systemd-Credential `web-push-vapid`, sonst `FANOTES_WEB_PUSH_VAPID`, sonst `/etc/fanotes/web-push-vapid.json` (JSON `{publicKey, privateKey}`, base64url, Modus `0600`) |
+| Erzeugen | `node scripts/generate-vapid.mjs [Datei]` (überschreibt nichts, druckt nur den öffentlichen Schlüssel) |
+| Kontakt (VAPID `sub`) | `FANOTES_WEB_PUSH_SUBJECT`, Standard `https://schulnetz.fasrv.ch/` |
+| Ohne Schlüsseldatei | Web Push ist aus: `/session` meldet `webPush: false`, die Einstellung bleibt verborgen, alle Routen antworten 404. Die Datei wird höchstens einmal pro Minute neu gesucht. |
+
+Routen unter `/api/v1/kanti-web` (Same-Origin und CSRF wie die anderen ändernden Routen): `GET /push/key` (öffentlich), `GET /push/status`, `POST /push/subscribe` (`{subscription, connectionId, lang}`), `POST /push/unsubscribe` (`{connectionId?}`, ohne Verbindung wird das Abo ganz entfernt).
+
+Aufbewahrung: Das Abo (Endpunkt und die beiden Schlüssel des Browsers, Sprache, Verbindungs-IDs) steht in der Browser-Sitzungsdatei (`web/sessions/`), eines pro Sitzung. Es wird gelöscht beim Abschalten, beim Abmelden, wenn die Sitzung abläuft (30 Tage ohne Nutzung, spätestens 90 Tage), wenn die Verbindung entfernt oder die App-Identität gelöscht wird, wenn das Konto gelöscht wird und wenn der Push-Dienst 404 oder 410 meldet. Endpunkte erlaubt: `fcm.googleapis.com`, `updates.push.services.mozilla.com`, `*.notify.windows.com`, `web.push.apple.com` (https, Standardport). Endpunkt und Schlüssel erscheinen in keinem Log; im Überwachungsprotokoll der Notenzusage steht pro Push nur der HTTP-Status (`web`).
+
+Gesendet wird dort, wo auch die App ihren Sync- und Anmelde-Push bekommt (`publishChanges` und `ping` in `schulnetz-api.mjs`): dieselben, nach den Meldungseinstellungen gefilterten und bei verdeckten Noten geschwärzten Einträge, hohe Dringlichkeit bei Noten und Änderungen von heute bis in sieben Tage, `Topic` je Verbindung. Der stille Pendel-Push für das Widget geht nicht an Browser.

@@ -18,7 +18,7 @@ const COMMUTE_ALERTS: (keyof AlertSettings)[] = ['commuteDelay', 'commuteCancell
 
 export const Settings = () => {
   const kanti = useKanti()
-  const { t, prefs, setPrefs, data, demo, connections, active } = kanti
+  const { t, prefs, setPrefs, data, demo, connections, active, webPush } = kanti
   const [browserPermission, setBrowserPermission] = useState(permission())
   const [adding, setAdding] = useState(false)
   const [renaming, setRenaming] = useState<Connection | null>(null)
@@ -78,6 +78,18 @@ export const Settings = () => {
           detail={browserPermission === 'denied' ? t.browserAlertsBlocked : t.browserAlertsBody}
           disabled={browserPermission === 'unsupported' || browserPermission === 'denied' || demo}
         />
+        {webPush.available && active ? (
+          <>
+            <Toggle
+              checked={webPush.enabled.has(active.id)}
+              onChange={(on) => (on ? webPush.enable(active.id) : webPush.disable(active.id))}
+              label={t.pushClosed}
+              detail={webPush.blocked ? t.browserAlertsBlocked : connections.length > 1 ? t.pushClosedFor(active.label) : t.pushClosedBody}
+              disabled={webPush.busy || (webPush.blocked && !webPush.enabled.has(active.id))}
+            />
+            {webPush.error ? <Banner tone="danger" icon="warning">{webPush.error}</Banner> : null}
+          </>
+        ) : null}
         {linked ? (
           <>
             <p className="settings-note"><Icon name="info" size={16} />{t.alertsShared}{active ? ` (${active.label})` : ''}</p>

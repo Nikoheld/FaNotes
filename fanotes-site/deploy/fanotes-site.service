@@ -35,6 +35,8 @@ Environment=NODE_OPTIONS=--max-http-header-size=65536
 # Credentials replace the broad /etc/fanotes read. Omit a line at deploy when that file is absent.
 LoadCredential=schulnetz-token:/etc/fanotes/schulnetz-token.key
 LoadCredential=fcm-service-account:/etc/fanotes/fcm-service-account.json
+# VAPID key pair for Web Push (node scripts/generate-vapid.mjs). Omit this line until the file exists.
+LoadCredential=web-push-vapid:/etc/fanotes/web-push-vapid.json
 LoadCredential=update-signing-key:/etc/fanotes/update-signing-private.pem
 LoadCredential=release-checksum-signature:/etc/fanotes/SHA256SUMS.sig
 LoadCredential=backup-enrollment-token:/etc/fanotes/backup-enrollment-token

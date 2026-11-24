@@ -1,0 +1,16 @@
+{
+  "name": "Kanti+",
+  "short_name": "Kanti+",
+  "description": "Stundenplan, Noten, Prüfungen, Absenzen und Pendeln aus Schulnetz. Inoffiziell.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "lang": "de",
+  "background_color": "#f4f5f2",
+  "theme_color": "#f4f5f2",
+  "icons": [
+    { "src": "/kanti-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/kanti-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

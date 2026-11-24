@@ -6,6 +6,8 @@ import type { AlertSettings, Change, CommuteBoards, CommuteConfig, CommuteRoute,
 
 export const API = '/api/v1/kanti-web'
 
+export interface PushStatus { enabled: boolean; subscribed: boolean; connections: string[]; host: string }
+
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) {
     super(message)
@@ -62,6 +64,11 @@ export const createApi = (transport: Transport = (input, init) => fetch(input, i
     /** Today's Mensa menu; public, same body as the app gets. */
     mensa: () => call<unknown>('GET', '/mensa'),
     logout: () => call<{ signedOut: boolean }>('POST', '/logout'),
+    /** Web Push (notifications with the tab closed): the server's public VAPID key, this session's subscription state. */
+    pushKey: () => call<{ enabled: boolean; publicKey: string }>('GET', '/push/key'),
+    pushStatus: () => call<PushStatus>('GET', '/push/status'),
+    pushSubscribe: (connectionId: string, subscription: PushSubscriptionJSON, lang: string) => call<PushStatus>('POST', '/push/subscribe', { connectionId, subscription, lang }),
+    pushUnsubscribe: (connectionId?: string) => call<PushStatus>('POST', '/push/unsubscribe', connectionId ? { connectionId } : {}),
     prelogin: (email: string) => call<{ kdf: { algorithm: string; iterations: number; salt: string } }>('POST', '/prelogin', { email }),
     login: (email: string, authKey: string) => call<{ ok: boolean }>('POST', '/login', { email, authKey }),
     startPairing: () => call<{ code: string; expiresAt: string }>('POST', '/pair'),

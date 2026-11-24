@@ -262,6 +262,58 @@ test('a grade whose FCM response arrives after 10 minutes is overdue and logged'
   }
 })
 
+test('a grade push to a browser is timed like the FCM push, with status codes only', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-push-web-'))
+  let clock = Date.parse('2026-11-14T08:00:00Z')
+  let gradePolls = 0
+  const lines = []
+  const fetch = async (url) => {
+    const target = String(url)
+    const json = (value) => ({ status: 200, text: async () => JSON.stringify(value) })
+    if (target.endsWith('/token.php')) return json({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 })
+    if (target.includes('/me/grades')) {
+      gradePolls += 1
+      const grades = [{ id: 'g1', course: 'Mathematik', courseId: 'math', title: 'Probe', date: '2026-11-14', mark: '5.5', weight: '1' }]
+      if (gradePolls > 1) grades.push({ id: 'g2', course: 'Englisch', courseId: 'en', title: 'Essay', date: '2026-11-14', mark: '4.5', weight: '1' })
+      return json(grades)
+    }
+    return json([])
+  }
+  const dropped = []
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    autostart: false,
+    now: () => new Date(clock),
+    log: (level, message) => lines.push(`${level} ${message}`),
+    fetch,
+    fcmSend: async () => ({ status: 200 }),
+    web: {
+      pushTargets: async () => [{ hash: 'h'.repeat(64), subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/secret-endpoint', p256dh: 'x', auth: 'y' }, connectionId: 'abcdef012345', lang: 'de', label: '' }],
+      dropPush: async (hash, endpoint) => { dropped.push(endpoint) },
+    },
+    webPush: { enabled: async () => true, send: async () => { clock += 11 * 60_000; return { status: 410, drop: true } } },
+  })
+  try {
+    const accountId = 'b'.repeat(32)
+    await runtime.linkAccount(accountId, { baseUrl: 'https://www.schulnetz-ag.ch/aksa', deviceId: '0123456789abcdef01234567', refreshToken: 'synthetic-refresh-token-long-enough' })
+    await runtime.pollAccount(accountId)
+    await runtime.pollAccount(accountId)
+    const health = await runtime.health()
+    assert.equal(health.pushes24h.count, 1)
+    assert.equal(health.pushes24h.overdue, 1)
+    const warn = lines.find((line) => line.startsWith('warn Noten-Push über 10 Minuten'))
+    assert.ok(warn, lines.join('\n'))
+    assert.equal(lines.join('\n').includes('secret-endpoint'), false)
+    const stored = await readFile(join(root, 'accounts', accountId, 'monitor.json'), 'utf8')
+    assert.equal(stored.includes('secret-endpoint'), false)
+    assert.deepEqual(JSON.parse(stored).pushes[0].web, ['410'])
+    assert.equal(dropped.length, 1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('sealed notices fit the FCM data limit and open with the device key', () => {
   const key = pushKeyBytes(randomBytes(32).toString('base64'))
   assert.ok(key)
