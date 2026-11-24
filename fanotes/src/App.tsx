@@ -103,6 +103,7 @@ import { externalArrivals, loadArrivals, saveArrivals } from './lib/newArrivals.
 import { useExternalTabChanges, useTabHolds } from './lib/useExternalTabChanges'
 import { WorkRequestsClient } from './lib/workRequests'
 import { failedLabel, syncStatusLabel } from './lib/sync/status'
+import { SharePresence, type SharePeople } from './components/SharePresence'
 import type { SettingsSection } from './components/SettingsModal'
 import { ProfileOverviewPublisher } from './components/ProfileOverviewPublisher'
 import { createAddonFetchText, createAddonStoragePort } from './lib/addons/storagePort'
@@ -904,7 +905,13 @@ export default function App({ startupBootstrap }: AppProps) {
   const shareInFlight = useRef(false)
   const shareEditRef = useRef<ShareEditClient | null>(null)
   const shareEditApplyingRef = useRef(false)
-  const [sharePeople, setSharePeople] = useState<{ editors: string[]; present: string[] } | null>(null)
+  const [sharePeople, setSharePeople] = useState<SharePeople | null>(null)
+  // Test seam for scripts/check-share-presence.mjs: a live share needs a server, the presence UI only needs this state.
+  useEffect(() => {
+    const onTestPeople = (event: Event) => setSharePeople((event as CustomEvent<SharePeople | null>).detail ?? null)
+    window.addEventListener('fanotes:test-share-people', onTestPeople)
+    return () => window.removeEventListener('fanotes:test-share-people', onTestPeople)
+  }, [])
   const [shareJoin, setShareJoin] = useState<ShareOpenState | null>(null)
   const [shareNameDraft, setShareNameDraft] = useState('')
   const [shareSessionToken, setShareSessionToken] = useState(0)
@@ -2367,7 +2374,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const sent = patch.content
     void liveEdit.editNote(sharePath, patch).then(() => {
       if (shareEditRef.current !== liveEdit) return
-      setSharePeople({ editors: liveEdit.peopleWhoCanEdit(), present: liveEdit.peopleEditing() })
+      setSharePeople({ editors: liveEdit.peopleWhoCanEdit(), present: liveEdit.peopleEditing(), self: liveEdit.name })
       if (sent === undefined) return
       const tab = tabsRef.current.find((candidate) => candidate.path === path)
       if (!tab || tab.content !== sent) return
@@ -4478,7 +4485,7 @@ export default function App({ startupBootstrap }: AppProps) {
             vaultPaths,
           })
           shareEditRef.current = client
-          setSharePeople({ editors: client.peopleWhoCanEdit(), present: client.peopleEditing() })
+          setSharePeople({ editors: client.peopleWhoCanEdit(), present: client.peopleEditing(), self: client.name })
           setShareSessionToken((current) => current + 1)
         } catch {
           /* The link is already public. This device joins when the note is opened from it. */
@@ -4553,10 +4560,11 @@ export default function App({ startupBootstrap }: AppProps) {
       await session.pull().catch(() => undefined)
       if (stopped || shareEditRef.current !== session) return
       // Same people as a second ago: no new state, or the whole app renders once a second for nothing.
-      const nextPeople = { editors: session.peopleWhoCanEdit(), present: session.peopleEditing() }
+      const nextPeople = { editors: session.peopleWhoCanEdit(), present: session.peopleEditing(), self: session.name }
       setSharePeople((current) => (current
         && current.editors.join('\n') === nextPeople.editors.join('\n')
-        && current.present.join('\n') === nextPeople.present.join('\n') ? current : nextPeople))
+        && current.present.join('\n') === nextPeople.present.join('\n')
+        && current.self === nextPeople.self ? current : nextPeople))
       const owned = tabsRef.current.filter((candidate) => session.owns(candidate.path))
       const tab = owned.find((candidate) => candidate.path === activePathRef.current)
         ?? owned.find((candidate) => candidate.path === splitPathRef.current)
@@ -4712,7 +4720,7 @@ export default function App({ startupBootstrap }: AppProps) {
         vaultPaths,
       })
       shareEditRef.current = client
-      setSharePeople({ editors: confirmed.editors, present: client.peopleEditing() })
+      setSharePeople({ editors: confirmed.editors, present: client.peopleEditing(), self: client.name })
       setShareSessionToken((current) => current + 1)
       setShareJoin(null)
       await refreshTree()
@@ -6903,6 +6911,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 />
               ))}
             </div>
+            <SharePresence people={sharePeople} />
             <button type="button" className="tabs-menu" title="Neue Notiz (Strg+N)" aria-label="Neue Notiz" onClick={() => void createNote()}><Plus size={14} /></button>
           </div>
           {tabMenu && (() => {
@@ -7581,14 +7590,6 @@ export default function App({ startupBootstrap }: AppProps) {
       {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal syncEngine={syncApi ? syncEngine : undefined} syncState={syncState} initialSection={settingsSection} platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onOpenAddonStore={() => { setSettingsOpen(false); openAddonStore() }} addonSummary={{ installed: addonState.installed.length, running: addonState.installed.filter((record) => addonState.statuses[record.id]?.state === 'running').length }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onInstallUpdateOnQuit={installUpdateOnQuit} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} onConvertFamd={convertAllFamdNotes} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
       {addonStoreOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Store" fallbackTitle="Der Add-on-Store ist abgestürzt"><AddonStoreModal open onClose={() => setAddonStoreOpen(false)} runtime={addonRuntime} runtimeState={addonState} source={addonSource} fetchText={addonFetchText} onOpenExternal={(url) => { void window.fanotes.openExternal(url).catch(() => toast('Der Link konnte nicht geöffnet werden.', 'error')) }} toast={toast} sourceText={settings.addonSource} onChangeSource={(value) => { addonIndexCache.reset(); applySettings({ ...settingsRef.current, addonSource: value }) }} autoUpdate={settings.addonsAutoUpdate} onChangeAutoUpdate={(value) => applySettings({ ...settingsRef.current, addonsAutoUpdate: value })} /></SafeBoundary></Suspense>}
       {addonPrompt && <Suspense fallback={null}><SafeBoundary name="Add-on-Eingabe" fallbackTitle="Der Add-on-Dialog ist abgestürzt"><AddonPromptDialog request={addonPrompt} /></SafeBoundary></Suspense>}
-      {sharePeople && (
-        <p className="share-edit-presence" role="status">
-          <span>Personen, die bearbeiten können</span>
-          <span data-i18n-ignore>{sharePeople.editors.join(', ') || '—'}</span>
-          <span>Gerade am Bearbeiten</span>
-          <span data-i18n-ignore>{sharePeople.present.join(', ') || '—'}</span>
-        </p>
-      )}
       {shareJoin && (
         <div className="modal-backdrop confirm-backdrop" role="presentation">
           <section ref={shareJoinDialogRef} className="confirm-dialog share-link-dialog" role="dialog" aria-modal="true" aria-labelledby="fanotes-share-join-title">

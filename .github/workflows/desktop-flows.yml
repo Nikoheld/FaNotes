@@ -11,6 +11,7 @@ on:
       - 'fanotes/src/**'
       - 'fanotes/electron/**'
       - 'fanotes/scripts/check-desktop-untested-flows.mjs'
+      - 'fanotes/scripts/check-share-presence.mjs'
       - 'fanotes/scripts/electron-test-stub.cjs'
       - 'fanotes/scripts/lib/desktop-flow.mjs'
       - '.github/workflows/desktop-flows.yml'
@@ -48,3 +49,5 @@ jobs:
           test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
       - name: Desktop flows
         run: npm run check:desktop-flows || { echo "::warning::desktop flows failed once; retrying"; npm run check:desktop-flows; }
+      - name: Share presence avatars
+        run: npm run check:share-presence

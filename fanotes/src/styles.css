@@ -5425,3 +5425,21 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
   color: #fff; background: var(--live-color, #2e86ab); white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) { .live-avatar { animation: none; } .live-pen { transition: none; } }
+
+/* Share presence: overlapping initials circles at the right end of the tab row (Word / Docs style). */
+.share-presence { flex: none; display: flex; align-items: center; padding: 0 8px; }
+.share-presence-button { display: flex; align-items: center; height: 28px; padding: 0 3px; border: 0; border-radius: 14px; background: transparent; cursor: pointer; }
+.share-presence-button:hover { background: var(--panel-hover); }
+.share-presence-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.share-avatar-slot { display: flex; }
+.share-avatar-slot + .share-avatar-slot { margin-left: -3px; }
+.share-avatar { box-sizing: border-box; width: 24px; height: 24px; flex: none; display: inline-grid; place-items: center; border-radius: 50%; color: #fff; font-size: 10px; font-weight: 600; line-height: 1; font-family: inherit; letter-spacing: 0; box-shadow: 0 0 0 2px var(--bg); user-select: none; animation: share-avatar-in var(--dur-2) var(--ease-decel) both; }
+.share-avatar-more { background: var(--panel-strong); color: var(--text); box-shadow: 0 0 0 2px var(--bg), inset 0 0 0 1px var(--border-strong); }
+@keyframes share-avatar-in { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: none; } }
+.share-presence-tip { position: fixed; z-index: 410; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--panel-strong); color: var(--text); box-shadow: var(--shadow); font-size: 12px; line-height: 1.3; font-family: inherit; white-space: nowrap; pointer-events: none; animation: share-avatar-in var(--dur-1) var(--ease-decel) both; }
+.share-presence-popover { min-width: 230px; gap: 6px; padding: 8px; animation: share-avatar-in var(--dur-2) var(--ease-decel) both; transform-origin: top right; }
+.share-presence-popover h3 { margin: 0 0 4px; padding: 0 2px; color: var(--text-muted); font-size: 11px; font-weight: 600; line-height: 1.3; font-family: inherit; text-transform: none; }
+.share-presence-popover ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.share-presence-popover li { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 2px; font-size: 12.5px; line-height: 1.25; font-family: inherit; }
+.share-presence-popover .share-avatar { box-shadow: none; animation: none; }
+@media (prefers-reduced-motion: reduce) { .share-avatar, .share-presence-tip, .share-presence-popover { animation: none; } }
