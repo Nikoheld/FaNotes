@@ -9,7 +9,12 @@ name: Handwriting note opens stable
 # time budget (fanotes/scripts/check-ink-open-flicker.mjs, about a minute).
 # Another step drives text boxes (fanotes/scripts/check-text-field-position.mjs,
 # about a minute): dragging never selects text, and boxes stay where they were
-# left. Never builds or publishes a release.
+# left. Zooming keeps the handwriting on the paper in every frame, at device
+# pixel ratio 2 and 1: no moved, stretched or missing ink while or after a
+# pinch, wheel, keyboard or button zoom, the sharp page within its budget and
+# the zoom percentage in step with the picture
+# (fanotes/scripts/check-zoom-ink-registration.mjs, about three minutes).
+# Never builds or publishes a release.
 on:
   pull_request:
     paths:
@@ -22,6 +27,8 @@ on:
       - 'fanotes/src/components/InkPreviewLayer.tsx'
       - 'fanotes/src/lib/packedInk.ts'
       - 'fanotes/src/lib/inkBitmapCache.ts'
+      - 'fanotes/src/lib/inkWindowPlan.ts'
+      - 'fanotes/src/lib/inkRepaintJob.ts'
       - 'fanotes/src/lib/paper*.ts'
       - 'fanotes/src/lib/noteCanvas.ts'
       - 'fanotes/src/lib/noteTextField.ts'
@@ -35,6 +42,7 @@ on:
       - 'fanotes/scripts/check-ink-open-flicker.mjs'
       - 'fanotes/scripts/check-text-field-position.mjs'
       - 'fanotes/scripts/check-text-field-toolbar.mjs'
+      - 'fanotes/scripts/check-zoom-ink-registration.mjs'
       - '.github/workflows/famd-open-stable.yml'
   workflow_dispatch:
 
@@ -78,3 +86,5 @@ jobs:
         run: npm run check:text-field-position
       - name: Text boxes use the document formatting toolbar
         run: npm run check:text-field-toolbar
+      - name: Zooming keeps the handwriting on the paper in every frame
+        run: npm run check:zoom-ink-registration
