@@ -99,13 +99,26 @@ export const connect = async (app) => {
     if (app.child.exitCode !== null) throw new Error(`Electron exited: ${app.output().slice(-400)}`)
   }
   if (!browser) throw new Error('Electron did not open a debugging port')
+  // The app opens hidden helper windows next to the main one (the OCR host while PDFs are indexed, the PDF export
+  // window). They are visible over CDP and close again on their own, so only the main window counts: the page
+  // that loaded the app shell (index.html with the preload API), never the first page in the list.
+  const isHelperPage = (candidate) => /ocr-host|recognition\.html|writing\.html|fanotes-note-export|^devtools|^about:blank$/u.test(candidate.url())
   let page = null
-  for (let tries = 0; tries < 160 && !page; tries += 1) {
-    page = browser.contexts().flatMap((context) => context.pages()).find((candidate) => !candidate.url().startsWith('devtools')) ?? null
-    if (!page) await sleep(250)
+  const deadlinePage = Date.now() + 90_000
+  while (!page && Date.now() < deadlinePage) {
+    for (const candidate of browser.contexts().flatMap((context) => context.pages())) {
+      if (candidate.isClosed() || isHelperPage(candidate)) continue
+      const isMain = await candidate.evaluate(() => Boolean(window.fanotes)).catch(() => false)
+      if (isMain) { page = candidate; break }
+    }
+    if (!page) {
+      if (app.child.exitCode !== null) throw new Error(`Electron exited: ${app.output().slice(-400)}`)
+      await sleep(250)
+    }
   }
   if (!page) throw new Error('no renderer page')
   page.on('pageerror', (error) => console.log('pageerror', String(error).slice(0, 200)))
+  page.on('close', () => console.log(`diagnostics: main page closed (${page.url().slice(0, 80)}) ${describeApp(app)}`))
   await page.waitForFunction(() => Boolean(window.fanotes && document.querySelector('.file-tree__row')), null, { timeout: 90_000 })
   return { browser, page }
 }
