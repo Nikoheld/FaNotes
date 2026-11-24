@@ -85,6 +85,9 @@ const de = {
   alerts: 'Benachrichtigungen', alertsShared: 'Diese Einstellungen gelten auch in der App.',
   browserAlerts: 'Benachrichtigungen in diesem Browser', browserAlertsBody: 'Solange Kanti+ in einem Tab offen ist.',
   browserAlertsBlocked: 'Der Browser blockiert Benachrichtigungen für diese Seite.',
+  pushClosed: 'Benachrichtigungen auch bei geschlossenem Tab',
+  pushClosedBody: 'Neue Noten und Änderungen kommen auch an, wenn Kanti+ nicht offen ist. Der Push-Dienst deines Browsers liefert sie Ende-zu-Ende verschlüsselt aus.',
+  pushClosedFor: (label: string) => `Gilt für «${label}». Der Push-Dienst deines Browsers liefert die Meldungen Ende-zu-Ende verschlüsselt aus, auch wenn Kanti+ nicht offen ist.`,
   alertNames: {
     enabled: 'Schulbenachrichtigungen', gradeNew: 'Neue Noten', gradeChanged: 'Geänderte Noten', lessonCancelled: 'Ausfälle', lessonChanged: 'Stundenplanänderungen',
     examNew: 'Neue Prüfungen', examMoved: 'Verschobene Prüfungen', examCancelled: 'Abgesagte Prüfungen', examRoom: 'Raumänderungen bei Prüfungen',
@@ -298,6 +301,9 @@ const en: Strings = {
   alerts: 'Notifications', alertsShared: 'These settings apply in the app too.',
   browserAlerts: 'Notifications in this browser', browserAlertsBody: 'While Kanti+ is open in a tab.',
   browserAlertsBlocked: 'The browser blocks notifications for this site.',
+  pushClosed: 'Notifications even when the tab is closed',
+  pushClosedBody: 'New grades and changes arrive even when Kanti+ is not open. Your browser’s push service delivers them end-to-end encrypted.',
+  pushClosedFor: (label: string) => `Applies to “${label}”. Your browser’s push service delivers the alerts end-to-end encrypted, even when Kanti+ is not open.`,
   alertNames: {
     enabled: 'School notifications', gradeNew: 'New grades', gradeChanged: 'Changed grades', lessonCancelled: 'Cancellations', lessonChanged: 'Timetable changes',
     examNew: 'New exams', examMoved: 'Moved exams', examCancelled: 'Cancelled exams', examRoom: 'Exam room changes',

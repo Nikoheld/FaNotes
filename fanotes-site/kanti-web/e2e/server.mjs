@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { randomBytes } from 'node:crypto'
+import { createECDH, randomBytes } from 'node:crypto'
 
 const port = Number(process.env.E2E_PORT || 4783)
 const dist = resolve(fileURLToPath(new URL('../dist', import.meta.url)))
@@ -19,6 +19,15 @@ const { handleSyncRequest } = await import(`${site}sync-api.mjs`)
 const { createSchulnetzRuntime } = await import(`${site}schulnetz-api.mjs`)
 const { createKantiWebApi, createKantiWebAppRoutes, createKantiWebStore } = await import(`${site}kanti-web-api.mjs`)
 
+// Web Push is on with a throwaway key and a sender that never leaves the process.
+const { createWebPush } = await import(`${site}web-push.mjs`)
+const vapid = createECDH('prime256v1')
+vapid.generateKeys()
+const webPush = createWebPush({
+  keys: { publicKey: vapid.getPublicKey().toString('base64url'), privateKey: vapid.getPrivateKey().toString('base64url') },
+  send: async () => ({ status: 201 }),
+})
+
 const store = createKantiWebStore({ root })
 const schulnetz = createSchulnetzRuntime({
   root,
@@ -28,9 +37,10 @@ const schulnetz = createSchulnetzRuntime({
   fetch: async () => { throw new Error('no network in e2e') },
   fcmSend: async () => ({ status: 200 }),
   web: createKantiWebAppRoutes(store, {}),
+  webPush,
 })
 // The browser reaches the server as http://127.0.0.1:<port>; the API checks Host and Origin.
-const web = createKantiWebApi({ store, access: schulnetz.webAccess, hosts: ['127.0.0.1'], origins: [`http://127.0.0.1:${port}`], log: () => {} })
+const web = createKantiWebApi({ store, webPush, access: schulnetz.webAccess, hosts: ['127.0.0.1'], origins: [`http://127.0.0.1:${port}`], log: () => {} })
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml',

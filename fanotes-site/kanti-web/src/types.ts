@@ -114,6 +114,8 @@ export interface Session {
   createdAt: string
   expiresAt: string
   account: 'fanotes' | null
+  /** The server can send notifications with the tab closed (Web Push). */
+  webPush?: boolean
   connections: Connection[]
 }
 

@@ -10,6 +10,8 @@ import { parseRoute, routeHref, type Route } from './lib/route'
 import { pickLanguage, STRINGS, type Language, type Strings } from './lib/i18n'
 import type { View } from './lib/shortcuts'
 import { useCommuteStore, type Commute } from './state-commute'
+import { useWebPush, type WebPush } from './state-push'
+import type { OpenMessage } from './lib/webpush'
 import { zurichToday } from '@shared/schulnetz-logic'
 import type { AlertSettings, Change, Connection, LinkStatus, Reveals, Session, Snapshot } from './types'
 
@@ -44,6 +46,8 @@ export interface Kanti {
   language: Language
   t: Strings
   commute: Commute
+  /** Notifications with the tab closed (Web Push). */
+  webPush: WebPush
   route: Route
   navigate: (view: View, params?: Record<string, string>, replace?: boolean) => void
   setPrefs: (patch: Partial<Prefs>) => void
@@ -115,6 +119,34 @@ export const KantiProvider = ({ children, api: injected, demo: startInDemo = fal
 
   const connections = useMemo<Connection[]>(() => (demo ? [demoConnection()] : session?.connections || []), [demo, session])
   const active = connections.find((connection) => connection.id === prefs.activeConnection) || connections[0] || null
+  const webPush = useWebPush({ api, session, demo, language, failure: t.error })
+  // The page skips its own notification for a connection the push already covers.
+  const webPushRef = useRef(webPush)
+  webPushRef.current = webPush
+
+  // A clicked push notification opens the right view of the right connection: as a message to an open
+  // page, or as ?connection=<id> on a new window (removed again so the address stays clean).
+  useEffect(() => {
+    if (phase !== 'ready' || demo) return
+    const open = (path: string, connection: string) => {
+      if (connection && connectionsRef.current.some((item) => item.id === connection)) setPrefs({ activeConnection: connection })
+      const next = parseRoute(path)
+      navigate(next.view)
+    }
+    const params = new URLSearchParams(window.location.search)
+    const wanted = params.get('connection')
+    if (wanted) {
+      params.delete('connection')
+      const rest = params.toString()
+      window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`)
+      open(window.location.pathname, wanted)
+    }
+    const onMessage = (event: MessageEvent<OpenMessage>) => {
+      if (event.data?.type === 'kanti-open' && typeof event.data.path === 'string') open(event.data.path, String(event.data.connection || ''))
+    }
+    navigator.serviceWorker?.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker?.removeEventListener('message', onMessage)
+  }, [phase, demo, navigate, setPrefs])
 
   const patchData = useCallback((id: string, patch: Partial<ConnectionData>) => {
     setStore((current) => ({ ...current, [id]: { ...(current[id] || EMPTY_DATA), ...patch } }))
@@ -208,7 +240,7 @@ export const KantiProvider = ({ children, api: injected, demo: startInDemo = fal
           setNews((current) => ({ ...current, [connection.id]: changes.slice(-30).reverse() }))
           const { show, cursor } = freshChanges(changes, readCursor(connection.id))
           writeCursor(connection.id, cursor)
-          if (show.length && prefsRef.current.browserAlerts) {
+          if (show.length && prefsRef.current.browserAlerts && !webPushRef.current.enabled.has(connection.id)) {
             for (const change of show) showNotification(change, connectionsRef.current.length > 1 ? connection.label : '', () => setPrefs({ activeConnection: connection.id }))
           }
           if (show.length) void load(connection.id)
@@ -248,6 +280,7 @@ export const KantiProvider = ({ children, api: injected, demo: startInDemo = fal
 
   const value: Kanti = {
     commute,
+    webPush,
     api,
     phase: demo ? 'ready' : phase,
     demo,
@@ -304,6 +337,7 @@ export const KantiProvider = ({ children, api: injected, demo: startInDemo = fal
     },
     logout: async () => {
       try { await api.logout() } catch { /* the cookie is cleared either way on the next 401 */ }
+      await webPush.reset()
       setSession(null)
       setStore({})
       setNews({})
