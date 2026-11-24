@@ -64,7 +64,19 @@ export const measurePaperFrame = (paper: HTMLElement): PaperFrame => {
   return { left: rect.left, top: rect.top, unit, zoom: layout > 0 ? unit / layout : 1 }
 }
 
-/** Newly pasted pictures start selected; the layer asks once when it mounts. */
-const fresh = new Set<string>()
-export const markFreshSheetImage = (id: string) => { fresh.add(id) }
-export const takeFreshSheetImage = (id: string) => fresh.delete(id)
+/**
+ * Newly pasted pictures start selected; the layer asks when it mounts. The mark lasts a few seconds, because the
+ * note may reload its worksheets right after the paste and mount the layer a second time.
+ */
+const FRESH_MS = 4000
+const fresh = new Map<string, number>()
+export const markFreshSheetImage = (id: string) => { fresh.set(id, Date.now()) }
+export const takeFreshSheetImage = (id: string) => {
+  const at = fresh.get(id)
+  if (at === undefined) return false
+  if (Date.now() - at > FRESH_MS) {
+    fresh.delete(id)
+    return false
+  }
+  return true
+}

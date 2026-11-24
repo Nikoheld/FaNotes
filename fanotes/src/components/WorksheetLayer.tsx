@@ -495,7 +495,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
     const layer = layerRef.current
     const paper = layer?.closest<HTMLElement>('.unified-paper') ?? null
     if (!layer || !paper) return
-    if (floating && placement) layer.dataset.sheetExtent = String(sheetImageBottom(placement, aspect) + 0.08)
+    if (floating && placement) layer.dataset.sheetExtent = String(sheetImageBottom(placement, aspect) + 0.3)
     else delete layer.dataset.sheetExtent
     syncSheetExtent(paper)
     return () => {
@@ -546,7 +546,17 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
     const frame = frameRef.current
     if (!frame) return
     frame.focus({ preventScroll: true })
-    frame.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    // Bring it to the middle of the view when it landed (partly) outside; the paper scroller is the one to move.
+    const view = resolvePaperZoomScroller(frame)
+    const scrollToFrame = () => {
+      if (!view) return
+      const box = frame.getBoundingClientRect()
+      const port = view.getBoundingClientRect()
+      if (box.top >= port.top + 56 && box.bottom <= port.bottom - 16) return
+      view.scrollTop += box.top + box.height / 2 - (port.top + port.height / 2)
+    }
+    window.requestAnimationFrame(scrollToFrame)
+    window.setTimeout(scrollToFrame, 250)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

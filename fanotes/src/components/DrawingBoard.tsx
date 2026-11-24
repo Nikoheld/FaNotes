@@ -868,6 +868,8 @@ export type DrawingBoardHandle = {
   exportPdfNoteMarks: () => Promise<PdfNoteMarksSnapshot | null>
   /** Paint the restored sheet once heading folds are back. */
   finishCanvasExport: () => void
+  /** Lowest written stroke, in paper widths from the top of the sheet; 0 when there is no ink. */
+  inkBottom: () => number
 }
 
 /** See `DrawingBoardProps.foreignErase`. Points and radius are client pixels. */
@@ -8231,6 +8233,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     exportInkDocument,
     exportPdfNoteMarks,
     finishCanvasExport,
+    inkBottom: () => bottomOfStrokes(strokesRef.current, sourceHeightRef.current) / SOURCE_WIDTH,
   }), [drawingPayload, exportInkDocument, exportOpenCanvas, exportPdfNoteMarks, finishCanvasExport, inkLoadBlocksSave, inkMode, inkRecordExists, restoreUnmovedSelection, setDirty, tool, waitForCanvasExport, writeInkPage])
 
   useEffect(() => () => {

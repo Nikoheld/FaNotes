@@ -80,7 +80,7 @@ const seedVault = (profile) => {
   })))
   fs.writeFileSync(path.join(profile.vault, 'Altes Bild.md'), `# Altes Bild\n\nText davor.\n\n<!-- fanotes-worksheet:${legacyImage} -->\n`)
   const pdf = 'legacy-pdf-1'
-  fs.writeFileSync(path.join(directory, `${pdf}.pdf`), makePdf(['[0 0 595 842]', '[0 0 595 842]'], 'Blatt'))
+  fs.writeFileSync(path.join(directory, `${pdf}.pdf`), makePdf(['[0 0 595 420]', '[0 0 595 420]'], 'Seite'))
   fs.writeFileSync(path.join(directory, `${pdf}.json`), JSON.stringify(baseDocument(pdf, '.pdf', 'pdf', 'application/pdf', { title: 'Aufgaben' })))
   fs.writeFileSync(path.join(profile.vault, 'Aufgaben.md'), `# Aufgaben\n\n<!-- fanotes-worksheet:${pdf} -->\n`)
   return { legacyImage, pdf }
@@ -90,7 +90,7 @@ const pasteImage = (page, bytes) => page.evaluate(async (base64) => {
   const binary = atob(base64)
   const data = Uint8Array.from(binary, (char) => char.charCodeAt(0))
   const transfer = new DataTransfer()
-  transfer.items.add(new File([data], 'Eingefügt.png', { type: 'image/png' }))
+  transfer.items.add(new File([data], 'image.png', { type: 'image/png' }))
   const target = document.querySelector('.cm-content') ?? document.body
   target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }))
 }, bytes.toString('base64'))
@@ -111,6 +111,17 @@ const sheetRectOf = (page, selector) => page.evaluate((query) => {
   const origin = paper.getBoundingClientRect()
   return { left: rect.left - origin.left, top: rect.top - origin.top, width: rect.width, height: rect.height }
 }, selector)
+
+/** Scrolls the paper so the picture sits in the middle of the view (a handle at the window's edge cannot be dragged). */
+const centreImage = (page) => page.evaluate(() => {
+  const image = document.querySelector('.sheet-image')
+  let node = image?.parentElement
+  while (node && !(node.scrollHeight > node.clientHeight + 4 && /auto|scroll/u.test(getComputedStyle(node).overflowY))) node = node.parentElement
+  if (!image || !node) return
+  const box = image.getBoundingClientRect()
+  const port = node.getBoundingClientRect()
+  node.scrollTop += box.top + box.height / 2 - (port.top + port.height / 2)
+})
 
 const insideWindow = (rect, page) => page.evaluate((box) => box.left >= -1 && box.top >= -1 && box.right <= innerWidth + 1 && box.bottom <= innerHeight + 1, rect)
 
@@ -147,8 +158,19 @@ const session = async (theme, full) => {
     await openFile(page, 'Aufgaben')
     await until(() => page.locator('.worksheet-pdf-page').count().then((n) => n > 0), 'pdf pages')
     await page.evaluate(() => document.querySelector('.worksheet-layer.is-document')?.scrollIntoView({ block: 'start' }))
-    await page.locator('.worksheet-layer.is-document').first().hover()
-    await sleep(400)
+    // The page really painted: some canvas holds a pixel that is not paper white (the fixture prints "Seite 1").
+    const painted = await until(() => page.evaluate(() => [...document.querySelectorAll('.worksheet-pdf-page canvas')].some((canvas) => {
+      if (!canvas.width || !canvas.height) return false
+      try {
+        const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
+        for (let index = 0; index < data.length; index += 16) if (data[index] < 200 && data[index + 3] > 0) return true
+      } catch { /* a canvas that cannot be read does not count */ }
+      return false
+    })), 'pdf text painted', 30_000).catch(() => false)
+    ok(`${label} the PDF worksheet is rendered (a dark text pixel on the page canvas)`, painted)
+    const box = await rectOf(page, '.worksheet-layer.is-document')
+    await page.mouse.move(box.left + box.width / 2, box.top + 120)
+    await sleep(500)
     const chip = await page.locator('.sheet-doc-chip').first().innerText().catch(() => '')
     ok(`${label} PDF worksheet has no bar, only a chip with the page count`, await page.locator('.worksheet-toolbar').count() === 0 && /2 Seiten/u.test(chip), chip)
     // The chip sits inside the first page's corner (the page may be scrolled partly out of view while it paints).
@@ -164,28 +186,47 @@ const session = async (theme, full) => {
     await page.locator('button[aria-label="Neue Notiz"], button[aria-label="New note"]').first().click()
     await until(() => page.locator('.cm-content').count().then((n) => n > 0), 'new note')
     await page.locator('.cm-content').first().click()
+    // Text on the sheet, caret back on the first line: the picture must still land below all of it.
+    await page.keyboard.press('Control+End')
+    await page.keyboard.type('\n\nErste Zeile mit Text\nZweite Zeile mit Text\nDritte Zeile mit Text')
+    await page.keyboard.press('Control+Home')
     const before = new Set(worksheetIds(profile))
     await pasteImage(page, makePng(400, 300))
-    await until(() => page.locator('.sheet-image.is-floating').count().then((n) => n === 1), 'floating image')
+    await page.locator('.sheet-image.is-floating').waitFor({ timeout: 4000 }).catch(async () => { await page.locator('.cm-content').first().click(); await pasteImage(page, makePng(400, 300)) })
+    await until(() => page.locator('.sheet-image.is-floating').count().then((n) => n === 1), 'floating image', 8000).catch(async (error) => {
+      console.log('toasts:', await page.locator('.toast').allInnerTexts())
+      throw error
+    })
     await until(() => page.locator('.sheet-image img').first().evaluate((img) => img.complete && img.naturalWidth > 0).catch(() => false), 'pasted image decoded')
     ok(`${label} paste creates one floating image and no worksheet bar`, await page.locator('.worksheet-toolbar, .worksheet-hint').count() === 0)
+    await sleep(900) // the sheet scrolls the new picture to the middle of the view
     ok(`${label} the new image starts selected: 4 handles and the tool strip`, await page.locator('.sheet-image.is-selected .sheet-image-handle').count() === 4 && await page.locator('.sheet-image-bar').isVisible())
     const bar = await rectOf(page, '.sheet-image-bar')
     ok(`${label} the tool strip is inside the window and has labelled icon buttons`, await insideWindow(bar, page) && await page.locator('.sheet-image-bar button[aria-label]').count() === 4, JSON.stringify(bar))
     const first = await rectOf(page, '.sheet-image')
     ok(`${label} it is visible where the reader looks and not upscaled past 400 px`, await insideWindow(first, page) && first.width <= 401 && first.width > 100, JSON.stringify(first))
+    const overlap = await page.evaluate(() => {
+      const image = document.querySelector('.sheet-image')?.getBoundingClientRect()
+      if (!image) return ['no image']
+      return [...document.querySelectorAll('.cm-line')].filter((line) => line.textContent.trim()).filter((line) => {
+        const rect = line.getBoundingClientRect()
+        return rect.left < image.right && rect.right > image.left && rect.top < image.bottom && rect.bottom > image.top
+      }).map((line) => line.textContent.slice(0, 24))
+    })
+    ok(`${label} the pasted image covers no heading and no text line`, overlap.length === 0, overlap.join(' | '))
     await page.screenshot({ path: path.join(shots, `selected-image-${theme}.png`) })
+    if (theme === 'light') await page.screenshot({ path: path.join(shots, 'pasted-below-text-light.png') })
 
     if (full) {
       const mid = { x: first.left + first.width / 2, y: first.top + first.height / 2 }
       // Drag with the mouse.
       await page.mouse.move(mid.x, mid.y)
       await page.mouse.down()
-      await page.mouse.move(mid.x - 50, mid.y + 30, { steps: 6 })
-      await page.mouse.move(mid.x - 100, mid.y + 60, { steps: 6 })
+      await page.mouse.move(mid.x - 50, mid.y - 20, { steps: 6 })
+      await page.mouse.move(mid.x - 100, mid.y - 40, { steps: 6 })
       await page.mouse.up()
       const moved = await rectOf(page, '.sheet-image')
-      ok(`${label} dragging moves the image by the pointer distance`, Math.abs(moved.left - first.left + 100) < 4 && Math.abs(moved.top - first.top - 60) < 4, JSON.stringify({ first, moved }))
+      ok(`${label} dragging moves the image by the pointer distance`, Math.abs(moved.left - first.left + 100) < 4 && Math.abs(moved.top - first.top + 40) < 4, JSON.stringify({ first, moved }))
       // Resize from the south-east handle, aspect locked.
       const handle = await rectOf(page, '.sheet-image-handle.is-se')
       await page.mouse.move(handle.left + handle.width / 2, handle.top + handle.height / 2)
@@ -194,7 +235,7 @@ const session = async (theme, full) => {
       await page.mouse.move(handle.left + 100, handle.top + 10, { steps: 5 })
       await page.mouse.up()
       const resized = await rectOf(page, '.sheet-image')
-      const resizedOnSheet = await sheetRectOf(page, '.sheet-image')
+      let resizedOnSheet = await sheetRectOf(page, '.sheet-image')
       const ratioBefore = moved.width / moved.height
       const ratioAfter = resized.width / resized.height
       ok(`${label} resizing from a corner keeps the aspect and anchors the opposite corner`, resized.width > moved.width + 40 && Math.abs(ratioBefore - ratioAfter) < 0.02 && Math.abs(resized.left - moved.left) < 2 && Math.abs(resized.top - moved.top) < 2, JSON.stringify({ moved, resized }))
@@ -220,6 +261,51 @@ const session = async (theme, full) => {
       ok(`${label} a click selects`, await page.locator('.sheet-image.is-selected').count() === 1)
       await page.mouse.click(8, 400)
       ok(`${label} a click outside deselects`, await page.locator('.sheet-image.is-selected').count() === 0)
+      // The same gestures at other paper zooms: the stored layout must follow the picture, not the zoom.
+      for (const wanted of [1.5, 0.75]) {
+        const reset = page.locator('.paper-view-hud-reset')
+        const zoomNow = async () => Number.parseFloat((await reset.innerText()).replace(/[^0-9.]/gu, '')) / 100
+        for (let step = 0; step < 14 && (wanted > 1 ? await zoomNow() < wanted - 0.07 : await zoomNow() > wanted + 0.07); step += 1) {
+          await page.locator(wanted > 1 ? 'button[aria-label="Hineinzoomen"]' : 'button[aria-label="Herauszoomen"]').click()
+          await sleep(120)
+        }
+        await sleep(700)
+        const zoom = await zoomNow()
+        await page.locator('.sheet-image').scrollIntoViewIfNeeded()
+        await page.locator('.sheet-image').click()
+        await centreImage(page)
+        await sleep(300)
+        const at = await rectOf(page, '.sheet-image')
+        const atBar = await rectOf(page, '.sheet-image-bar')
+        ok(`${label} zoom ${Math.round(zoom * 100)}%: the tool strip is inside the window`, atBar && await insideWindow(atBar, page), JSON.stringify(atBar))
+        const centre = { x: at.left + at.width / 2, y: at.top + at.height / 2 }
+        await page.mouse.move(centre.x, centre.y)
+        await page.mouse.down()
+        await page.mouse.move(centre.x + 15, centre.y + 10, { steps: 4 })
+        await page.mouse.move(centre.x + 30, centre.y + 20, { steps: 4 })
+        await page.mouse.up()
+        const dragged = await rectOf(page, '.sheet-image')
+        ok(`${label} zoom ${Math.round(zoom * 100)}%: dragging follows the pointer`, Math.abs(dragged.left - at.left - 30) < 4 && Math.abs(dragged.top - at.top - 20) < 4, JSON.stringify({ at, dragged }))
+        const handle = await rectOf(page, '.sheet-image-handle.is-se')
+        await page.mouse.move(handle.left + handle.width / 2, handle.top + handle.height / 2)
+        await page.mouse.down()
+        await page.mouse.move(handle.left - 20, handle.top - 15, { steps: 5 })
+        await page.mouse.move(handle.left - 40, handle.top - 30, { steps: 5 })
+        await page.mouse.up()
+        const shrunk = await rectOf(page, '.sheet-image')
+        ok(`${label} zoom ${Math.round(zoom * 100)}%: resizing keeps the aspect and the top-left corner`, Math.abs(shrunk.width / shrunk.height - dragged.width / dragged.height) < 0.02 && shrunk.width < dragged.width - 20 && Math.abs(shrunk.left - dragged.left) < 2 && Math.abs(shrunk.top - dragged.top) < 2, JSON.stringify({ dragged, shrunk }))
+        const onSheet = await sheetRectOf(page, '.sheet-image')
+        const ok1 = await until(() => {
+          const placement = worksheetJson(profile, id).placement
+          return Math.abs(placement.x / placement.width - onSheet.left / onSheet.width) < 0.01 && Math.abs(placement.y / placement.width - onSheet.top / onSheet.width) < 0.01
+        }, 'placement saved at this zoom', 10_000).catch(() => false)
+        ok(`${label} zoom ${Math.round(zoom * 100)}%: the persisted placement matches the picture`, ok1, JSON.stringify(worksheetJson(profile, id).placement))
+        resizedOnSheet = await sheetRectOf(page, '.sheet-image')
+      }
+      await page.keyboard.press('Control+0')
+      await sleep(700)
+      resizedOnSheet = await sheetRectOf(page, '.sheet-image')
+      await page.mouse.click(8, 400)
       // Pen layer: the object is inert while writing.
       await page.locator('.sheet-image').click()
       await page.keyboard.press('Control+d')

@@ -255,7 +255,7 @@ import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
 import { clampPaperSquareMm, paperSheetPx, paperSquarePx } from './lib/paperSquare'
-import { measurePaperFrame, placementAround, markFreshSheetImage } from './lib/sheetImage'
+import { clampSheetPlacement, measurePaperFrame, placementAround, markFreshSheetImage } from './lib/sheetImage'
 import { clampViewZoom, createPaperViewStore, resolvePaperZoomScroller, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
 import { flushPaperViewMemory, loadPaperViewMemory, paperViewMemoryKey, recallPaperView, recallPaperViewForWidth } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
@@ -5686,7 +5686,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setWorksheetSession((current) => current.documents.some((item) => item.id === document.id)
       ? current
       : { key: current.key + 1, documents: [...current.documents, document] })
-    toast(`„${document.title}“ liegt auf dem Blatt.`, 'success')
+    toast(/^(bild|image|eingefügt|pasted)(\s|\d|\.|$)/iu.test(document.title.trim()) ? 'Bild eingefügt.' : `„${document.title}“ eingefügt.`, 'success')
   }, [toast, updateContent])
 
   /**
@@ -5703,26 +5703,43 @@ export default function App({ startupBootstrap }: AppProps) {
     }).catch(() => null)
     if (!natural || natural.width < 1 || natural.height < 1) return null
     const frame = measurePaperFrame(paper)
-    let centreX: number
-    let centreY: number
+    const layoutPaperPx = frame.unit / Math.max(0.01, frame.zoom)
     if (at) {
-      centreX = at.x
-      centreY = at.y
-    } else {
-      const view = resolvePaperZoomScroller(paper)?.getBoundingClientRect()
-      const sheet = paper.getBoundingClientRect()
-      const left = Math.max(view?.left ?? sheet.left, sheet.left)
-      const right = Math.min(view?.right ?? sheet.right, sheet.right)
-      const top = Math.max(view?.top ?? sheet.top, sheet.top)
-      const bottom = Math.min(view?.bottom ?? sheet.bottom, sheet.bottom)
-      centreX = (left + right) / 2
-      centreY = (top + bottom) / 2
+      return placementAround({ x: (at.x - frame.left) / frame.unit, y: (at.y - frame.top) / frame.unit }, natural, layoutPaperPx)
     }
-    return placementAround(
-      { x: (centreX - frame.left) / frame.unit, y: (centreY - frame.top) / frame.unit },
-      natural,
-      frame.unit / Math.max(0.01, frame.zoom),
-    )
+    // No drop point: the first free room, so a paste never lands on text, ink or another picture.
+    const size = placementAround({ x: 0.5, y: 0 }, natural, layoutPaperPx)
+    const width = size.placement.width
+    const height = width * size.aspect
+    const gap = 0.03
+    const obstacles: Array<{ top: number; bottom: number }> = []
+    const unitsOf = (rect: DOMRect) => ({ top: (rect.top - frame.top) / frame.unit, bottom: (rect.bottom - frame.top) / frame.unit })
+    paper.querySelectorAll<HTMLElement>('.cm-line').forEach((line) => {
+      if (line.textContent?.trim()) obstacles.push(unitsOf(line.getBoundingClientRect()))
+    })
+    paper.querySelectorAll<HTMLElement>('.note-text-field, .worksheet-page').forEach((node) => {
+      const rect = node.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) obstacles.push(unitsOf(rect))
+    })
+    const inkBottom = drawingBoardRef.current?.inkBottom?.() ?? 0
+    if (inkBottom > 0) obstacles.push({ top: 0, bottom: inkBottom })
+    let top = gap
+    const caret = globalThis.document.activeElement?.closest('.cm-editor') && paper.contains(globalThis.document.activeElement)
+      ? (globalThis.getSelection()?.rangeCount ? globalThis.getSelection()?.getRangeAt(0) : null)
+      : null
+    if (caret) {
+      const rect = caret.getClientRects()[0] ?? (caret.startContainer instanceof Element ? caret.startContainer : caret.startContainer.parentElement)?.closest('.cm-line')?.getBoundingClientRect()
+      if (rect && rect.height > 0) top = unitsOf(rect).bottom + gap
+    } else {
+      top = Math.max(gap, ...obstacles.map((item) => item.bottom + gap))
+    }
+    // Slide below whatever the picture would overlap at that height.
+    for (let pass = 0; pass < obstacles.length + 1; pass += 1) {
+      const hit = obstacles.find((item) => item.top < top + height && item.bottom > top)
+      if (!hit) break
+      top = hit.bottom + gap
+    }
+    return { placement: clampSheetPlacement({ width, x: (1 - width) / 2, y: top }), aspect: size.aspect }
   }, [])
 
   const importImageBytes = useCallback(async (file: File, at?: { x: number; y: number }) => {

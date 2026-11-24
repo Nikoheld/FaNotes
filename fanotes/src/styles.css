@@ -2166,9 +2166,9 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .sheet-image:focus-visible::after {
   content: '';
   position: absolute;
-  inset: -1px;
-  border: 1.5px solid var(--paper-accent-readable, var(--accent));
-  border-radius: 2px;
+  inset: -4px;
+  border: 2px solid var(--accent);
+  border-radius: 4px;
   pointer-events: none;
 }
 .sheet-image.is-loading {
@@ -2192,20 +2192,19 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .sheet-image-handle {
   position: absolute;
   z-index: 2;
-  width: 11px;
-  height: 11px;
+  width: 10px;
+  height: 10px;
   box-sizing: border-box;
-  border: 1.5px solid var(--paper-accent-readable, var(--accent));
-  border-radius: 3px;
-  background: var(--panel, #fff);
-  box-shadow: 0 1px 3px rgba(20, 22, 32, .25);
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  background: #fff;
   touch-action: none;
 }
-.sheet-image-handle::before { content: ''; position: absolute; inset: -9px; }
-.sheet-image-handle.is-nw { left: -6px; top: -6px; cursor: nwse-resize; }
-.sheet-image-handle.is-ne { right: -6px; top: -6px; cursor: nesw-resize; }
-.sheet-image-handle.is-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
-.sheet-image-handle.is-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.sheet-image-handle::before { content: ''; position: absolute; inset: -10px; }
+.sheet-image-handle.is-nw { left: -9px; top: -9px; cursor: nwse-resize; }
+.sheet-image-handle.is-ne { right: -9px; top: -9px; cursor: nesw-resize; }
+.sheet-image-handle.is-sw { left: -9px; bottom: -9px; cursor: nesw-resize; }
+.sheet-image-handle.is-se { right: -9px; bottom: -9px; cursor: nwse-resize; }
 .sheet-image-bar {
   position: absolute;
   z-index: 4;
