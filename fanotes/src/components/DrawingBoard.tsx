@@ -86,6 +86,7 @@ import { decodeInkHistory, encodeInkHistory, type EncodedInkHistory } from '../l
 import { expandPackedStroke, frameBudgetOpen, INK_OPEN_ONE_PASS_POINTS, inkPageIsHeavy, packedInkPoints } from '../lib/packedInk'
 import { inkStrokeAllowsShapeSnap, shapeSnapAllowsLiveSample, shapeSnapProfile, snapStrokeToShape } from '../lib/shapeSnap'
 import {
+  PAPER_ZOOM_GESTURE_SETTLE_MS,
   VIEW_ROTATE_STEP,
   applyPaperViewToElements,
   applyPaperZoomStayPut,
@@ -99,7 +100,7 @@ import {
   zoomFactorFromWheel,
   zoomStepFromSpeed,
 } from '../lib/paperView'
-import { usePaperViewController } from './PaperView'
+import { PaperZoomPercent, usePaperViewController } from './PaperView'
 import { getHandwritingTrainingSampleCount } from '../lib/handwritingDbSummary'
 import { changedMathTokenRect } from '../lib/mathCorrectionLayout'
 import { groupMathInkLines, selectMathInkAtPoint } from '../lib/mathInkSelection'
@@ -227,8 +228,10 @@ import {
   type InkLayoutPoint,
   type InkWindowLayout,
   type LiveInkSlice,
+  INK_WINDOW_GUARD_VIEWPORTS,
   inkBandWindow,
   inkWindowGuardHit,
+  inkWindowNeedsMove,
   inkWindowShift,
   liveInkWindowHolds,
   measureVisibleInkBox,
@@ -463,6 +466,15 @@ const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom
 )
 
 type InkWindow = { y0: number; y1: number }
+type InkVisibleRange = { top: number; bottom: number }
+/** Where the committed canvas goes once its bitmap is painted: the slice, the sheet it is a slice of, and the sheet rows (layout px) it holds. */
+type CommittedInkPlan = { window: InkWindow; paper: { width: number; height: number } | null; top: number; bottom: number }
+/** True when the rows hold every visible row of the sheet. */
+const inkRowsCoverVisible = (rows: { top: number; bottom: number }, visible: InkVisibleRange, sheetHeight: number) => {
+  const top = Math.min(Math.max(0, visible.top), sheetHeight)
+  const bottom = Math.max(top, Math.min(sheetHeight, visible.bottom))
+  return bottom - top < 0.5 || (rows.top <= top + 0.5 && rows.bottom >= bottom - 0.5)
+}
 /** Final slice check after the last scroll event, in case scrollend never fires. */
 const INK_WINDOW_IDLE_MS = 320
 /**
@@ -473,6 +485,19 @@ const INK_WINDOW_IDLE_MS = 320
  * ink soft after every zoom.
  */
 const ZOOM_SETTLE_MS = 48
+/**
+ * A pinch or wheel zoom that rests this long (and two frames more) is
+ * re-rastered at the zoom its preview shows, before the camera commits (150
+ * to 240 ms after the last step): the sharp ink is then already there, or
+ * well under way, at the commit.
+ */
+const ZOOM_PREVIEW_RASTER_MS = 60
+/**
+ * Outside a gesture (a programmatic zoom: a PDF fit, a reset) the visible
+ * sheet is covered at once at most this often; a burst of camera writes still
+ * folds into the one settle, as before.
+ */
+const ZOOM_COVER_FOLD_MS = 250
 
 /**
  * Visible sheet range in paper layout px. Client rects carry the plane's CSS
@@ -1720,6 +1745,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const canvasQualityKeyRef = useRef('')
   const pointerBoundsRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null)
   const viewZoomRef = useRef(1)
+  /**
+   * Zoom a pinch or wheel preview has reached, once the ink was re-rastered
+   * for it before the camera committed; null when the bitmap follows the
+   * committed camera.
+   */
+  const previewRasterZoomRef = useRef<number | null>(null)
+  /** Box of the committed canvas the next paint puts it at, and the sheet rows (layout px) it then shows. */
+  const committedPlanRef = useRef<CommittedInkPlan | null>(null)
+  /**
+   * Sheet rows (layout px) the bitmap on screen shows, and of which drawing;
+   * its CSS box is always this, never the plan of a paint still running.
+   */
+  const committedShownRef = useRef<{ top: number; bottom: number; drawing: string | null } | null>(null)
+  /** Visible sheet rows (layout px) at the last slice measurement. */
+  const inkVisibleRef = useRef<InkVisibleRange | null>(null)
+  /** When a camera change outside a gesture last re-sliced or painted at once. */
+  const looseZoomCoverAtRef = useRef(-Infinity)
+  /** Set below, once the slice planner exists; the scroll listener above it calls through this. */
+  const coverZoomPreviewRef = useRef<(zoom: number) => boolean>(() => false)
   /** Wall-clock until which a zoom gesture counts as still moving. */
   const zoomInFlightUntilRef = useRef(0)
   const zoomSettleTimerRef = useRef<number | null>(null)
@@ -2731,13 +2775,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const layoutWindow = inline ? inkWindowLayoutRef.current : null
     const liveLayout = inline ? liveWindowLayoutRef.current : null
     const windowLayoutHeight = Math.max(1, layoutWindow ? Math.min(layoutHeight, layoutWindow.height) : layoutHeight)
+    // The zoom the bitmap is made for: the preview's while a pinch rests, else the camera's.
+    const rasterZoom = previewRasterZoomRef.current ?? viewZoomRef.current
     const qualityKey = [
       Math.round(layoutWidth),
       Math.round(layoutHeight),
       Math.round(windowLayoutHeight),
       layoutWindow ? Math.round(layoutWindow.top) : 'full',
       liveLayout ? [liveLayout.left, liveLayout.top, liveLayout.width, liveLayout.height].map(Math.round).join(',') : 'shared',
-      viewZoomRef.current.toFixed(2),
+      rasterZoom.toFixed(2),
       (window.devicePixelRatio || 1).toFixed(2),
       inline ? 'i' : 'f',
     ].join(':')
@@ -2747,7 +2793,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // Box, bitmap size and paint offset of both canvases from the planned
     // slices. The live layer gets its own (smaller) slice when one is planned.
     const placeCanvases = () => {
-      const nextSize = computeInkPixelSize(layoutWidth, windowLayoutHeight, viewZoomRef.current, inline)
+      const nextSize = computeInkPixelSize(layoutWidth, windowLayoutHeight, rasterZoom, inline)
       const placed = placeInkWindow(layoutWindow, layoutHeight, nextSize.height)
       const moved = placed.topPx !== canvasPixelSizeRef.current.topPx
       inkWindowRef.current = placed.window
@@ -2761,7 +2807,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       canvasQualityKeyRef.current = qualityKey
       const paperBox = inline ? { width: layoutWidth, height: layoutHeight } : null
-      applyInkWindowToCanvases([committedCanvas], placed.window, paperBox)
+      // The committed canvas keeps the box of the bitmap it shows. The new box
+      // is applied by whatever paints that bitmap (`showCommittedPlan`), in
+      // the same task: a heavy page is painted across frames, and the old
+      // bitmap stretched into the new slice's box for those frames was the
+      // ink that sat in the wrong place after every zoom.
+      const full = isFullInkWindow(placed.window)
+      committedPlanRef.current = {
+        window: placed.window,
+        paper: paperBox,
+        top: full ? 0 : placed.top,
+        bottom: full ? layoutHeight : placed.top + windowLayoutHeight,
+      }
       const live = liveLayout
         ? placeLiveInkWindow(liveLayout, { width: layoutWidth, height: layoutHeight }, { width: nextSize.width, height: placed.virtualHeight })
         : null
@@ -2787,6 +2844,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const inkWindow = inkWindowRef.current
     const { width: pixelWidth, height: pixelHeight, virtualHeight, layoutWidth: paintLayoutWidth, topPx } = canvasPixelSizeRef.current
     if (!pixelWidth || !pixelHeight || !virtualHeight) return
+    const committedPlan = committedPlanRef.current
+    const shownDrawing = drawingIdRef.current || loadedDrawingIdRef.current || null
+    /** Move the committed canvas to the box of the bitmap that is put on it in this same task. */
+    const showCommittedPlan = (plan: CommittedInkPlan | null = committedPlan) => {
+      if (!plan) return
+      applyInkWindowToCanvases([committedCanvas], plan.window, plan.paper)
+      committedShownRef.current = { top: plan.top, bottom: plan.bottom, drawing: shownDrawing }
+    }
     const liveWidth = liveSliceRef.current?.width ?? pixelWidth
     const liveHeight = liveSliceRef.current?.height ?? pixelHeight
     const liveCanvasResized = canvas.width !== liveWidth || canvas.height !== liveHeight
@@ -2879,6 +2944,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
      */
     const paintInPlace = () => {
       cancelInkPaint()
+      showCommittedPlan()
       if (committedCanvas.width !== pixelWidth) committedCanvas.width = pixelWidth
       if (committedCanvas.height !== pixelHeight) committedCanvas.height = pixelHeight
       markerCoverageRef.current = renderDocument(
@@ -2950,6 +3016,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       cancelInkPaint()
       // Resize and copy in one task, like the heavy job's swap: no frame shows a blank page.
       if (!swapInkBuffer(committedCanvas, entry.bitmap)) return false
+      showCommittedPlan()
       // The entry stays: an open passes through a few layouts, and a later
       // redraw at this same page may take it again. The board gets its own
       // marker mask, since new marker ink writes into it.
@@ -2982,6 +3049,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const swapped = swapInkBuffer(committedCanvas, buffer)
       inkBufferRef.current?.settle()
       if (!swapped) return false
+      showCommittedPlan()
       // The marker mask no longer lines up; the exact repaint after the lift rebuilds it.
       let coverage: MarkerCoverage | null = null
       for (const band of plan.bands) {
@@ -3007,11 +3075,33 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       markInkPainted()
       return true
     }
-    if (samePaint) {
+    // The picture on screen does not hold every visible row of the sheet (a
+    // zoom out past the slice it was painted for) and a paint across frames
+    // would leave those rows without ink until it is done: paint the planned
+    // slice in this task instead. Rare, and a late frame beats missing ink.
+    // Only for the page that is on screen: a note that is just opening has
+    // its own first paint.
+    const shownRows = committedShownRef.current
+    const visibleRows = inline ? inkVisibleRef.current : null
+    const coverNow = Boolean(
+      shownRows
+      && visibleRows
+      && committedPlan
+      && shownRows.drawing === shownDrawing
+      && !inkHydratingRef.current
+      && !activeStrokeRef.current
+      && !inkRowsCoverVisible(shownRows, visibleRows, layoutHeight)
+      && inkRowsCoverVisible(committedPlan, visibleRows, layoutHeight),
+    )
+    if (coverNow && (samePaint || heavyRepaint)) {
+      paintInPlace()
+    } else if (samePaint) {
       // This page is still filling in across frames. A scroll uses the same
       // picture, so it must not clear the bitmap and start again.
     } else if (shift) {
       cancelInkPaint()
+      // Same bitmap size: the rows move inside it and the box moves with them.
+      showCommittedPlan()
       if (shift.dy !== 0) {
         shiftInkWindowBitmap(committedCanvas, shift.dy)
         const coverage = markerCoverageRef.current
@@ -3095,6 +3185,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       } else {
         // The visible bitmap is stale until the swap: never trust its seal.
         committedBitmapRef.current = null
+        const jobPlan = committedPlan
         const spare = spareInkCoverageRef.current
         spareInkCoverageRef.current = null
         const job: InkPaintJob = {
@@ -3114,7 +3205,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           size: () => canvasPixelSizeRef.current,
           dirty: () => committedCanvasDirtyRef.current,
           paint: (running, from) => paintInkBudgetSlice(running.buffer, slice, running.coverage, from),
-          swap: (running) => swapInkBuffer(committedCanvas, running.buffer),
+          // The finished page and its box in one task. The box is the one of
+          // the slice this job painted, also when the plan moved on since.
+          swap: (running) => {
+            if (!swapInkBuffer(committedCanvas, running.buffer)) return false
+            showCommittedPlan(jobPlan)
+            return true
+          },
           schedule: (run) => requestAnimationFrame(run),
           finished: (done) => {
             markerCoverageRef.current = done.coverage
@@ -3151,6 +3248,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     } else if (openPaintLater) {
       committedCanvasDirtyRef.current = true
+      // An opening page has no picture of its own yet: its box is set at once.
+      showCommittedPlan()
       if (!openPaintFrameRef.current) {
         openPaintFrameRef.current = requestAnimationFrame(() => {
           openPaintFrameRef.current = 0
@@ -3815,6 +3914,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (!inline) {
       inkWindowLayoutRef.current = null
       liveWindowLayoutRef.current = null
+      inkVisibleRef.current = null
       return current !== null || currentLive !== null
     }
     const paper = resolvePaperElement()
@@ -3823,9 +3923,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (!paper || !measured) {
       inkWindowLayoutRef.current = null
       liveWindowLayoutRef.current = null
+      inkVisibleRef.current = null
       return current !== null || currentLive !== null
     }
     inkWindowViewportRef.current = measured.viewport.height
+    inkVisibleRef.current = { top: measured.visible.top, bottom: measured.visible.bottom }
     if (viewportRasterRef.current) {
       // Viewport raster: no vertical slice, one box for both layers.
       inkWindowLayoutRef.current = null
@@ -4176,7 +4278,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (inkScrollFrameRef.current !== null) return
       inkScrollFrameRef.current = window.requestAnimationFrame(() => {
         inkScrollFrameRef.current = null
-        if (zoomInFlight()) return
+        if (zoomInFlight()) {
+          // No re-slice per step, but a pan inside a pinch must not leave the
+          // painted rows either.
+          coverZoomPreviewRef.current(paperView?.liveZoom() ?? viewZoomRef.current)
+          return
+        }
         syncInkWindow()
       })
     }
@@ -4232,7 +4339,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       if (pendingSolverTapRef.current) window.clearTimeout(pendingSolverTapRef.current.timer)
     }
-  }, [flushPaintedLayoutGrow, planInkWindowNow, redraw, resolvePaperElement, syncInkWindow, zoomInFlight])
+  }, [flushPaintedLayoutGrow, paperView, planInkWindowNow, redraw, resolvePaperElement, syncInkWindow, zoomInFlight])
 
   const applyInkExtentStyles = useCallback((height: number, width: number = sourceWidthRef.current) => {
     const paper = resolvePaperElement()
@@ -4665,13 +4772,69 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // zoomed handwriting stays sharp instead of a stretched low-res bitmap.
   // The slice is re-planned around the now-visible sheet (a 100% full
   // overlay becomes a 500% slice) and painted by the same redraw.
-  const settleZoomedInk = useCallback(() => {
+  const settleZoomedInk = useCallback((repaint = false) => {
+    // From here on the bitmap is the committed camera's, also for the redraw
+    // after a stroke that is still under the pen.
+    previewRasterZoomRef.current = null
     if (activeStrokeRef.current) return
     planInkWindowNow(true)
     canvasQualityKeyRef.current = ''
-    committedCanvasDirtyRef.current = true
+    // The redraw repaints when the bitmap size or its rows per sheet px
+    // changed. A page a resting pinch already re-rastered for this zoom, or
+    // is still painting for it, is left alone.
+    if (repaint) committedCanvasDirtyRef.current = true
     redraw(true)
   }, [planInkWindowNow, redraw])
+
+  /**
+   * One preview frame of a pinch or wheel zoom: the sheet is a compositor
+   * scale of the committed camera and the ink bitmap scales with it. Keeps
+   * every visible row of the sheet painted while the view grows (a zoom out
+   * past the slice), and returns whether the slice was re-rastered.
+   */
+  const coverZoomPreview = useCallback((zoom: number) => {
+    if (!inline || activeStrokeRef.current || viewportRasterRef.current) return false
+    const planned = inkWindowLayoutRef.current
+    // One bitmap holds the whole sheet: nothing can scroll or zoom out of it.
+    if (!planned) return false
+    const paper = resolvePaperElement()
+    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+    const measured = paper && scroller ? measureInkWindow(paper, scroller, viewRotationRef.current) : null
+    if (!paper || !measured) return false
+    inkVisibleRef.current = { top: measured.visible.top, bottom: measured.visible.bottom }
+    const sheetHeight = paper.offsetHeight
+    const needsMove = inkWindowNeedsMove(planned, measured.visible, INK_WINDOW_GUARD_VIEWPORTS * measured.viewport.height, sheetHeight)
+    const shown = committedShownRef.current
+    const outgrown = Boolean(shown && !inkRowsCoverVisible(shown, measured.visible, sheetHeight))
+    if (!needsMove && !outgrown) return false
+    if (!paper.closest('.paper-sheet-plane')?.classList.contains('is-zoom-gesture')) {
+      // Not a gesture: fold a burst of camera writes, the settle paints once.
+      const now = performance.now()
+      if (now - looseZoomCoverAtRef.current < ZOOM_COVER_FOLD_MS) return false
+      looseZoomCoverAtRef.current = now
+    }
+    if (needsMove) {
+      // The visible sheet reached the edge of the slice: a new slice around
+      // it, at the resolution of the zoom on screen.
+      previewRasterZoomRef.current = zoom
+      planInkWindowNow(true)
+      canvasQualityKeyRef.current = ''
+    }
+    // Otherwise the new slice is still being painted and the view outgrew
+    // the old one: the redraw paints it in this task.
+    redraw(true)
+    return needsMove
+  }, [inline, planInkWindowNow, redraw, resolvePaperElement])
+  coverZoomPreviewRef.current = coverZoomPreview
+
+  /** A zoom preview that rests: the sharp bitmap for the zoom on screen, before the camera commits. */
+  const rasterZoomPreview = useCallback((zoom: number) => {
+    if (!inline || activeStrokeRef.current || viewportRasterRef.current) return
+    previewRasterZoomRef.current = zoom
+    planInkWindowNow(true)
+    canvasQualityKeyRef.current = ''
+    redraw(true)
+  }, [inline, planInkWindowNow, redraw])
 
   useEffect(() => {
     if (!paperView) return
@@ -4685,13 +4848,28 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       zoomInFlightUntilRef.current = 0
       const view = paperView.getView()
       adopt(view)
-      // One React render per gesture, not per step: the toolbar percentage
-      // and everything else that reads the state catch up here.
+      // The ink first: the sharp page starts before React renders the board.
+      settleZoomedInk()
+      // One React render per gesture, not per step: everything that reads
+      // the state catches up here. (The toolbar percentage follows the
+      // preview on its own, see PaperZoomPercent.)
       setViewZoom(view.zoom)
       setViewRotation(view.rotation)
       setViewPan(view.pan)
-      settleZoomedInk()
     }
+    const settleIn = (ms: number) => {
+      if (zoomSettleTimerRef.current !== null) window.clearTimeout(zoomSettleTimerRef.current)
+      zoomSettleTimerRef.current = window.setTimeout(settle, ms)
+    }
+    let previewRasterTimer = 0
+    let previewRasterFrame = 0
+    const clearPreviewRasterTimer = () => {
+      if (previewRasterTimer) window.clearTimeout(previewRasterTimer)
+      if (previewRasterFrame) window.cancelAnimationFrame(previewRasterFrame)
+      previewRasterTimer = 0
+      previewRasterFrame = 0
+    }
+    let zoomCoverFrame = 0
     const initial = paperView.getView()
     adopt(initial)
     setViewZoom(initial.zoom)
@@ -4701,25 +4879,67 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // resize pass above still rasterised at zoom 1, and CSS zoom then
     // stretched that bitmap for the whole stroke. Re-raster at the camera
     // that is already in effect.
-    if (initial.zoom > 1.02) settleZoomedInk()
+    if (initial.zoom > 1.02) settleZoomedInk(true)
     const unsubscribe = paperView.subscribe((view) => {
       const zoomed = view.zoom !== viewZoomRef.current
       // Cached pages of other notes were painted for the old zoom.
       if (zoomed) inkBitmapCache.clear()
       adopt(view)
-      if (zoomed) zoomInFlightUntilRef.current = performance.now() + ZOOM_SETTLE_MS
-      if (zoomSettleTimerRef.current !== null) window.clearTimeout(zoomSettleTimerRef.current)
-      zoomSettleTimerRef.current = window.setTimeout(settle, ZOOM_SETTLE_MS)
+      if (zoomed) {
+        zoomInFlightUntilRef.current = performance.now() + ZOOM_SETTLE_MS
+        // Before the frame that shows this camera is painted, and after the
+        // caller has scrolled the sheet into place: a zoom out must not show
+        // rows the bitmap does not hold while the settle waits.
+        if (!zoomCoverFrame) {
+          zoomCoverFrame = window.requestAnimationFrame(() => {
+            zoomCoverFrame = 0
+            coverZoomPreview(paperView.getView().zoom)
+          })
+        }
+      }
+      settleIn(ZOOM_SETTLE_MS)
+    })
+    const unsubscribeLiveZoom = paperView.subscribeLiveZoom((zoom, preview, settleMs) => {
+      clearPreviewRasterTimer()
+      if (!preview) {
+        // The gesture is over, its camera committed and the sheet scrolled
+        // into place: no burst is left to fold, the sharp page starts now.
+        settleIn(0)
+        return
+      }
+      if (coverZoomPreview(zoom)) return
+      // A touch pinch commits when the fingers lift, not when they rest: no
+      // raster while the hand is still on the glass.
+      if (settleMs > PAPER_ZOOM_GESTURE_SETTLE_MS) return
+      previewRasterTimer = window.setTimeout(() => {
+        previewRasterTimer = 0
+        // Two frames more, and past the second one's own preview step: on a
+        // busy main thread the timer also runs out while the next step is
+        // still queued, and a raster per step would only make the gesture
+        // slower. A step that arrives cancels this.
+        previewRasterFrame = window.requestAnimationFrame(() => {
+          previewRasterFrame = window.requestAnimationFrame(() => {
+            previewRasterFrame = 0
+            previewRasterTimer = window.setTimeout(() => {
+              previewRasterTimer = 0
+              rasterZoomPreview(zoom)
+            }, 0)
+          })
+        })
+      }, ZOOM_PREVIEW_RASTER_MS)
     })
     return () => {
       unsubscribe()
+      unsubscribeLiveZoom()
+      clearPreviewRasterTimer()
+      if (zoomCoverFrame) window.cancelAnimationFrame(zoomCoverFrame)
       if (zoomSettleTimerRef.current !== null) {
         window.clearTimeout(zoomSettleTimerRef.current)
         zoomSettleTimerRef.current = null
       }
       zoomInFlightUntilRef.current = 0
     }
-  }, [paperView, settleZoomedInk])
+  }, [coverZoomPreview, paperView, rasterZoomPreview, settleZoomedInk])
 
   useEffect(() => {
     if (paperView) return
@@ -4732,7 +4952,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // Without a camera host the zoom is this board's own state; settle from it.
   useEffect(() => {
     if (paperView) return
-    const timer = window.setTimeout(settleZoomedInk, 90)
+    const timer = window.setTimeout(() => settleZoomedInk(true), 90)
     return () => window.clearTimeout(timer)
   }, [paperView, settleZoomedInk, viewZoom])
 
@@ -9859,7 +10079,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         </label>
         <div className="lw-draw-toolgroup lw-view-controls" aria-label="Blattansicht">
           <button type="button" className="lw-draw-subtle lw-view-reset" aria-label="Ansicht zurücksetzen" title="Zoom und Drehung zurücksetzen (Strg+0 · Esc)" onClick={resetView} disabled={viewZoom === 1 && viewRotation === 0 && viewPan.x === 0 && viewPan.y === 0}>
-            {Math.round(viewZoom * 100)}%{viewRotation ? ` · ${viewRotation}°` : ''}
+            <PaperZoomPercent controller={paperView} zoom={viewZoom} />{viewRotation ? ` · ${viewRotation}°` : ''}
           </button>
         </div>
 

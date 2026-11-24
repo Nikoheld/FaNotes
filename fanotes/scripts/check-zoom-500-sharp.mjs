@@ -242,7 +242,13 @@ const runOnce = () => {
   // settle re-plans it around the visible sheet before the sharp repaint.
   assert.match(board, /planInkWindow\(/)
   assert.match(board, /placeInkWindow\(/)
-  assert.match(board, /const settleZoomedInk = useCallback\(\(\) => \{\n    if \(activeStrokeRef\.current\) return\n    planInkWindowNow\(true\)\n    canvasQualityKeyRef\.current = ''\n    committedCanvasDirtyRef\.current = true\n    redraw\(true\)/)
+  assert.match(board, /const settleZoomedInk = useCallback\(\(repaint = false\) => \{\n[\s\S]{0,200}previewRasterZoomRef\.current = null\n    if \(activeStrokeRef\.current\) return\n    planInkWindowNow\(true\)\n    canvasQualityKeyRef\.current = ''\n[\s\S]{0,260}if \(repaint\) committedCanvasDirtyRef\.current = true\n    redraw\(true\)/)
+  // The committed canvas takes the box of a slice only together with that
+  // slice's bitmap (fanotes/scripts/check-zoom-ink-registration.mjs drives it):
+  // the slice planner never moves the canvas, the paint does.
+  assert.match(board, /committedPlanRef\.current = \{\n\s+window: placed\.window,/)
+  assert.doesNotMatch(board, /const placeCanvases = \(\) => \{(?:(?!\n    \}\n)[\s\S])*applyInkWindowToCanvases\(\[committedCanvas\]/, 'placing the slice must not move the committed canvas before its bitmap is painted')
+  assert.match(board, /swap: \(running\) => \{\n\s+if \(!swapInkBuffer\(committedCanvas, running\.buffer\)\) return false\n\s+showCommittedPlan\(jobPlan\)/, 'a heavy page swaps bitmap and box in one task')
   assert.match(board, /viewZoomRef\.current/)
   // A wheel zoom is a burst of steps. The board follows the camera through a
   // subscription and refs (no React render per step) and re-slices/re-rasterises
@@ -250,13 +256,18 @@ const runOnce = () => {
   assert.match(board, /const paperView = usePaperViewController\(\)/)
   assert.doesNotMatch(board, /usePaperView\(\)/)
   assert.match(board, /paperView\.subscribe\(\(view\) => \{/)
-  assert.match(board, /if \(zoomed\) zoomInFlightUntilRef\.current = performance\.now\(\) \+ ZOOM_SETTLE_MS/)
+  assert.match(board, /if \(zoomed\) \{\n\s+zoomInFlightUntilRef\.current = performance\.now\(\) \+ ZOOM_SETTLE_MS/)
   assert.match(board, /plane\?\.classList\.contains\('is-zoom-gesture'\)/, 'the compositor zoom preview must not re-slice ink')
-  assert.match(board, /zoomSettleTimerRef\.current = window\.setTimeout\(settle, ZOOM_SETTLE_MS\)/)
-  assert.equal((board.match(/if \(zoomInFlight\(\)\) return/g) ?? []).length, 3, 'scroll frame, idle timer and scrollend all skip the re-slice while the zoom is moving')
+  // A programmatic burst is folded for ZOOM_SETTLE_MS; a finished wheel or
+  // pinch gesture has nothing left to fold and starts the sharp page at once.
+  assert.match(board, /zoomSettleTimerRef\.current = window\.setTimeout\(settle, ms\)/)
+  assert.match(board, /settleIn\(ZOOM_SETTLE_MS\)/)
+  assert.match(board, /if \(!preview\) \{[\s\S]{0,260}settleIn\(0\)/)
+  assert.equal((board.match(/if \(zoomInFlight\(\)\) return/g) ?? []).length, 2, 'idle timer and scrollend skip the re-slice while the zoom is moving')
+  assert.match(board, /if \(zoomInFlight\(\)\) \{[\s\S]{0,260}coverZoomPreviewRef\.current\(/, 'a scroll frame inside a zoom only keeps the visible sheet painted')
   const paperViewSource = readFileSync(join(root, 'src', 'components', 'PaperView.tsx'), 'utf8')
   assert.match(paperViewSource, /export const usePaperViewController = \(\) => useContext\(PaperViewControllerContext\)/)
-  assert.match(paperViewSource, /const controller = useMemo<PaperViewController>\(\(\) => \(\{[\s\S]*?\}\), \[resetView, rotateBy, setView, store, zoomBy, zoomTo\]\)/, 'the controller identity must not depend on the view snapshot')
+  assert.match(paperViewSource, /const controller = useMemo<PaperViewController>\(\(\) => \(\{[\s\S]*?\}\), \[liveZoom, resetView, rotateBy, setView, store, zoomBy, zoomTo\]\)/, 'the controller identity must not depend on the view snapshot')
   assert.match(inkHit, /export const resolveInkOverlayWindow/)
   assert.match(inkHit, /isFullInkWindow\(window\)\) return false/)
   // Both PDF hosts paint through the shared painter: the plan windows the
