@@ -99,6 +99,13 @@ try {
   assert.equal(cloned.textBoxes[0].text, 'Antwort')
   assert.equal(cloned.source, 'neu')
   assert.equal(cloned.pageWidth, 800)
+  assert.equal('placement' in cloned, false, 'a worksheet without a placement stays a full-width block in its copy')
+  const floatingCopy = clonedWorksheetDocument(
+    { id: 'neu2', title: 'Kopie', textBoxes: [], highlights: [] },
+    { title: 'Bild', textBoxes: [], placement: { x: 0.2, y: 0.1, width: 0.4 }, aspect: 0.75 },
+  )
+  assert.deepEqual(floatingCopy.placement, { x: 0.2, y: 0.1, width: 0.4 })
+  assert.equal(floatingCopy.aspect, 0.75)
 
   const app = readFileSync(join(root, 'src/App.tsx'), 'utf8')
   const tree = readFileSync(join(root, 'src/components/FileTree.tsx'), 'utf8')

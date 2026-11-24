@@ -255,7 +255,8 @@ import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
 import { clampPaperSquareMm, paperSheetPx, paperSquarePx } from './lib/paperSquare'
-import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
+import { measurePaperFrame, placementAround, markFreshSheetImage } from './lib/sheetImage'
+import { clampViewZoom, createPaperViewStore, resolvePaperZoomScroller, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
 import { flushPaperViewMemory, loadPaperViewMemory, paperViewMemoryKey, recallPaperView, recallPaperViewForWidth } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
 import { configureDiagnostics, recordFeature, setDiagnosticsVault } from './lib/diagnosticsClient'
@@ -387,7 +388,9 @@ const PAGE_STATS_MIN_DWELL_DELTA_MS = 3_000
 type AppProps = { startupBootstrap?: Promise<BootstrapData> }
 
 type SaveState = 'saved' | 'saving' | 'error'
-type Toast = { id: number; kind: 'success' | 'error' | 'info'; message: string }
+/** How long a toast with an undo button stays; the removed file is deleted after the same time. */
+const UNDO_TOAST_MS = 9000
+type Toast = { id: number; kind: 'success' | 'error' | 'info'; message: string; action?: { label: string; run: () => void } }
 type DrawingSession = NoteOverlaySession<DrawingLibraryDocument>
 const EMPTY_DRAWING_SESSION: DrawingSession = { key: 0, document: null, path: null }
 type WorksheetSession = { key: number; documents: WorksheetDocument[] }
@@ -1641,13 +1644,13 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [worksheetSession.documents])
 
-  const toast = useCallback((rawMessage: string, kind: Toast['kind'] = 'info') => {
+  const toast = useCallback((rawMessage: string, kind: Toast['kind'] = 'info', action?: Toast['action']) => {
     const message = kind === 'error' ? sanitizeToastMessage(rawMessage) : rawMessage
     // Error toasts feed the opt-in diagnostics: a hash and a count, never the text itself.
     if (kind === 'error') diagnosticLog.record({ at: Date.now(), kind: 'error', message })
     const id = ++toastCounter.current
-    setToasts((current) => [...current.slice(-3), { id, kind, message }])
-    window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), kind === 'error' ? 6500 : 4000)
+    setToasts((current) => [...current.slice(-3), { id, kind, message, ...(action ? { action } : {}) }])
+    window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), action ? UNDO_TOAST_MS : kind === 'error' ? 6500 : 4000)
   }, [])
 
   // Shared notes (desktop): live co-editing with the other person. Unshared notes cost nothing.
@@ -5686,15 +5689,92 @@ export default function App({ startupBootstrap }: AppProps) {
     toast(`„${document.title}“ liegt auf dem Blatt.`, 'success')
   }, [toast, updateContent])
 
-  const importImageBytes = useCallback(async (file: File) => {
+  /**
+   * Where a new picture lands on the sheet: centred on the drop point, or on the middle of what the reader sees.
+   * Undefined when no sheet is open or the picture's size cannot be read; it then stays a full-width block.
+   */
+  const placeNewSheetImage = useCallback(async (file: File, at?: { x: number; y: number }) => {
+    const paper = unifiedPaperRef.current
+    if (!paper) return null
+    const natural = await createImageBitmap(file).then((bitmap) => {
+      const size = { width: bitmap.width, height: bitmap.height }
+      bitmap.close()
+      return size
+    }).catch(() => null)
+    if (!natural || natural.width < 1 || natural.height < 1) return null
+    const frame = measurePaperFrame(paper)
+    let centreX: number
+    let centreY: number
+    if (at) {
+      centreX = at.x
+      centreY = at.y
+    } else {
+      const view = resolvePaperZoomScroller(paper)?.getBoundingClientRect()
+      const sheet = paper.getBoundingClientRect()
+      const left = Math.max(view?.left ?? sheet.left, sheet.left)
+      const right = Math.min(view?.right ?? sheet.right, sheet.right)
+      const top = Math.max(view?.top ?? sheet.top, sheet.top)
+      const bottom = Math.min(view?.bottom ?? sheet.bottom, sheet.bottom)
+      centreX = (left + right) / 2
+      centreY = (top + bottom) / 2
+    }
+    return placementAround(
+      { x: (centreX - frame.left) / frame.unit, y: (centreY - frame.top) / frame.unit },
+      natural,
+      frame.unit / Math.max(0.01, frame.zoom),
+    )
+  }, [])
+
+  const importImageBytes = useCallback(async (file: File, at?: { x: number; y: number }) => {
     if (!window.fanotes.importWorksheetFromData) {
       toast('Bilder auf das Blatt legen geht in dieser Version noch nicht.', 'error')
       return
     }
     const bytes = new Uint8Array(await file.arrayBuffer())
-    const document = await window.fanotes.importWorksheetFromData({ name: file.name || 'Bild.png', mimeType: file.type || 'image/png', bytes })
+    let document = await window.fanotes.importWorksheetFromData({ name: file.name || 'Bild.png', mimeType: file.type || 'image/png', bytes })
+    const placed = document.kind === 'image' ? await placeNewSheetImage(file, at) : null
+    if (placed) {
+      document = await window.fanotes.saveWorksheet({ ...document, placement: placed.placement, aspect: placed.aspect })
+      markFreshSheetImage(document.id)
+    }
     await attachImportedWorksheet(document)
-  }, [attachImportedWorksheet, toast])
+  }, [attachImportedWorksheet, placeNewSheetImage, toast])
+
+  /** Swaps the picture of a worksheet for another file, on the same spot of the sheet. */
+  const replaceWorksheetImage = useCallback(async (id: string, file: File) => {
+    const notePath = activePathRef.current
+    const previous = worksheetSession.documents.find((item) => item.id === id)
+    if (!notePath || !previous || !window.fanotes.importWorksheetFromData) return
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      const created = await window.fanotes.importWorksheetFromData({ name: file.name || 'Bild.png', mimeType: file.type || 'image/png', bytes })
+      if (created.kind !== 'image') {
+        await window.fanotes.deleteWorksheet(created.id).catch(() => undefined)
+        throw new Error('Bitte wähle eine Bilddatei.')
+      }
+      const natural = previous.placement
+        ? await createImageBitmap(file).then((bitmap) => {
+          const size = bitmap.height / Math.max(1, bitmap.width)
+          bitmap.close()
+          return size
+        }).catch(() => null)
+        : null
+      const saved = await window.fanotes.saveWorksheet(previous.placement && natural
+        ? { ...created, placement: previous.placement, aspect: natural }
+        : created)
+      markFreshSheetImage(saved.id)
+      const tab = tabsRef.current.find((item) => item.path === notePath)
+      const currentContent = pendingWrites.current.get(notePath) ?? tab?.content ?? ''
+      updateContent(retargetWorksheetMarkers(currentContent, new Map([[id, saved.id]])))
+      worksheetDirtyIdsRef.current.delete(id)
+      worksheetLayerRefs.current.delete(id)
+      setWorksheetSession((current) => ({ key: current.key + 1, documents: current.documents.map((item) => item.id === id ? saved : item) }))
+      await window.fanotes.deleteWorksheet(id).catch(() => undefined)
+      toast('Bild ersetzt.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Das Bild konnte nicht ersetzt werden.', 'error')
+    }
+  }, [toast, updateContent, worksheetSession.documents])
 
   // The second pane's handwriting, read right before the pane shows it
   // (capped), so the pane's first frame has its ink. Like the main pane's
@@ -5943,9 +6023,64 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [activeEntryMutating, calendarOpen, drawingOpen, glyphenWerkOpen, homeworkOpen, overviewOpen, toast])
 
+  const pendingWorksheetDeletes = useRef(new Map<string, number>())
+
+  /**
+   * A picture goes at once and comes back with one click: only the note's marker and the layer disappear, the files
+   * are deleted when the undo toast is gone.
+   */
+  const removeSheetImageWithUndo = useCallback(async (document: WorksheetDocument) => {
+    const notePath = activePathRef.current
+    if (!notePath) return
+    const id = document.id
+    await worksheetLayerRefs.current.get(id)?.flush().catch(() => undefined)
+    const tab = tabsRef.current.find((item) => item.path === notePath)
+    const currentContent = pendingWrites.current.get(notePath) ?? tab?.content ?? ''
+    const nextContent = detachWorksheet(currentContent, id)
+    if (nextContent !== currentContent) updateContent(nextContent)
+    worksheetDirtyIdsRef.current.delete(id)
+    worksheetLayerRefs.current.delete(id)
+    setWorksheetSession((current) => ({ key: current.key + 1, documents: current.documents.filter((item) => item.id !== id) }))
+    pendingWorksheetDeletes.current.set(id, window.setTimeout(() => {
+      pendingWorksheetDeletes.current.delete(id)
+      void window.fanotes.deleteWorksheet(id).catch(() => undefined)
+    }, UNDO_TOAST_MS + 1500))
+    toast('Bild entfernt', 'info', {
+      label: 'Rückgängig',
+      run: () => {
+        const timer = pendingWorksheetDeletes.current.get(id)
+        if (timer === undefined) return
+        window.clearTimeout(timer)
+        pendingWorksheetDeletes.current.delete(id)
+        void (async () => {
+          try {
+            const restored = await window.fanotes.readWorksheet(id)
+            if (activePathRef.current === notePath) {
+              const latestTab = tabsRef.current.find((item) => item.path === notePath)
+              const latest = pendingWrites.current.get(notePath) ?? latestTab?.content ?? ''
+              updateContent(attachWorksheet(latest, id))
+              markFreshSheetImage(id)
+              setWorksheetSession((current) => current.documents.some((item) => item.id === id)
+                ? current
+                : { key: current.key + 1, documents: [...current.documents, restored] })
+            } else {
+              await window.fanotes.writeFile(notePath, attachWorksheet(await window.fanotes.readFile(notePath), id))
+            }
+          } catch {
+            toast('Das Bild ließ sich nicht wiederherstellen.', 'error')
+          }
+        })()
+      },
+    })
+  }, [toast, updateContent])
+
   const removeWorksheetFromNote = useCallback(async (id: string) => {
     const document = worksheetSession.documents.find((item) => item.id === id)
     const label = document?.title ?? 'Arbeitsblatt'
+    if (document?.kind === 'image') {
+      await removeSheetImageWithUndo(document)
+      return
+    }
     if (!await requestConfirm(`„${label}“ wirklich aus dieser Notiz entfernen? Die PDF-/Bilddatei wird aus dem Vault gelöscht.`, { title: 'Arbeitsblatt entfernen' })) {
       return
     }
@@ -5967,7 +6102,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Das Arbeitsblatt konnte nicht entfernt werden.', 'error')
     }
-  }, [requestConfirm, toast, updateContent, worksheetSession.documents])
+  }, [removeSheetImageWithUndo, requestConfirm, toast, updateContent, worksheetSession.documents])
 
   /** Opens the OneNote page picker; the dialog asks for the file, converts it and imports the chosen pages. */
   const importOneNote = useCallback(async (): Promise<null> => {
@@ -6598,15 +6733,15 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [calendarOpen, closeDrawing, closeTab, createNote, cycleTabs, duplicateNote, focusMode, toolbarFullscreen, setToolbarFullscreenMode, glyphenWerkOpen, homeworkOpen, insertStamp, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorkRequestsOrBugReport, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, textFieldPlacing, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
 
   useEffect(() => {
-    const placeImage = (data: DataTransfer | null, event: Event, failure: string) => {
+    const placeImage = (data: DataTransfer | null, event: Event, failure: string, at?: { x: number; y: number }) => {
       const file = clipboardImageFile(data)
       if (!file) return
       event.preventDefault()
       event.stopPropagation()
-      void importImageBytes(file).catch((error) => toast(error instanceof Error ? error.message : failure, 'error'))
+      void importImageBytes(file, at).catch((error) => toast(error instanceof Error ? error.message : failure, 'error'))
     }
     const onPaste = (event: ClipboardEvent) => placeImage(event.clipboardData, event, 'Bild konnte nicht eingefügt werden.')
-    const onDrop = (event: DragEvent) => placeImage(event.dataTransfer, event, 'Bild konnte nicht abgelegt werden.')
+    const onDrop = (event: DragEvent) => placeImage(event.dataTransfer, event, 'Bild konnte nicht abgelegt werden.', { x: event.clientX, y: event.clientY })
     const onDragOver = (event: DragEvent) => {
       if ([...(event.dataTransfer?.types ?? [])].includes('Files')) event.preventDefault()
     }
@@ -7322,7 +7457,7 @@ export default function App({ startupBootstrap }: AppProps) {
                     </SafeBoundary>
                   </div>
                   )}
-                  {!isPdfActive && worksheetSession.documents.map((document) => <Suspense key={document.id} fallback={<div className="worksheet-loading"><LoaderCircle className="spin" size={20} /> Arbeitsblatt wird geladen …</div>}>
+                  {!isPdfActive && worksheetSession.documents.map((document) => <Suspense key={document.id} fallback={<div className="worksheet-skeleton" aria-busy="true" aria-label="Arbeitsblatt wird geladen" />}>
                     <SafeBoundary name={`Arbeitsblatt ${document.title}`} fallbackTitle="Das Arbeitsblatt ist abgestürzt">
                       <StableWorksheetLayer
                         ref={worksheetLayerRefFor(document.id)}
@@ -7331,6 +7466,8 @@ export default function App({ startupBootstrap }: AppProps) {
                         onSave={saveWorksheetDocument}
                         onDirtyChange={worksheetDirtyCallbackFor(document.id)}
                         onRemove={() => void removeWorksheetFromNote(document.id)}
+                        onReplace={(file) => replaceWorksheetImage(document.id, file)}
+                        onNotify={toast}
                       />
                     </SafeBoundary>
                   </Suspense>)}
@@ -7709,7 +7846,7 @@ export default function App({ startupBootstrap }: AppProps) {
           onOpenSettings={() => { applySettings({ ...settingsRef.current, diagnosticsNoticeSeen: true }); openSettings('senddata') }}
         />
       )}
-      <div className="toast-stack" aria-live="polite" aria-relevant="additions">{toasts.map((item) => <div className={`toast ${item.kind}`} role={item.kind === 'error' ? 'alert' : 'status'} key={item.id}>{item.kind === 'success' ? <CheckCircle2 size={16} /> : item.kind === 'error' ? <CircleAlert size={16} /> : <Info size={16} />}<span>{item.message}</span><button type="button" aria-label="Meldung schließen" onClick={() => dismissToast(item.id)}><X size={13} /></button></div>)}</div>
+      <div className="toast-stack" aria-live="polite" aria-relevant="additions">{toasts.map((item) => <div className={`toast ${item.kind}`} role={item.kind === 'error' ? 'alert' : 'status'} key={item.id}>{item.kind === 'success' ? <CheckCircle2 size={16} /> : item.kind === 'error' ? <CircleAlert size={16} /> : <Info size={16} />}<span>{item.message}</span>{item.action && <button type="button" className="toast-action" onClick={() => { const run = item.action?.run; dismissToast(item.id); run?.() }}>{item.action.label}</button>}<button type="button" aria-label="Meldung schließen" onClick={() => dismissToast(item.id)}><X size={13} /></button></div>)}</div>
     </div>
   )
 }

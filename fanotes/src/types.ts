@@ -478,6 +478,13 @@ export type WorksheetHighlight = {
   color: string
 }
 
+/**
+ * Where a picture worksheet floats on the sheet. Optional and additive: a
+ * worksheet without it stays a full-width block below the text, as before.
+ * x and width are fractions of the paper width, y is paper widths from the top.
+ */
+export type WorksheetPlacement = { x: number; y: number; width: number }
+
 export type WorksheetDocument = {
   schemaVersion: 1
   id: string
@@ -492,6 +499,10 @@ export type WorksheetDocument = {
   pageHeight?: number
   textBoxes: WorksheetTextBox[]
   highlights?: WorksheetHighlight[]
+  /** Picture worksheets only: floating position and size on the sheet. */
+  placement?: WorksheetPlacement
+  /** Picture worksheets only: height / width of the picture, so the sheet can reserve room before it loads. */
+  aspect?: number
 }
 
 export type NoteHistorySnapshot = {
