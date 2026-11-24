@@ -5,6 +5,7 @@ import { dateLabel, markLabel, type Language, type Strings } from '../lib/i18n'
 import { markTone } from '../lib/grades'
 import { Icon, RoomPill, Tag } from '../components/ui'
 import { daysBetween } from '../lib/agenda'
+import type { HomeworkItem } from '../lib/homework'
 
 /** The Zurich clock, ticking once a minute. */
 export const useClock = (): Clock => {
@@ -88,5 +89,28 @@ export const EntryDetails = ({ entry, t, language }: { entry: Entry; t: Strings;
     <div className="details-tags">
       <EntryTags entry={entry} t={t} detail />
     </div>
+  </div>
+)
+
+/** One school assignment: title, course and the due day. Opens its description in a dialog. */
+export const HomeworkRow = ({ item, t, language, today, onOpen }: { item: HomeworkItem; t: Strings; language: Language; today: string; onOpen: () => void }) => (
+  <button type="button" className="hw-row" onClick={onOpen}>
+    <span className="hw-main">
+      <span className="hw-title">{item.title}</span>
+      <small className="hw-meta">{[item.courseName, t.assignment].filter(Boolean).join(' · ')}</small>
+    </span>
+    {item.day ? <span className={`tag${item.day < today ? '' : item.day === today ? ' tag-accent' : ''}`}>{relativeDay(item.day, today, t, language)}</span> : null}
+  </button>
+)
+
+export const HomeworkDetails = ({ item, t, language }: { item: HomeworkItem; t: Strings; language: Language }) => (
+  <div className="details">
+    <p className="details-kind">{t.assignment}</p>
+    <h3>{item.title}</h3>
+    <dl>
+      {item.courseName ? <><dt>{t.subject}</dt><dd>{item.courseName}</dd></> : null}
+      {item.day ? <><dt>{t.date}</dt><dd>{dateLabel(item.day, language, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</dd></> : null}
+      {item.description ? <><dt>{t.note}</dt><dd>{item.description}</dd></> : null}
+    </dl>
   </div>
 )

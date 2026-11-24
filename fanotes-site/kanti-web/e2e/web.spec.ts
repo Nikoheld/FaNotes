@@ -137,3 +137,42 @@ test.describe('static pages and the SPA shell', () => {
     await expect(page.locator('.signin a[href="/about/"]')).toBeVisible()
   })
 })
+
+test.describe('demo: Mensa week, absent teachers and school assignments', () => {
+  const withPrefs = async (page: Page, prefs: Record<string, unknown>) => {
+    await page.addInitScript((value) => { try { window.localStorage.setItem('kanti-web:prefs', JSON.stringify(value)) } catch { /* ignore */ } }, { onboarded: true, ...prefs })
+  }
+
+  test('the Mensa is off by default: no menu entry', async ({ page }) => {
+    await withPrefs(page, {})
+    await page.goto('/?demo')
+    await expect(page.getByRole('heading', { name: 'Heute', exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.sidebar .nav').getByRole('link', { name: /Mensa/ })).toHaveCount(0)
+    await expect(page.locator('.teacher-absences')).toHaveCount(0)
+  })
+
+  test('Mensa on: the week view, its day chips and the shortcut', async ({ page }) => {
+    await withPrefs(page, { showMensa: true, showTeacherAbsences: true })
+    await page.goto('/?demo')
+    await expect(page.getByRole('heading', { name: 'Heute', exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.teacher-absences')).toContainText('Lehrperson A')
+    await page.keyboard.press('g')
+    await page.keyboard.press('l')
+    await expect(page).toHaveURL(/\/mensa$/)
+    await expect(page.getByRole('heading', { name: 'Mensa', exact: true }).first()).toBeVisible()
+    await expect(page.locator('.mensa-chip')).toHaveCount(10)
+    await expect(page.getByText('Diese Woche', { exact: true })).toBeVisible()
+    await expect(page.getByText('Nächste Woche', { exact: true })).toBeVisible()
+    await page.locator('.mensa-chip').nth(1).click()
+    await expect(page.locator('.mensa-dayview .mensa-menu').first()).toContainText('CHF')
+  })
+
+  test('school assignments in the agenda and in Today', async ({ page }) => {
+    await withPrefs(page, {})
+    await page.goto('/termine?demo')
+    await expect(page.getByRole('heading', { name: 'Schulaufträge', exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.hw-row').first()).toContainText('Aufgaben 4 bis 7 lösen')
+    await page.goto('/?demo')
+    await expect(page.locator('.hw-row').first()).toBeVisible({ timeout: 15_000 })
+  })
+})

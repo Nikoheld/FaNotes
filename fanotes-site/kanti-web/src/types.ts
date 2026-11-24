@@ -59,6 +59,8 @@ export interface SchoolAbsence {
 
 export interface SchoolMessage { id: string; title: string; body: string; at: string }
 export interface SchoolVacation { id: string; name: string; start: string; end: string }
+/** The teachers the Schulnetz start page lists for one day (the app's TeacherAbsenceDay). */
+export interface TeacherAbsenceDay { day: string; absent: string[]; excursion: string[] }
 export interface KontoLine { date: string; label: string; amount: string; balance: string }
 export interface SchoolHomework { id: string; title: string; description: string; dueDate: string; courseId: string; courseName: string }
 
@@ -75,6 +77,8 @@ export interface Snapshot {
   absenceRemaining?: number | null
   absenceParser?: number
   homework: SchoolHomework[]
+  /** Start-page read of absent teachers; only present when the school lists some. */
+  teacherAbsences?: TeacherAbsenceDay
   messages: SchoolMessage[]
   vacations: SchoolVacation[]
   konto: KontoLine[]
