@@ -22,6 +22,8 @@ import ch.fasrv.fanotes.desk.CalendarDocument
 import ch.fasrv.fanotes.desk.HomeworkTask
 import ch.fasrv.fanotes.desk.emptyCalendar
 import ch.fasrv.fanotes.ink.InkDocument
+import ch.fasrv.fanotes.ink.newInkDocument
+import ch.fasrv.fanotes.vault.fileKindOf
 import ch.fasrv.fanotes.schulnetz.DiagnosticTrace
 import ch.fasrv.fanotes.schulnetz.diagnosticSyncKey
 import ch.fasrv.fanotes.schulnetz.diagnosticAlertStatus
@@ -240,7 +242,15 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     /** Where a search hit should open: a 1-based page and the words to highlight. */
     var editorTarget by mutableStateOf<DocTarget?>(null)
     var docStatus by mutableStateOf(DocSearchStatus())
+    /** The vault file the file viewer shows (an image, audio, video or story folder). */
+    var filePath by mutableStateOf<String?>(null)
+    fun openFile(path: String) {
+        filePath = path
+        navigate(Page.File)
+    }
     fun openNote(path: String, target: DocTarget? = null) {
+        // Only a note has an editor. Media and story folders have their own viewer and are never read as text.
+        if (fileKindOf(path) != null || ch.fasrv.fanotes.vault.StoryFiles.isStoryFolder(path)) { openFile(path); return }
         editorTarget = target
         editorPath = path
         editor = NoteEditorController(graph, viewModelScope, path)
@@ -411,7 +421,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         reloadJob = viewModelScope.launch {
             try {
                 val data = withContext(Dispatchers.IO) {
-                    val nextTree = graph.store.tree()
+                    val nextTree = graph.store.tree(includeFiles = true)
                     val folder = if (ch.fasrv.fanotes.vault.folderExists(nextTree, noteFolder)) noteFolder else ""
                     Reloaded(nextTree, folder, ch.fasrv.fanotes.vault.folderChildren(nextTree, folder).filter { it.path !in setOf(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH) },
                         runCatching { graph.homework().tasks }, runCatching { graph.calendar() }, graph.hypothetical(), graph.gradeBook(), graph.writtenNoteCount(), graph.deskPrefs(), graph.hiddenLessons(), graph.subjectColors(), graph.plannedAbsences())
@@ -450,6 +460,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     suspend fun loadPreview(node: VaultNode): NotePreview = withContext(Dispatchers.IO) {
         val hit = previewCache.get(node.path)
         if (hit != null && hit.first == node.modifiedAt) return@withContext hit.second
+        // Only a note has text and handwriting; a media file or a story is never decoded as a note.
+        if (!node.kind.isNote) return@withContext NotePreview("", newInkDocument(node.name, "blank", ""))
         val note = graph.store.readNote(node.path)
         NotePreview(noteExcerpt(note.markdown, note.title), note.document).also { previewCache.put(node.path, node.modifiedAt to it) }
     }
@@ -458,7 +470,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             val cached = searchCache.get(node.path)
             val body = if (cached?.first == node.modifiedAt) cached.second else {
-                val note = graph.store.readNote(node.path)
+                // One unreadable or oversized note must not end the whole search.
+                val note = try { graph.store.readNote(node.path) } catch (_: Exception) { return@mapNotNull null } catch (_: OutOfMemoryError) { return@mapNotNull null }
                 searchableNoteText(note.markdown, note.document.extras.string("searchTranscript").orEmpty()).also { searchCache.put(node.path, node.modifiedAt to it) }
             }
             if (node.name.contains(query, true) || body.contains(query, true)) {
@@ -536,7 +549,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             // Indexed text belongs to the account that could read it.
             runCatching { graph.docSearch.forgetAll() }
             runCatching { graph.refreshSchulnetz("fa-notes-logout") }
-            if (route.destination == Destination.Notes || route.page == Page.Editor || route.page == Page.Trash || route.page == Page.Profile || route.page == Page.DocSearch) {
+            if (route.destination == Destination.Notes || route.page == Page.Editor || route.page == Page.File || route.page == Page.Trash || route.page == Page.Profile || route.page == Page.DocSearch) {
                 history = emptyList()
                 route = CompanionRoute(Destination.Today)
             }
@@ -554,7 +567,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 graph.engine.deleteAccount(password)
                 runCatching { graph.docSearch.forgetAll() }
                 withContext(Dispatchers.IO) { graph.forgetSchoolOfDeletedAccount() }
-                if (route.destination == Destination.Notes || route.page == Page.Editor || route.page == Page.Trash || route.page == Page.Profile || route.page == Page.DocSearch) {
+                if (route.destination == Destination.Notes || route.page == Page.Editor || route.page == Page.File || route.page == Page.Trash || route.page == Page.Profile || route.page == Page.DocSearch) {
                     history = emptyList()
                     route = CompanionRoute(Destination.Today)
                 }

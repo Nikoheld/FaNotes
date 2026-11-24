@@ -7,6 +7,7 @@ import ch.fasrv.fanotes.famd.companionPath
 import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.ink.InkSession
 import ch.fasrv.fanotes.json.JsonValue
+import ch.fasrv.fanotes.vault.NoteKind
 import ch.fasrv.fanotes.vault.OpenNote
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
@@ -24,6 +25,11 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
     var dirty by mutableStateOf(false); private set
     var canUndo by mutableStateOf(false); private set
     var canRedo by mutableStateOf(false); private set
+    /**
+     * Nothing is ever written from this screen: a PDF opens for reading only (its page and the desktop's annotations
+     * cannot be shown together on a phone), and a note whose handwriting is too large or still missing must stay unchanged.
+     */
+    val readOnly: Boolean get() = note?.let { it.kind == NoteKind.PDF || it.inkTooLarge || it.inkPending } == true
     private var revision = 0L
     private var savedRevision = 0L
     private var debounce: Job? = null
@@ -46,9 +52,14 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
                 session = InkSession(loaded.document)
                 document = loaded.document
                 protected = protected + ".fanotes/assets/${loaded.inkId}.json"
-                // Nothing is edited while the handwriting is missing, so sync may bring it in meanwhile.
-                if (loaded.inkPending) graph.busyPaths -= protected else graph.busyPaths += protected
+                // Nothing is edited while the handwriting is missing or too large, or for a PDF, so sync may replace the files meanwhile.
+                if (loaded.inkPending || loaded.inkTooLarge || loaded.kind == NoteKind.PDF) graph.busyPaths -= protected else graph.busyPaths += protected
             } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: OutOfMemoryError) {
+                // A huge file must not take the app down: say so and leave the note unchanged.
+                graph.busyPaths -= protected
+                error = t(R.string.too_large_for_memory)
+            }
             catch (failure: Exception) { error = failure.message?.takeIf { it.isNotBlank() }?.let(::shownText) ?: t(R.string.could_not_open_note) }
             finally { loading = false }
         }
@@ -62,6 +73,7 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
     fun undo() { if (session?.undo() == true) inkChanged() }
     fun redo() { if (session?.redo() == true) inkChanged() }
     private fun changed() {
+        if (readOnly) return
         revision++; dirty = true; error = null
         debounce?.cancel()
         debounce = scope.launch { delay(750); save() }
@@ -71,7 +83,7 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
         val opened = note ?: return@withLock !loading
         if (savedRevision == revision) return@withLock true
         // Never write a sidecar for a note whose handwriting has not arrived (see OpenNote.inkPending).
-        if (opened.inkPending) return@withLock true
+        if (opened.inkPending || opened.inkTooLarge || opened.kind == NoteKind.PDF) return@withLock true
         val target = revision
         val ink = document ?: return@withLock false
         val text = markdown
@@ -86,6 +98,7 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
             error = null
             true
         } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: OutOfMemoryError) { error = t(R.string.too_large_for_memory); false }
         catch (failure: Exception) { error = failure.message?.takeIf { it.isNotBlank() }?.let(::shownText) ?: t(R.string.could_not_save_draft); false }
         finally { saving = false }
     }
@@ -120,7 +133,7 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
         debounce?.cancel()
         if (loading) return false
         // Repeat if input changed while the IO save was in flight.
-        do { if (!save()) return false } while (dirty)
+        do { if (!save()) return false } while (dirty && !readOnly)
         graph.busyPaths -= protected
         return true
     }

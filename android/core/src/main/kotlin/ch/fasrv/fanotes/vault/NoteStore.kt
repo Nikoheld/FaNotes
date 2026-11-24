@@ -24,7 +24,9 @@ import ch.fasrv.fanotes.desk.recordPageSaved
 import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.ink.newInkDocument
 import ch.fasrv.fanotes.ink.parseInkDocument
+import ch.fasrv.fanotes.json.JsonLimitException
 import ch.fasrv.fanotes.json.JsonValue
+import ch.fasrv.fanotes.famd.MAX_SYNC_DOCUMENT_BYTES
 import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.json.deepCopy
 import ch.fasrv.fanotes.json.jsonArray
@@ -68,6 +70,9 @@ interface VaultIo {
     fun move(from: String, to: String)
     fun exists(path: String): Boolean
     fun mtime(path: String): Long
+
+    /** Size in bytes of a file, or -1 when it is missing (or not a file). Lets a caller refuse a huge file before reading it. */
+    fun size(path: String): Long
     fun list(directory: String): List<VaultEntry>
     fun walkFiles(): List<VaultEntry>
     fun mkdir(path: String)
@@ -100,8 +105,16 @@ interface VaultIo {
  */
 data class VaultEntry(val path: String, val directory: Boolean, val size: Long, val mtimeMs: Long, val handle: String? = null)
 
-/** STORY: a writing-mode project folder (`Name.story/`), shown and opened as one document. */
-enum class NoteKind { MARKDOWN, PDF, FOLDER, STORY }
+/**
+ * STORY: a writing-mode project folder (`Name.story/`), shown and opened as one document.
+ * IMAGE, AUDIO and VIDEO are plain media files; they only appear in a tree built with `includeFiles`.
+ */
+enum class NoteKind {
+    MARKDOWN, PDF, FOLDER, STORY, IMAGE, AUDIO, VIDEO;
+
+    /** A note has text and handwriting ([NoteStore.readNote] works on it). A story, a media file and a folder are not notes. */
+    val isNote: Boolean get() = this == MARKDOWN || this == PDF
+}
 
 data class VaultNode(
     val name: String,
@@ -158,6 +171,8 @@ fun censusNotes(nodes: List<VaultNode>, skip: Set<String> = emptySet()): NoteCen
                     notes += 1
                     here += 1
                 }
+                // Plain media files are listed on request only and are not notes.
+                NoteKind.IMAGE, NoteKind.AUDIO, NoteKind.VIDEO -> Unit
             }
         }
         perFolder[folder.ifBlank { "/" }] = here
@@ -181,43 +196,92 @@ data class OpenNote(
      * empty sidecar that could replace the real handwriting on the other devices.
      */
     val inkPending: Boolean = false,
+    /**
+     * The handwriting file is too large to open on a phone (over [MAX_SYNC_DOCUMENT_BYTES], too many nodes, or the heap ran
+     * out). The note comes back with an empty document and payload and is never saved: a save would replace the real handwriting.
+     */
+    val inkTooLarge: Boolean = false,
 )
 
 /** The message [NoteStore.save] throws for a note whose handwriting has not arrived yet. */
 const val INK_PENDING_MESSAGE = "This note's handwriting has not reached this device yet. It was left unchanged."
 
+/** The message [NoteStore.save] throws for a note whose handwriting is too large to open here. */
+const val INK_TOO_LARGE_MESSAGE = "This note's handwriting is too large to open on this device. It was left unchanged."
+
+/** Most text a note body may have before only its start is shown (the same cap as a sync document). */
+private const val NOTE_TEXT_HEAD_BYTES = 1024 * 1024
+
 class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit = {}) {
-    fun tree(): List<VaultNode> = buildTree("")
+    /** [includeFiles] also lists images, audio and video as [NoteKind.IMAGE], [NoteKind.AUDIO] and [NoteKind.VIDEO]. */
+    fun tree(includeFiles: Boolean = false): List<VaultNode> = buildTree("", includeFiles)
 
     fun readNote(path: String): OpenNote {
         val normalized = normalize(path)
         val extension = extensionOf(normalized)
+        // Media and story folders are no notes: never decode them as text.
+        if (fileKindOf(normalized) != null || StoryFiles.isStoryFolder(normalized)) {
+            throw IllegalArgumentException("Dieser Eintrag ist keine Notiz.")
+        }
         val famdPath = if (extension == FAMD_EXTENSION) normalized else companionPath(normalized, FAMD_EXTENSION)
         val markdownPath = when (extension) {
             ".pdf" -> null
             FAMD_EXTENSION -> companionPath(normalized, ".md").takeIf { io.exists(it) }
             else -> normalized
         }
-        val famdBytes = io.read(famdPath)
-        val famd = famdBytes?.let { readStoredFamd(it) }
-        val mdBytes = markdownPath?.let { io.read(it) }
-        // Ink that lives only inside the markdown, with no sidecar yet, is still the note.
-        val embedded = if (famdBytes == null && mdBytes != null && famdHeaderStored(mdBytes.decodeToString())) {
-            readStoredFamd(mdBytes)
-        } else {
+        val limit = MAX_SYNC_DOCUMENT_BYTES.toLong()
+        var tooLarge = false
+        // A sidecar over the sync cap is never decoded: the phone could not hold the text and the parsed document.
+        val famdBytes = if (io.size(famdPath) > limit) {
+            tooLarge = true
             null
+        } else try {
+            io.read(famdPath)
+        } catch (_: OutOfMemoryError) {
+            tooLarge = true
+            null
+        }
+        var famd: FamdDocument? = null
+        if (famdBytes != null) {
+            try {
+                famd = readStoredFamd(famdBytes)
+            } catch (_: JsonLimitException) {
+                tooLarge = true
+            } catch (_: OutOfMemoryError) {
+                tooLarge = true
+            }
+        }
+        // A Markdown file that embeds a payload counts like a sidecar; for a huge one only its start is read.
+        val mdTooBig = markdownPath != null && io.size(markdownPath) > limit
+        if (mdTooBig) tooLarge = true
+        val mdBytes = when {
+            markdownPath == null -> null
+            mdTooBig -> io.readHead(markdownPath, NOTE_TEXT_HEAD_BYTES)?.bytes
+            else -> try { io.read(markdownPath) } catch (_: OutOfMemoryError) { tooLarge = true; null }
+        }
+        // Ink that lives only inside the markdown, with no sidecar yet, is still the note.
+        var embedded: FamdDocument? = null
+        if (!tooLarge && famdBytes == null && mdBytes != null && famdHeaderStored(mdBytes.decodeToString())) {
+            try {
+                embedded = readStoredFamd(mdBytes)
+            } catch (_: JsonLimitException) {
+                tooLarge = true
+            } catch (_: OutOfMemoryError) {
+                tooLarge = true
+            }
         }
         val markdown = when {
             mdBytes != null -> toLf(plainMarkdownBody(mdBytes.decodeToString()))
             famd != null -> toLf(famd.markdown)
             else -> ""
         }
-        val payload = famd?.payload ?: embedded?.payload ?: emptyFamdPayload(isoNow())
+        val payload = if (tooLarge) emptyFamdPayload(isoNow()) else famd?.payload ?: embedded?.payload ?: emptyFamdPayload(isoNow())
         val title = titleOf(normalized)
-        val document = parseInkDocument(payload.obj("ink"), title, payload.string("paperStyle") ?: "dots", payload.string("updatedAt") ?: isoNow())
+        val document = if (tooLarge) newInkDocument(title, "dots", isoNow())
+        else parseInkDocument(payload.obj("ink"), title, payload.string("paperStyle") ?: "dots", payload.string("updatedAt") ?: isoNow())
         val inkId = noteInkId(markdown) ?: UUID.randomUUID().toString()
         // A marker is only written together with its sidecar, so a marker without one means it has not arrived.
-        val inkPending = extension != ".pdf" && extension != FAMD_EXTENSION && famdBytes == null && embedded == null && noteInkId(markdown) != null
+        val inkPending = !tooLarge && extension != ".pdf" && extension != FAMD_EXTENSION && famdBytes == null && embedded == null && noteInkId(markdown) != null
         return OpenNote(
             path = normalized,
             kind = if (extension == ".pdf") NoteKind.PDF else NoteKind.MARKDOWN,
@@ -228,6 +292,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
             worksheets = worksheetIdsFromMarkdown(markdown),
             inkId = inkId,
             inkPending = inkPending,
+            inkTooLarge = tooLarge,
         )
     }
 
@@ -243,6 +308,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         now: String = isoNow(),
         textFieldBase: List<ch.fasrv.fanotes.desk.NoteTextField>? = null,
     ): OpenNote {
+        if (note.inkTooLarge) throw IllegalStateException(INK_TOO_LARGE_MESSAGE)
         val famdPathForPlain = if (note.path.endsWith(FAMD_EXTENSION)) note.path else companionPath(note.path, FAMD_EXTENSION)
         if (note.inkPending && !io.exists(famdPathForPlain)) throw IllegalStateException(INK_PENDING_MESSAGE)
         // A plain Markdown note that never had ink stays a plain file: no marker, no sidecar, no asset.
@@ -643,6 +709,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
             throw IllegalArgumentException("Die Notiz wurde nicht gefunden.")
         }
         val note = readNote(normalized)
+        if (note.inkTooLarge) throw IllegalStateException(INK_TOO_LARGE_MESSAGE)
         if (note.kind == NoteKind.PDF) throw IllegalArgumentException(PDF_DUPLICATE_REFUSED)
         val parent = normalized.substringBeforeLast('/', "")
         val extension = if (note.kind == NoteKind.PDF) ".pdf" else ".md"
@@ -760,7 +827,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         io.write(".fanotes/assets/$id.json", ink.stringify().encodeToByteArray())
     }
 
-    private fun buildTree(directory: String): List<VaultNode> {
+    private fun buildTree(directory: String, includeFiles: Boolean): List<VaultNode> {
         return io.list(directory)
             .filter { !it.path.substringAfterLast('/').startsWith(".") }
             .mapNotNull { entry ->
@@ -768,7 +835,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
                 if (entry.directory && StoryFiles.isStoryFolder(entry.path)) {
                     VaultNode(name.removeSuffix(".story").removeSuffix(".STORY"), entry.path, NoteKind.STORY, entry.mtimeMs)
                 } else if (entry.directory) {
-                    VaultNode(name, entry.path, NoteKind.FOLDER, entry.mtimeMs, buildTree(entry.path))
+                    VaultNode(name, entry.path, NoteKind.FOLDER, entry.mtimeMs, buildTree(entry.path, includeFiles))
                 } else {
                     val extension = extensionOf(name)
                     when (extension) {
@@ -780,7 +847,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
                             if (io.exists(md) || io.exists(markdown)) null
                             else VaultNode(titleOf(name), entry.path, NoteKind.MARKDOWN, entry.mtimeMs)
                         }
-                        else -> null
+                        else -> if (includeFiles) fileKindOf(name)?.let { VaultNode(name, entry.path, it, entry.mtimeMs) } else null
                     }
                 }
             }
@@ -842,9 +909,21 @@ fun movedVaultPath(path: String, destFolder: String, occupied: (String) -> Boole
 fun renamedVaultPath(path: String, nextName: String, folder: Boolean): String {
     val trimmed = nextName.trim()
     if (trimmed.isEmpty()) throw IllegalArgumentException("Der Name darf nicht leer sein.")
-    val stemInput = if (folder) trimmed else trimmed.replace(Regex("""\.(md|markdown|pdf)$""", RegexOption.IGNORE_CASE), "")
+    val story = folder && path.endsWith(".story", ignoreCase = true)
+    val kept = path.substringAfterLast('/').let { leafName -> leafName.lastIndexOf('.').let { dot -> if (dot <= 0) "" else leafName.substring(dot) } }
+    // A typed extension that repeats the file's own is dropped; a media file keeps its own extension, never `.famd`.
+    val stemInput = when {
+        story -> trimmed.replace(Regex("""\.story$""", RegexOption.IGNORE_CASE), "")
+        folder -> trimmed
+        else -> trimmed.replace(Regex("""\.(md|markdown|pdf)$""", RegexOption.IGNORE_CASE), "")
+            .let { if (kept.isNotEmpty() && it.endsWith(kept, ignoreCase = true) && it.length > kept.length) it.dropLast(kept.length) else it }
+    }
     val stem = safeNoteName(stemInput)
-    val leaf = if (folder) stem else stem + extensionOf(path).ifBlank { ".md" }
+    val leaf = when {
+        story -> "$stem.story"
+        folder -> stem
+        else -> stem + kept.ifBlank { ".md" }
+    }
     val parent = path.substringBeforeLast('/', "")
     return if (parent.isEmpty()) leaf else "$parent/$leaf"
 }
@@ -966,6 +1045,11 @@ class DirectoryVault(val root: Path) : VaultIo {
     }
 
     override fun exists(path: String) = Files.exists(resolve(path))
+
+    override fun size(path: String): Long {
+        val target = resolve(path)
+        return if (Files.isRegularFile(target)) target.toFile().length() else -1L
+    }
 
     override fun mtime(path: String): Long {
         val target = resolve(path)

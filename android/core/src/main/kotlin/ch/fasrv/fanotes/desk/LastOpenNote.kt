@@ -12,7 +12,7 @@ fun collectNotePaths(nodes: List<VaultNode>): List<String> {
     val paths = mutableListOf<String>()
     fun walk(list: List<VaultNode>) {
         for (node in list) {
-            if (node.kind == NoteKind.FOLDER) walk(node.children) else paths += node.path
+            if (node.kind == NoteKind.FOLDER) walk(node.children) else if (node.kind.isNote) paths += node.path
         }
     }
     walk(nodes)

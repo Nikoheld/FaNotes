@@ -105,6 +105,12 @@ fun CompanionRoot(model: CompanionModel) {
         }
         return
     }
+    if (route.page == Page.File && model.notesAccount) {
+        Scaffold(snackbarHost = { SnackbarHost(snackbar) }, contentWindowInsets = WindowInsets.safeDrawing, containerColor = MaterialTheme.colorScheme.background) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) { FileViewerScreen(model) }
+        }
+        return
+    }
     val creationLabel = when {
         model.notesAccount && route.destination == Destination.Notes -> t(R.string.new_note)
         route.destination == Destination.Planner -> if (model.plannerTasks) t(R.string.new_task) else t(R.string.new_event)

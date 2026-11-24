@@ -83,6 +83,7 @@ class VaultHeadTest {
         override fun move(from: String, to: String) { error("unused") }
         override fun exists(path: String) = true
         override fun mtime(path: String) = 0L
+        override fun size(path: String) = if (path == "x") 300L else -1L
         override fun list(directory: String): List<VaultEntry> = emptyList()
         override fun walkFiles(): List<VaultEntry> = emptyList()
         override fun mkdir(path: String) { error("unused") }

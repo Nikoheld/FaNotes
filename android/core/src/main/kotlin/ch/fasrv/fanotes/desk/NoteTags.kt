@@ -51,7 +51,7 @@ fun filterVaultByTag(nodes: List<VaultNode>, tag: String?, index: Map<String, Li
     val wanted = normalizeTag(tag)
     fun keep(node: VaultNode): VaultNode? {
         if (node.kind != NoteKind.FOLDER) {
-            return if (index[node.path].orEmpty().contains(wanted)) node else null
+            return if (node.kind.isNote && index[node.path].orEmpty().contains(wanted)) node else null
         }
         val children = node.children.mapNotNull { keep(it) }
         return if (children.isEmpty()) null else node.copy(children = children)

@@ -14,6 +14,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.automirrored.outlined.Article
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -50,24 +52,50 @@ import java.time.ZoneId
 
 @Composable
 fun NoteRow(model: CompanionModel, node: VaultNode, onMore: (() -> Unit)? = null, onClick: () -> Unit) {
-    val preview by produceState<NotePreview?>(null, node.path, node.modifiedAt) { value = runCatching { model.loadPreview(node) }.getOrNull() }
+    val preview by produceState<NotePreview?>(null, node.path, node.modifiedAt) { value = if (node.kind.isNote) runCatching { model.loadPreview(node) }.getOrNull() else null }
+    val density = LocalDensity.current
+    val picture by produceState<android.graphics.Bitmap?>(null, node.path, node.modifiedAt, node.kind) {
+        value = if (node.kind == NoteKind.IMAGE) decodeFileThumbnail(model.graph.root.resolve(node.path), with(density) { 104.dp.roundToPx() }, with(density) { 128.dp.roundToPx() }) else null
+    }
     val inset = if (LocalInGroup.current) 16.dp else 0.dp
     Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).padding(start = inset, end = if (onMore != null) 4.dp else inset, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Box(Modifier.size(52.dp, 64.dp).clip(MaterialTheme.shapes.small).background(LocalCompanionSemantics.current.paper)
             .border(1.dp, LocalCompanionSemantics.current.hairline, MaterialTheme.shapes.small), contentAlignment = Alignment.Center) {
             val ink = preview?.ink
-            if (ink != null && ink.strokes.isNotEmpty()) InkThumbnail(ink, Modifier.fillMaxSize().padding(5.dp), cacheKey = "${node.path}:${node.modifiedAt}")
-            else Icon(if (node.kind == NoteKind.PDF) Icons.Outlined.PictureAsPdf else Icons.AutoMirrored.Outlined.Article, null, Modifier.size(24.dp), tint = LocalCompanionSemantics.current.paperInk.copy(alpha = 0.55f))
+            val image = picture
+            if (image != null) Image(image.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+            else if (ink != null && ink.strokes.isNotEmpty()) InkThumbnail(ink, Modifier.fillMaxSize().padding(5.dp), cacheKey = "${node.path}:${node.modifiedAt}")
+            else Icon(kindIcon(node.kind), null, Modifier.size(24.dp), tint = LocalCompanionSemantics.current.paperInk.copy(alpha = 0.55f))
         }
-        val shownName = displayNoteTitle(node.name, t(R.string.untitled_note))
+        val shownName = if (node.kind.isNote) displayNoteTitle(node.name, t(R.string.untitled_note)) else node.name
         Column(Modifier.weight(1f)) {
             Text(shownName, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val excerpt = preview?.text.orEmpty()
+            val excerpt = if (node.kind.isNote) preview?.text.orEmpty() else kindLabel(node.kind)
             if (excerpt.isNotBlank()) Text(excerpt, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
             Text(listOf(node.path.substringBeforeLast('/', "").ifBlank { t(R.string.my_notes) }, formatSchoolStamp(Instant.ofEpochMilli(node.modifiedAt).atZone(ZoneId.systemDefault()), "d MMM")).joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
         }
         if (onMore != null) ActionIcon(Icons.Outlined.MoreVert, t(R.string.actions_for, shownName), onClick = onMore)
     }
+}
+
+/** The icon of a library entry: its own for every kind of file. */
+fun kindIcon(kind: NoteKind) = when (kind) {
+    NoteKind.PDF -> Icons.Outlined.PictureAsPdf
+    NoteKind.IMAGE -> Icons.Outlined.Image
+    NoteKind.AUDIO -> Icons.Outlined.AudioFile
+    NoteKind.VIDEO -> Icons.Outlined.VideoFile
+    NoteKind.STORY -> Icons.AutoMirrored.Outlined.MenuBook
+    NoteKind.FOLDER -> Icons.Outlined.Folder
+    NoteKind.MARKDOWN -> Icons.AutoMirrored.Outlined.Article
+}
+
+@Composable
+fun kindLabel(kind: NoteKind): String = when (kind) {
+    NoteKind.IMAGE -> t(R.string.kind_image)
+    NoteKind.AUDIO -> t(R.string.kind_audio)
+    NoteKind.VIDEO -> t(R.string.kind_video)
+    NoteKind.STORY -> t(R.string.kind_story)
+    else -> ""
 }
 
 @Composable
@@ -186,10 +214,12 @@ fun NotesScreen(model: CompanionModel) {
 private fun NoteActions(model: CompanionModel, node: VaultNode, onDismiss: () -> Unit) {
     var action by remember { mutableStateOf("") }
     if (action == "rename") {
-        NameDialog(t(R.string.rename), t(R.string.name), t(R.string.save), node.name, onDismiss) { model.renameNote(node, it); onDismiss() }; return
+        // A media file keeps its extension; only the name before it is edited.
+        val initial = if (node.kind in setOf(NoteKind.IMAGE, NoteKind.AUDIO, NoteKind.VIDEO)) node.name.substringBeforeLast('.') else node.name
+        NameDialog(t(R.string.rename), t(R.string.name), t(R.string.save), initial, onDismiss) { model.renameNote(node, it); onDismiss() }; return
     }
     if (action == "trash") {
-        ConfirmDialog(t(R.string.move_to_recently_deleted, if (node.kind == NoteKind.FOLDER) t(R.string.folder_noun) else t(R.string.note_noun)), t(R.string.you_can_restore_it_from_this_device_s_library_me), t(R.string.move), onDismiss) { model.trashNote(node); onDismiss() }; return
+        ConfirmDialog(t(R.string.move_to_recently_deleted, when { node.kind == NoteKind.FOLDER -> t(R.string.folder_noun); node.kind.isNote -> t(R.string.note_noun); else -> t(R.string.file_noun) }), t(R.string.you_can_restore_it_from_this_device_s_library_me), t(R.string.move), onDismiss) { model.trashNote(node); onDismiss() }; return
     }
     KantiSheet(onDismiss = onDismiss) {
         SheetTitle(if (action == "move") t(R.string.move_to_folder) else node.name, onDismiss)
@@ -202,7 +232,15 @@ private fun NoteActions(model: CompanionModel, node: VaultNode, onDismiss: () ->
                 }
             }
         } else {
+            val context = androidx.compose.ui.platform.LocalContext.current
             Group(color = LocalCompanionSemantics.current.sunken.copy(alpha = 0.55f)) {
+                if (node.kind in setOf(NoteKind.IMAGE, NoteKind.AUDIO, NoteKind.VIDEO)) {
+                    SettingRow(Icons.AutoMirrored.Outlined.OpenInNew, t(R.string.open_in_another_app), chevron = false) {
+                        openFileInAnotherApp(context, model.graph.root, model.graph.root.resolve(node.path))
+                        onDismiss()
+                    }
+                    FineDivider()
+                }
                 SettingRow(Icons.Outlined.DriveFileRenameOutline, t(R.string.rename), chevron = false) { action = "rename" }
                 FineDivider()
                 SettingRow(Icons.AutoMirrored.Outlined.DriveFileMove, t(R.string.move_to_folder), chevron = false) { action = "move" }
@@ -257,16 +295,20 @@ fun NoteEditorScreen(model: CompanionModel) {
             ActionIcon(Icons.AutoMirrored.Outlined.ArrowBack, t(R.string.save_and_go_back)) { model.closeEditor() }
             Column(Modifier.weight(1f).padding(start = 4.dp)) {
                 Text(editor.note?.title ?: t(R.string.opening_note), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                StatusLine(when { editor.error != null -> t(R.string.save_needs_attention); editor.saving -> t(R.string.saving); editor.dirty -> t(R.string.unsaved_changes); else -> t(R.string.saved_on_this_device) },
+                if (!editor.readOnly) StatusLine(when { editor.error != null -> t(R.string.save_needs_attention); editor.saving -> t(R.string.saving); editor.dirty -> t(R.string.unsaved_changes); else -> t(R.string.saved_on_this_device) },
                     when { editor.error != null -> StateTone.Error; editor.dirty || editor.saving -> StateTone.Warning; else -> StateTone.Accent })
             }
-            ActionIcon(Icons.Outlined.Done, t(R.string.save_note), enabled = editor.note != null) { editor.flush() }
+            if (!editor.readOnly) ActionIcon(Icons.Outlined.Done, t(R.string.save_note), enabled = editor.note != null) { editor.flush() }
         }
         if (editor.loading) { LoadingState(t(R.string.opening_note)); return }
         if (editor.error != null) {
             Box(Modifier.padding(Space.md)) { InfoBanner(t(R.string.note_needs_attention), shownText(editor.error), if (editor.note == null) t(R.string.try_again) else t(R.string.save_again), true, onAction = { if (editor.note == null) editor.load() else editor.flush() }) }
         }
         if (editor.note == null) return
+        if (editor.note?.inkTooLarge == true) {
+            // The handwriting stays as it is. The text, if there is any, still reads below.
+            Box(Modifier.padding(horizontal = Space.md, vertical = Space.sm)) { InfoBanner(t(R.string.note_ink_too_large_title), t(R.string.note_ink_too_large_body), tone = StateTone.Warning) }
+        }
         if (editor.note?.inkPending == true) {
             // The handwriting is still on its way: say so instead of opening an empty note that could be saved over it.
             Box(Modifier.padding(Space.md)) {
@@ -275,10 +317,14 @@ fun NoteEditorScreen(model: CompanionModel) {
             }
             return
         }
-        SegmentedTabs(listOf("read" to t(R.string.editor_read), "text" to t(R.string.editor_text), "ink" to t(R.string.editor_ink)), mode, { focus.clearFocus(); mode = it },
-            Modifier.padding(horizontal = Space.page, vertical = 6.dp))
-        HorizontalDivider(color = LocalCompanionSemantics.current.hairline)
-        when (mode) {
+        // A PDF and a note with oversized handwriting open for reading only: nothing here may be written back.
+        val shownMode = if (editor.readOnly) "read" else mode
+        if (!editor.readOnly) {
+            SegmentedTabs(listOf("read" to t(R.string.editor_read), "text" to t(R.string.editor_text), "ink" to t(R.string.editor_ink)), mode, { focus.clearFocus(); mode = it },
+                Modifier.padding(horizontal = Space.page, vertical = 6.dp))
+            HorizontalDivider(color = LocalCompanionSemantics.current.hairline)
+        }
+        when (shownMode) {
             "text" -> {
                 Box(Modifier.weight(1f).fillMaxWidth().background(scheme.surface).padding(Space.page)) {
                     if (editor.markdown.isEmpty()) Text(t(R.string.start_writing), style = MaterialTheme.typography.bodyLarge, color = scheme.onSurfaceVariant)

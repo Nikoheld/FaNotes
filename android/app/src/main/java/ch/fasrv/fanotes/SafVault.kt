@@ -118,6 +118,8 @@ class SafVault(private val context: Context, private val tree: Uri) : VaultIo {
 
     override fun mtime(path: String): Long = documents.find(normalize(path))?.mtimeMs ?: 0L
 
+    override fun size(path: String): Long = documents.find(normalize(path))?.takeIf { it.file }?.size ?: -1L
+
     override fun list(directory: String): List<VaultEntry> =
         documents.list(if (directory.isBlank()) "" else normalize(directory))
 
