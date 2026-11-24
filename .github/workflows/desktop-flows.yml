@@ -11,6 +11,7 @@ on:
       - 'fanotes/src/**'
       - 'fanotes/electron/**'
       - 'fanotes/scripts/check-desktop-untested-flows.mjs'
+      - 'fanotes/scripts/check-share-presence.mjs'
       - 'fanotes/scripts/check-note-export*.mjs'
       - 'fanotes/scripts/check-ink-*export.mjs'
       - 'fanotes/scripts/electron-test-stub.cjs'
@@ -50,6 +51,8 @@ jobs:
           test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
       - name: Desktop flows
         run: npm run check:desktop-flows || { echo "::warning::desktop flows failed once; retrying"; npm run check:desktop-flows; }
+      - name: Share presence avatars
+        run: npm run check:share-presence
       - name: Note export (unit)
         run: npm run check:note-export-unit
       - name: Note export (PDF and Word through the real dialog)
