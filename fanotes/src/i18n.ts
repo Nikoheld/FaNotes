@@ -541,6 +541,10 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   if (updatedTo) return `Updated to version ${updatedTo[1]}`
   const rolledBack = /^FaNotes (\d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) ließ sich nicht starten und wurde zurückgesetzt\. Die automatische Installation wartet auf die nächste Version\.$/u.exec(source)
   if (rolledBack) return `FaNotes ${rolledBack[1]} did not start and was rolled back. Automatic installation waits for the next version.`
+  const notInstalled = /^FaNotes (\d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) konnte nicht installiert werden\. Die automatische Installation wartet auf die nächste Version\.$/u.exec(source)
+  if (notInstalled) return `FaNotes ${notInstalled[1]} could not be installed. Automatic installation waits for the next version.`
+  const notInstalledNote = /^FaNotes (\d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) wurde nicht installiert\. (.+?) Das Update wird nicht erneut automatisch versucht; du kannst es unter Einstellungen › Updates manuell installieren\.$/u.exec(source)
+  if (notInstalledNote) return `FaNotes ${notInstalledNote[1]} was not installed. ${translateCore(notInstalledNote[2])} The update is not retried automatically; you can install it manually under Settings › Updates.`
   const readyToInstall = /^(FaNotes \d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) ist installationsbereit$/u.exec(source)
   if (readyToInstall) return `${readyToInstall[1]} is ready to install`
   const downloadingUpdate = /^Update wird geladen · (\d+) %$/u.exec(source)

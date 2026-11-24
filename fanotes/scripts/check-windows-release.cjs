@@ -5,10 +5,12 @@ const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const {
+  INSTALL_HELPER,
   PLATFORM_RELEASES,
   WINDOWS_DELTA_HELPER,
   WINDOWS_INSTALLER_ARGS,
   WINDOWS_INSTALLER_HELPER,
+  WINDOWS_LAUNCHER,
   WINDOWS_SWAP_HELPER,
   githubReleaseAssetUrl,
   stableStringify,
@@ -86,7 +88,13 @@ for (const helper of [WINDOWS_SWAP_HELPER, WINDOWS_INSTALLER_HELPER]) {
   assert.match(helper, /install\.lock/u, 'Every Windows helper releases the install lock.')
   assert.match(helper, /\$Mode -eq 'relaunch'/u)
   assert.doesNotMatch(helper, /--force-run/u)
+  // The app quits only after it has seen this marker, so it must be the helper's very first action.
+  assert.match(helper, /^param\([\s\S]+?\[string\]\$AttemptId = ''\n\)\s*\$root = [^\n]+\n# First action[^\n]*\ntry \{\n {2}\[System\.IO\.File\]::WriteAllText\(\(Join-Path \$root 'helper-started\.json'\)/u)
 }
+assert.match(INSTALL_HELPER, /lock_file="[^\n]+\n# First action[^\n]*\nprintf [^\n]+helper-started\.json[^\n]+\n\nexec >>/u)
+// Never a detached, console-less PowerShell: Start-Process gives the helper a hidden console of its own, WMI is the fallback.
+assert.match(WINDOWS_LAUNCHER, /Start-Process -FilePath \$program -ArgumentList \$line -WindowStyle Hidden -PassThru[\s\S]+Win32_Process -MethodName Create[\s\S]+exit 3/u)
+assert.doesNotMatch(WINDOWS_LAUNCHER, /-NoNewWindow/u)
 assert.equal(PLATFORM_RELEASES.win32.api, 'https://api.github.com/repos/Nikoheld/FaNotes/releases')
 // The manifest must name the release it was picked from.
 assert.throws(

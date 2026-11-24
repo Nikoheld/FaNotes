@@ -1804,6 +1804,10 @@ export default function App({ startupBootstrap }: AppProps) {
         closeInProgressRef.current = false
         toast(`Das Update konnte nicht gestartet werden: ${next.error}`, 'error')
       }
+      if (next.installNotCompleted && rolledBackNoteRef.current !== next.installNotCompleted.version) {
+        rolledBackNoteRef.current = next.installNotCompleted.version
+        toast(`FaNotes ${next.installNotCompleted.version} wurde nicht installiert. ${next.installNotCompleted.message} Das Update wird nicht erneut automatisch versucht; du kannst es unter Einstellungen › Updates manuell installieren.`, 'error')
+      }
       if (next.rolledBack && rolledBackNoteRef.current !== next.rolledBack.version) {
         rolledBackNoteRef.current = next.rolledBack.version
         toast(`FaNotes ${next.rolledBack.version} ließ sich nicht starten. Die bisherige Version ${next.currentVersion} wurde wiederhergestellt. ${next.rolledBack.message}`, 'error')

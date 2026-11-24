@@ -9,7 +9,7 @@ const { Readable, Transform } = require('node:stream')
 const { pipeline } = require('node:stream/promises')
 const { DELTA_FORMAT, applyDeltaPatch } = require('./delta.cjs')
 const { VERSION_PATTERN, compareSemanticVersions, deltaPathname, packagePathname, releaseVisibleOnChannel, versionChannel } = require('./releaseVersion.cjs')
-const { createUpdateLocks } = require('./update-lock.cjs')
+const { createUpdateLocks, isPidAlive } = require('./update-lock.cjs')
 
 const PRODUCT_ORIGIN = 'https://fanotes.fasrv.ch'
 const GITHUB_REPOSITORY = 'Nikoheld/FaNotes'
@@ -91,6 +91,14 @@ const MAX_PACKAGE_BYTES = 1024 * 1024 * 1024
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 const RELEASE_CACHE_FILE = 'release-cache.json'
 const INSTALL_RESULT_FILE = 'install-result.json'
+// The helper writes HELPER_STARTED_FILE as its very first action. The app only
+// quits for an install once it has seen that marker for its own attempt.
+const HELPER_STARTED_FILE = 'helper-started.json'
+// Written before the helper is started and evaluated on the next start: an
+// attempt that left no result and no newer version behind counts as failed.
+const INSTALL_ATTEMPT_FILE = 'install-attempt.json'
+const HELPER_START_TIMEOUT_MS = 8_000
+const WINDOWS_LAUNCHER_TIMEOUT_MS = 15_000
 const MAX_INSTALL_LOG_BYTES = 256 * 1024
 /** Short first poll so a staged update can be adopted before the user settles in. */
 const INITIAL_CHECK_DELAY_MS = 2_500
@@ -143,8 +151,12 @@ const collectRelaunchArgs = (argv) => {
 // quit, background install) never opens a window; "relaunch" (install at
 // launch) starts the new version afterwards.
 const WINDOWS_HELPER_COMMON = String.raw`
-$ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $ResultFile
+# First action: tell the waiting app that this helper really runs.
+try {
+  [System.IO.File]::WriteAllText((Join-Path $root 'helper-started.json'), ('{"attempt":"' + ($AttemptId -replace '[^a-f0-9]', '') + '","pid":' + $PID + '}'))
+} catch { }
+$ErrorActionPreference = 'Stop'
 $selfTestFile = Join-Path $root 'self-test.json'
 $lockFile = Join-Path $root 'install.lock'
 $launchRequestFile = Join-Path $root 'launch-request.json'
@@ -261,7 +273,8 @@ const WINDOWS_DELTA_HELPER = `param(
   [Parameter(Mandatory=$true)][string]$ResultFile,
   [Parameter(Mandatory=$true)][string]$Mode,
   [string]$LaunchArgs = '',
-  [int]$StubPid = 0
+  [int]$StubPid = 0,
+  [string]$AttemptId = ''
 )
 ${WINDOWS_HELPER_COMMON}
 $temporary = "$Target.fanotes-new"
@@ -340,7 +353,8 @@ const WINDOWS_INSTALLER_HELPER = `param(
   [Parameter(Mandatory=$true)][string]$LogFile,
   [Parameter(Mandatory=$true)][string]$ResultFile,
   [Parameter(Mandatory=$true)][string]$Mode,
-  [string]$LaunchArgs = ''
+  [string]$LaunchArgs = '',
+  [string]$AttemptId = ''
 )
 ${WINDOWS_HELPER_COMMON}
 try {
@@ -382,6 +396,49 @@ try {
 }
 `
 
+// Starts a Windows install helper so that it outlives FaNotes. Node starts a
+// child either inside its job object (KILL_ON_JOB_CLOSE: it dies with
+// FaNotes) or, with `detached`, as DETACHED_PROCESS without any console, and
+// Windows PowerShell 5.1 started that way was seen to exit 0 without running
+// its script (Windows 11 26200). This launcher is an ordinary hidden child with
+// a console of its own. The helper it starts gets its own hidden console and
+// leaves FaNotes' job: libuv creates that job with SILENT_BREAKAWAY_OK, so the
+// children of its members are not part of it. If Start-Process fails, the
+// helper is created through WMI (outside FaNotes' process tree altogether).
+// -Arguments is base64 of a JSON array; the launcher prints pid=<n> via=<how>.
+const WINDOWS_LAUNCHER = String.raw`param(
+  [Parameter(Mandatory=$true)][string]$Arguments,
+  [string]$Method = 'auto'
+)
+$ErrorActionPreference = 'Stop'
+$program = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+$parsed = ConvertFrom-Json -InputObject ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Arguments)))
+# CommandLineToArgvW rules: backslashes before a quote (or before the closing quote) are doubled.
+$quoted = foreach ($item in $parsed) { '"' + (([string]$item -replace '(\*)"', '$1$1"') -replace '(\+)$', '$1$1') + '"' }
+$line = @($quoted) -join ' '
+if ($Method -ne 'cim') {
+  try {
+    $process = Start-Process -FilePath $program -ArgumentList $line -WindowStyle Hidden -PassThru
+    [Console]::Out.WriteLine("pid=$($process.Id) via=start-process")
+    exit 0
+  } catch {
+    [Console]::Error.WriteLine("start-process: $($_.Exception.Message)")
+  }
+}
+try {
+  $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+  $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ('"' + $program + '" ' + $line); ProcessStartupInformation = $startup }
+  if ($created.ReturnValue -eq 0) {
+    [Console]::Out.WriteLine("pid=$($created.ProcessId) via=cim")
+    exit 0
+  }
+  [Console]::Error.WriteLine("cim: return value $($created.ReturnValue)")
+} catch {
+  [Console]::Error.WriteLine("cim: $($_.Exception.Message)")
+}
+exit 3
+`
+
 // Linux AppImage swap. Arguments: parent pid, target, staged file, SHA-256,
 // from and to version, log file, result file, mode. The self-test runs with
 // the headless Ozone platform, so it also works without a display (systemd
@@ -404,6 +461,8 @@ if [ "$#" -ge 9 ]; then shift 9; else shift "$#"; fi
 root="$(dirname -- "$result_file")"
 self_test_file="$root/self-test.json"
 lock_file="$root/install.lock"
+# First action: tell the waiting app that this helper really runs.
+printf '{"attempt":"%s","pid":%s}\\n' "\${FANOTES_HELPER_ATTEMPT:-}" "$$" >"$root/helper-started.json" 2>/dev/null || true
 
 exec >>"$log_file" 2>&1
 trap 'rm -f -- "$lock_file"' EXIT
@@ -969,9 +1028,48 @@ const describeInstallFailure = (reason) => {
     case 'checksum': case 'staged-missing': return 'Die heruntergeladene Datei war beschädigt oder fehlte.'
     case 'replace-failed': case 'symlink': return 'Die Programmdatei konnte nicht ersetzt werden.'
     case 'installer-failed': case 'helper-failed': return 'Der Installationshelfer ist fehlgeschlagen.'
+    case 'helper-did-not-start': return 'Der Installationshelfer ist nicht gestartet.'
+    case 'install-incomplete': return 'Die Installation wurde nicht abgeschlossen.'
     default: return 'Die Installation ist fehlgeschlagen.'
   }
 }
+
+/** Failures where the new version never ran: nothing was rolled back. */
+const INSTALL_NOT_COMPLETED_REASONS = new Set(['helper-did-not-start', 'install-incomplete'])
+
+const readSmallJson = async (filePath) => {
+  try {
+    const info = await fsp.lstat(filePath)
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 4096) return null
+    const value = JSON.parse((await fsp.readFile(filePath, 'utf8')).replace(/^\uFEFF/u, ''))
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms) })
+
+/** Output and exit of a short-lived child, with a time limit. */
+const runToExit = (child, timeoutMs) => new Promise((resolve) => {
+  let stdout = ''
+  let stderr = ''
+  let settled = false
+  const finish = (result) => {
+    if (settled) return
+    settled = true
+    clearTimeout(timer)
+    resolve({ ...result, stdout, stderr })
+  }
+  const timer = setTimeout(() => {
+    try { child.kill() } catch { /* already gone */ }
+    finish({ code: null, timedOut: true })
+  }, timeoutMs)
+  child.stdout?.on('data', (chunk) => { if (stdout.length < 4096) stdout += chunk })
+  child.stderr?.on('data', (chunk) => { if (stderr.length < 4096) stderr += chunk })
+  child.once('error', (error) => finish({ code: null, error }))
+  child.once('close', (code) => finish({ code }))
+})
 
 function createUpdateManager({
   app,
@@ -995,6 +1093,9 @@ function createUpdateManager({
   helperParentPid = process.pid,
   updaterRoot: updaterRootOverride = null,
   locks: providedLocks = null,
+  // How long the app waits for the helper's started marker before it stays open.
+  helperStartTimeoutMs = HELPER_START_TIMEOUT_MS,
+  isAlive = isPidAlive,
 }) {
   const currentVersion = app.getVersion()
   const relaunchArgs = collectRelaunchArgs(launchArgv)
@@ -1011,6 +1112,8 @@ function createUpdateManager({
   const updaterRoot = updaterRootOverride ?? path.join(app.getPath('userData'), 'updates')
   const persistentStatePath = path.join(updaterRoot, 'state.json')
   const installResultPath = path.join(updaterRoot, INSTALL_RESULT_FILE)
+  const helperStartedPath = path.join(updaterRoot, HELPER_STARTED_FILE)
+  const installAttemptPath = path.join(updaterRoot, INSTALL_ATTEMPT_FILE)
   const releaseCachePath = path.join(updaterRoot, RELEASE_CACHE_FILE)
   const locks = providedLocks ?? createUpdateLocks(updaterRoot)
   const publicKeyPath = path.join(__dirname, 'update-public-key.pem')
@@ -1057,6 +1160,8 @@ function createUpdateManager({
     justUpdated: null,
     /** The last install that failed and was rolled back; shown once so the user knows why the old version is back. */
     rolledBack: null,
+    /** Set once when the last install never completed (its helper did not start or ended without a result). */
+    installNotCompleted: null,
     /** Which step failed when status is 'error', so the UI can offer the right retry. */
     failedPhase: null,
     background: null,
@@ -1241,6 +1346,36 @@ function createUpdateManager({
       await fsp.rm(path.join(updaterRoot, result.version), { recursive: true, force: true }).catch(() => {})
       await persistState().catch(() => {})
     }
+  }
+
+  /**
+   * install-attempt.json is written before a helper starts. Still present for
+   * a newer version on the next start, with no helper holding install.lock,
+   * it means the attempt ended without installing (the helper died silently,
+   * the install was interrupted, or it reported success but this is still the
+   * old version). That version is then treated like a failed install: no
+   * automatic retry, so FaNotes never quits for the same install twice.
+   */
+  const evaluateInstallAttempt = async ({ consume }) => {
+    const attempt = await readSmallJson(installAttemptPath)
+    if (!attempt || !VERSION_PATTERN.test(attempt.version || '') || compareVersions(attempt.version, currentVersion) <= 0) {
+      await fsp.rm(installAttemptPath, { force: true }).catch(() => {})
+      return
+    }
+    if (locks.installHolder()) return
+    const at = typeof attempt.at === 'string' && Number.isFinite(Date.parse(attempt.at)) ? attempt.at : null
+    if (failedInstall?.version !== attempt.version) {
+      failedInstall = { version: attempt.version, reason: 'install-incomplete', at }
+      if (pendingInstall?.version === attempt.version) pendingInstall = null
+      logger.warn(`Die Installation von FaNotes ${attempt.version} wurde nicht abgeschlossen; sie wird nicht automatisch wiederholt.`)
+      await persistState().catch(() => {})
+    }
+    // The background run records the failure; the app shows it once and clears the attempt.
+    if (!consume) return
+    if (INSTALL_NOT_COMPLETED_REASONS.has(failedInstall.reason)) {
+      state = { ...state, installNotCompleted: { version: attempt.version, reason: failedInstall.reason, message: describeInstallFailure(failedInstall.reason), at } }
+    }
+    await fsp.rm(installAttemptPath, { force: true }).catch(() => {})
   }
 
   /** Staged files of installed, older or failed versions only cost disk. */
@@ -1594,7 +1729,9 @@ function createUpdateManager({
             downloadedBytes: 0,
             totalBytes: verified.delta?.sizeBytes ?? verified.packages[primaryPackage].sizeBytes,
             progress: 0,
-            error: `FaNotes ${verified.latestVersion} ließ sich nicht starten und wurde zurückgesetzt. Die automatische Installation wartet auf die nächste Version.`,
+            error: INSTALL_NOT_COMPLETED_REASONS.has(failedInstall.reason)
+              ? `FaNotes ${verified.latestVersion} konnte nicht installiert werden. Die automatische Installation wartet auf die nächste Version.`
+              : `FaNotes ${verified.latestVersion} ließ sich nicht starten und wurde zurückgesetzt. Die automatische Installation wartet auf die nächste Version.`,
             block: null,
             checkedAt,
           })
@@ -2032,6 +2169,57 @@ function createUpdateManager({
     if (info && info.size > MAX_INSTALL_LOG_BYTES) await fsp.rename(logPath, `${logPath}.1`).catch(() => {})
   }
 
+  /**
+   * Windows: starts the helper through WINDOWS_LAUNCHER and returns its pid,
+   * or null when the launcher could not start it.
+   */
+  const launchWindowsHelper = async (helperArgs, env, method) => {
+    const launcherPath = path.join(updaterRoot, 'launch-helper.ps1')
+    await fsp.writeFile(launcherPath, WINDOWS_LAUNCHER, { encoding: 'utf8', mode: 0o600 })
+    const encoded = Buffer.from(JSON.stringify(helperArgs), 'utf8').toString('base64')
+    let child
+    try {
+      child = spawnImpl('powershell.exe', [
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+        '-File', launcherPath, '-Arguments', encoded, '-Method', method,
+      ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env })
+    } catch (error) {
+      logger.warn('Der Windows-Starter des Installationshelfers konnte nicht gestartet werden:', error?.message ?? error)
+      return null
+    }
+    const run = await runToExit(child, WINDOWS_LAUNCHER_TIMEOUT_MS)
+    const match = /pid=(\d+) via=([a-z-]+)/u.exec(run.stdout)
+    const pid = match ? Number(match[1]) : NaN
+    if (run.code !== 0 || !Number.isSafeInteger(pid) || pid <= 0) {
+      logger.warn(`Der Windows-Starter des Installationshelfers ist fehlgeschlagen (code=${run.code ?? (run.timedOut ? 'timeout' : 'error')}): ${(run.stderr || run.error?.message || '').trim().slice(0, 300)}`)
+      return null
+    }
+    return { pid, via: match[2] }
+  }
+
+  /** Waits for the helper's first action (HELPER_STARTED_FILE with this attempt id). */
+  const waitForHelperStart = async (attemptId, pid) => {
+    const deadline = Date.now() + helperStartTimeoutMs
+    for (;;) {
+      const marker = await readSmallJson(helperStartedPath)
+      if (marker?.attempt === attemptId) {
+        return { started: true, pid: Number.isSafeInteger(marker.pid) && marker.pid > 0 ? marker.pid : pid }
+      }
+      const alive = Number.isSafeInteger(pid) && pid > 0 ? isAlive(pid) : null
+      if (alive === false) {
+        // It may have written the marker and finished in between.
+        const last = await readSmallJson(helperStartedPath)
+        return last?.attempt === attemptId ? { started: true, pid } : { started: false, pid }
+      }
+      if (Date.now() >= deadline) {
+        // Still running but silent: a slow start (antivirus scan) rather than a dead helper.
+        if (alive) logger.warn('Der Installationshelfer läuft, hat seinen Start aber noch nicht gemeldet.')
+        return { started: alive === true, pid }
+      }
+      await sleep(100)
+    }
+  }
+
   const spawnHelper = async (command, args, installationKind, plan) => {
     if (!locks.acquireInstall({ version: plan.version })) {
       throw new Error('Ein anderes FaNotes-Update wird gerade installiert.')
@@ -2040,14 +2228,58 @@ function createUpdateManager({
     // PowerShell 7 that put its PSModulePath into the environment.
     const env = { ...process.env }
     for (const name of Object.keys(env)) if (name.toLowerCase() === 'psmodulepath') delete env[name]
+    const attemptId = crypto.randomBytes(12).toString('hex')
+    const helperArgs = platform === 'win32' ? [...args, '-AttemptId', attemptId] : args
+    env.FANOTES_HELPER_ATTEMPT = attemptId
+    let helperPid = null
     try {
-      const child = spawnImpl(command, args, { detached: true, stdio: 'ignore', windowsHide: true, env })
-      await waitForChildSpawn(child)
-      child.unref()
-      // The helper releases install.lock when it has swapped or rolled back.
-      if (Number.isSafeInteger(child.pid)) locks.handInstallTo(child.pid, { version: plan.version })
+      await fsp.rm(helperStartedPath, { force: true })
+      await atomicJsonWrite(installAttemptPath, {
+        version: plan.version,
+        fromVersion: currentVersion,
+        attempt: attemptId,
+        installationKind,
+        at: new Date().toISOString(),
+      })
+      // Windows: the launcher (Start-Process, else WMI), then WMI alone, then
+      // the old detached start. The next way is tried only when the helper
+      // started by the previous one is gone without its started marker.
+      const methods = platform === 'win32' ? ['auto', 'cim', 'detached'] : ['detached']
+      let start = { started: false, pid: null }
+      for (const method of methods) {
+        let pid = null
+        if (method === 'detached') {
+          const child = spawnImpl(command, helperArgs, { detached: true, stdio: 'ignore', windowsHide: true, env })
+          await waitForChildSpawn(child)
+          child.unref()
+          pid = Number.isSafeInteger(child.pid) ? child.pid : null
+        } else {
+          pid = (await launchWindowsHelper(helperArgs, env, method))?.pid ?? null
+          if (!pid) continue
+        }
+        helperPid = pid
+        // The helper releases install.lock when it has swapped or rolled back.
+        if (helperPid) locks.handInstallTo(helperPid, { version: plan.version })
+        start = await waitForHelperStart(attemptId, helperPid)
+        if (start.started) break
+        if (method !== 'detached') logger.warn(`Der Installationshelfer (${method}) hat sich nicht gemeldet; FaNotes versucht den nächsten Startweg.`)
+      }
+      if (!start.started) {
+        const error = new Error('Der Installationshelfer ist nicht gestartet. FaNotes bleibt offen und versucht diese Version nicht erneut automatisch. Du kannst das Update in den Einstellungen unter Updates erneut starten.')
+        error.code = 'FANOTES_HELPER_DID_NOT_START'
+        throw error
+      }
+      if (start.pid && start.pid !== helperPid) locks.handInstallTo(start.pid, { version: plan.version })
     } catch (error) {
-      locks.releaseInstall()
+      locks.abandonInstall(helperPid)
+      await fsp.rm(installAttemptPath, { force: true }).catch(() => {})
+      if (error?.code === 'FANOTES_HELPER_DID_NOT_START') {
+        logger.warn(`Der Installationshelfer für ${plan.version} hat sich nicht gemeldet.`)
+        failedInstall = { version: plan.version, reason: 'helper-did-not-start', at: new Date().toISOString() }
+        // This session can still start it from the settings; later starts do not adopt it.
+        if (pendingInstall?.version === plan.version) pendingInstall = null
+        await persistState().catch(() => {})
+      }
       throw error
     }
     installPrepared = true
@@ -2203,6 +2435,8 @@ function createUpdateManager({
   const installOnQuit = async () => {
     if (!supported || installPrepared || !(settings().installUpdatesOnQuit || installOnQuitRequested)) return false
     if (state.status === 'downloaded' && downloadedPath) {
+      // A version whose install never completed is installed again only on request.
+      if (manifest?.latestVersion === failedInstall?.version && !installOnQuitRequested) return false
       const next = await prepareInstall({ mode: 'quiet' })
       return next.status === 'installing'
     }
@@ -2294,6 +2528,7 @@ function createUpdateManager({
       await loadPersistentState()
       await fsp.mkdir(updaterRoot, { recursive: true, mode: 0o700 })
       await readInstallResult({ consume: consumeInstallResult })
+      await evaluateInstallAttempt({ consume: consumeInstallResult })
       await removeObsoleteStagedReleases()
     })()
     return initialized
@@ -2366,7 +2601,10 @@ module.exports = {
   INSTALL_HELPER,
   INSTALL_MODES,
   INSTALL_RESULT_FILE,
+  HELPER_STARTED_FILE,
+  INSTALL_ATTEMPT_FILE,
   WINDOWS_INSTALLER_HELPER,
+  WINDOWS_LAUNCHER,
   WINDOWS_SWAP_HELPER,
   reduceReleaseList,
   PLATFORM_RELEASES,

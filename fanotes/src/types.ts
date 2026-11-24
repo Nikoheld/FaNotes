@@ -314,6 +314,8 @@ export type UpdateState = {
   failedInstallVersion?: string | null
   /** Set once after an install failed and the previous version was restored. */
   rolledBack?: { version: string; reason: string; message: string; at: string | null } | null
+  /** Set once when the last install never completed (its helper did not start, or it ended without installing). */
+  installNotCompleted?: { version: string; reason: string; message: string; at: string | null } | null
   /** Which step failed while status is 'error'. */
   failedPhase?: 'check' | 'download' | null
   /** The user chose "install when FaNotes closes" for this session. */
