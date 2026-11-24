@@ -1,5 +1,17 @@
 # Änderungsverlauf
 
+## 2026.11.4
+
+- **Export.** Neuer Export-Dialog: Text-, Handschrift- und PDF-Notizen als PDF oder Word. Handschrift wird ein scharfes Vektor-PDF, PDF-Notizen behalten Handschrift und Markierungen.
+- **Bilder.** Eingefügte Bilder liegen als Objekte auf dem Blatt: verschieben, Grösse ändern, ersetzen, entfernen mit Rückgängig. Keine grosse Leiste mehr über Bildern, PDFs und OneNote-Seiten.
+- **Zoom.** Handschrift springt nach dem Zoomen nicht mehr an eine andere Stelle, und Zoomen in Notizen mit vielen Abschnitten ist flüssiger.
+- **Zusammenarbeit.** Wer gerade mitschreibt, erscheint als kleine Kreise oben in der Tab-Leiste statt als Balken unten.
+- **Textfelder.** Gleiche Formatierungsleiste wie Dokumente; sie bleiben nach Neustart und Sync an ihrem Platz und markieren beim Verschieben keinen Text mehr.
+- **Tempo.** Notizen öffnen schnell ohne Flackern der Handschrift, keine periodischen Hänger mehr, der Speicher bleibt begrenzt.
+- **Bedienung.** Weichere Übergänge bei Dateien, Menüs, Dialogen und Einstellungen.
+- **Android.** Grosse Handschrift-Notizen kommen per Sync an; fehlende Handschrift wird nie als leere Notiz angezeigt.
+- **Kanäle.** Geräte auf dem Beta-Kanal wechseln mit dieser Version einmalig auf Stable.
+
 ## 2026.11.4-beta.2
 
 - Desktop: share presence as small avatars in the tab row instead of a bottom bar (#1463)
