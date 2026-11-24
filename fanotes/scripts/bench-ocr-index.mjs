@@ -93,7 +93,7 @@ const launch = async (label) => {
   }
   let page = null
   while (!page && Date.now() < deadline) {
-    page = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().startsWith('devtools')) ?? null
+    page = browser.contexts().flatMap((c) => c.pages()).find((p) => !/^devtools|ocr-host|recognition\.html|fanotes-note-export/u.test(p.url())) ?? null
     if (!page) await sleep(250)
   }
   await page.waitForFunction(() => Boolean(window.fanotes && document.querySelector('.file-tree__row')), null, { timeout: 90_000 })

@@ -107,7 +107,7 @@ const runCombo = async (language, theme, onboarding = false) => {
     if (!browser) throw new Error('Electron did not open a debugging port')
     let page = null
     for (let tries = 0; tries < 120 && !page; tries += 1) {
-      page = browser.contexts().flatMap((context) => context.pages()).find((candidate) => !candidate.url().startsWith('devtools')) ?? null
+      page = browser.contexts().flatMap((context) => context.pages()).find((candidate) => !/^devtools|ocr-host|recognition\.html|fanotes-note-export/u.test(candidate.url())) ?? null
       if (!page) await sleep(250)
     }
     if (!page) throw new Error('no renderer page')
