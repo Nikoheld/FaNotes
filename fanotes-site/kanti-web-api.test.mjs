@@ -125,10 +125,10 @@ const browser = (base, userAgent = 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Ge
 const appIdentity = async (base) => {
   const response = await fetch(`${base}/api/v1/schulnetz/guest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
   const { accountId, token } = await response.json()
-  const call = async (method, path, body) => {
+  const call = async (method, path, body, extraHeaders = {}) => {
     const result = await fetch(`${base}/api/v1/schulnetz${path}`, {
       method,
-      headers: { 'X-Kanti-Guest': accountId, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: { 'X-Kanti-Guest': accountId, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...extraHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
     const text = await result.text()
@@ -437,6 +437,64 @@ test('hidden grades: a new mark never reaches the browser until it is revealed',
     assert.equal(snapshot.grades.find((item) => item.title === 'Geometrie').mark, 3.5)
     // The app learns the reveal from the shared ledger.
     assert.deepEqual((await app.call('GET', '/reveals')).body.revealed, [hiddenId])
+  } finally {
+    await env.close()
+  }
+})
+
+test('grade history: versions and removals are stored, served to the app on request and withheld for hidden grades', async () => {
+  const env = await start({ clock: () => new Date('2026-11-10T12:00:00.000Z') })
+  try {
+    const app = await appIdentity(env.base)
+    await linkSchulnetz(app)
+    const file = join(env.root, 'accounts', app.accountId, 'grade-history.json')
+    const algebra = grade('g1', 'Algebra', 5)
+    const geometry = grade('g2', 'Geometrie', 4, '2026-11-02')
+    await app.call('PUT', '/snapshot', snapshotWith([algebra, geometry]))
+    await app.call('PUT', '/snapshot', snapshotWith([{ ...algebra, mark: 4.5 }, geometry]))
+    // A partial read (not complete) must not remove anything.
+    await app.call('PUT', '/snapshot', snapshotWith([{ ...algebra, mark: 4.5 }], { gradesReadComplete: false }))
+    const partial = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(partial.version, 1)
+    assert.equal(partial.tracks.some((track) => track.removedAt), false)
+    await app.call('PUT', '/snapshot', snapshotWith([{ ...algebra, mark: 4.5 }]))
+
+    // Older apps send no header and see no new field.
+    assert.equal('gradeHistory' in (await app.call('GET', '/snapshot')).body, false)
+    const served = (await app.call('GET', '/snapshot', undefined, { 'X-Kanti-Grades': 'history' })).body.gradeHistory
+    assert.equal(served.length, 2)
+    assert.deepEqual(served[0].versions.map((version) => version.mark), [5, 4.5])
+    assert.equal(served[0].removedAt, undefined)
+    assert.equal(served[1].removedAt, '2026-11-10T12:00:00.000Z')
+    assert.equal(served[1].versions[0].mark, 4)
+
+    // The browser gets the same history; a hidden grade keeps every version's mark back, removed or not.
+    assert.equal((await app.call('PUT', '/settings', { guessGrades: true })).status, 200)
+    const fresh = grade('g3', 'Trigonometrie', 3.5, '2026-11-09')
+    await app.call('PUT', '/snapshot', snapshotWith([{ ...algebra, mark: 4.5 }, fresh]))
+    await app.call('PUT', '/snapshot', snapshotWith([{ ...algebra, mark: 4.5 }, { ...fresh, mark: 2.5 }]))
+    const { client, session } = await pairBrowser(env.base, [app])
+    const id = session.connections[0].id
+    let history = (await client.call('GET', `/connections/${id}/snapshot`)).body.gradeHistory
+    const hidden = history.find((track) => track.title === 'Trigonometrie')
+    assert.equal(hidden.hidden, true)
+    assert.equal(hidden.versions.length, 2)
+    assert.ok(hidden.versions.every((version) => version.mark === null))
+    assert.deepEqual(history.find((track) => track.title === 'Algebra').versions.map((version) => version.mark), [5, 4.5])
+    assert.deepEqual(history.find((track) => track.title === 'Geometrie').versions.map((version) => version.mark), [4])
+    await app.call('PUT', '/snapshot', snapshotWith([{ ...algebra, mark: 4.5 }]))
+    history = (await client.call('GET', `/connections/${id}/snapshot`)).body.gradeHistory
+    const gone = history.find((track) => track.title === 'Trigonometrie')
+    assert.ok(gone.removedAt)
+    assert.ok(gone.versions.every((version) => version.mark === null))
+    assert.equal(JSON.stringify(history).includes('3.5'), false)
+    await client.call('POST', `/connections/${id}/reveal`, { ids: [gradeTargetId(fresh)] })
+    history = (await client.call('GET', `/connections/${id}/snapshot`)).body.gradeHistory
+    assert.deepEqual(history.find((track) => track.title === 'Trigonometrie').versions.map((version) => version.mark), [3.5, 2.5])
+
+    // It goes away with the rest of the guest's school data.
+    assert.equal((await app.call('DELETE', '/link')).status, 200)
+    await assert.rejects(readFile(file, 'utf8'), { code: 'ENOENT' })
   } finally {
     await env.close()
   }

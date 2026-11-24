@@ -1,0 +1,2666 @@
+{
+ "cases": [
+  {
+   "name": "first run seeds one version per grade and removes nothing",
+   "history": [],
+   "steps": [
+    {
+     "at": "2026-01-10T08:00:00.000Z",
+     "trusted": true,
+     "previous": [],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "p",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "mark": null,
+       "weight": 1
+      },
+      {
+       "id": "s",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Durchschnitt",
+       "date": "2026-01-05",
+       "mark": 4.5,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a changed mark appends a version",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.5,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      },
+      {
+       "mark": 4.5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-11T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a mark changed back appends a third version",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.5,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-01-12T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.5,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      },
+      {
+       "mark": 4.5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-11T08:00:00.000Z"
+      },
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-12T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a weight change appends a version",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 2
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      },
+      {
+       "mark": 5,
+       "weight": 2,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-11T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a title or date change appends a version",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1 neu",
+       "date": "2026-01-06",
+       "mark": 5,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1 neu",
+     "date": "2026-01-06",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      },
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1 neu",
+       "date": "2026-01-06",
+       "seenAt": "2026-01-11T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a grade missing from a trusted read is marked removed",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "b",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 2",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4,
+       "weight": 1,
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "b",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "mark": 4,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "b",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "mark": 4,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ],
+     "removedAt": "2026-01-11T08:00:00.000Z"
+    },
+    {
+     "id": "g2",
+     "gradeId": "b",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 2",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4,
+       "weight": 1,
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a grade missing from an untrusted read is not removed",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "b",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 2",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4,
+       "weight": 1,
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": false,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "b",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "mark": 4,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "b",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "mark": 4,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "b",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 2",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4,
+       "weight": 1,
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "an empty trusted read removes nothing",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "b",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 2",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4,
+       "weight": 1,
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "b",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "mark": 4,
+       "weight": 1
+      }
+     ],
+     "next": []
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "b",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 2",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4,
+       "weight": 1,
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a removed grade that comes back is restored without a new version",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ],
+     "removedAt": "2026-01-11T08:00:00.000Z"
+    },
+    {
+     "id": "g2",
+     "gradeId": "b",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 2",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4,
+       "weight": 1,
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-12T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "b",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "mark": 4,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a2",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "b",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "mark": 4,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a2",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "b",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 2",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4,
+       "weight": 1,
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a removed grade that comes back changed gets a version",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ],
+     "removedAt": "2026-01-11T08:00:00.000Z"
+    },
+    {
+     "id": "g2",
+     "gradeId": "b",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 2",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4,
+       "weight": 1,
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-12T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "b",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "mark": 4,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.5,
+       "weight": 1
+      },
+      {
+       "id": "b",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "mark": 4,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      },
+      {
+       "mark": 5.5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-12T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "b",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 2",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4,
+       "weight": 1,
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a new row id with the same content is the same grade",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "b",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 2",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4,
+       "weight": 1,
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "b",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "mark": 4,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "x",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "y",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "mark": 4,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "x",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "y",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 2",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4,
+       "weight": 1,
+       "title": "Test 2",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "the same grade under a new course label is the same grade",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "z",
+       "course": "Mathe",
+       "courseId": "MATH",
+       "subject": "Mathe",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "z",
+     "courseId": "MATH",
+     "course": "Mathe",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a row waiting for its mark makes no track or version",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "p",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 3",
+       "date": "2026-01-05",
+       "mark": null,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "the mark arriving on a waiting row makes the first version",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "p",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 3",
+       "date": "2026-01-05",
+       "mark": null,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "p",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 3",
+       "date": "2026-01-05",
+       "mark": 5.5,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "p",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 3",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-11T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5.5,
+       "weight": 1,
+       "title": "Test 3",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-11T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a parser upgrade (previous equals next) makes no versions and no removals",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1: Funktionen",
+       "date": "05.01.2026",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "n",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Neu",
+       "date": "2026-01-05",
+       "mark": 3,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1: Funktionen",
+       "date": "05.01.2026",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "n",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Neu",
+       "date": "2026-01-05",
+       "mark": 3,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "n",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Neu",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-11T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 3,
+       "weight": 1,
+       "title": "Neu",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-11T08:00:00.000Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "two equal grades are tracked apart and one can go",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "a2",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-01-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      },
+      {
+       "id": "a2",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    },
+    {
+     "id": "g2",
+     "gradeId": "a2",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 5,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ],
+     "removedAt": "2026-01-11T08:00:00.000Z"
+    }
+   ]
+  },
+  {
+   "name": "a track keeps its first and its newest 29 versions",
+   "history": [
+    {
+     "id": "g1",
+     "gradeId": "a",
+     "courseId": "MAT-1a",
+     "course": "Mathematik",
+     "title": "Test 1",
+     "date": "2026-01-05",
+     "firstSeenAt": "2026-01-10T08:00:00.000Z",
+     "versions": [
+      {
+       "mark": 4.0,
+       "weight": 1,
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "seenAt": "2026-01-10T08:00:00.000Z"
+      }
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "at": "2026-02-01T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.0,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.1,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-02T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.1,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.2,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-03T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.2,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.3,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-04T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.3,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.4,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-05T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.4,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.5,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-06T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.5,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.6,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-07T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.6,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.7,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-08T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.7,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.8,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-09T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.8,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.9,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-10T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 4.9,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.0,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-11T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.0,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.1,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-12T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.1,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.2,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-13T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.2,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.3,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-14T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.3,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.4,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-15T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.4,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.5,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-16T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.5,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.6,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-17T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.6,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.7,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-18T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.7,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.8,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-19T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.8,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.9,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-20T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 5.9,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.0,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-21T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.0,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.1,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-22T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.1,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.2,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-23T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.2,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.3,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-24T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.3,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.4,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-25T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.4,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.5,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-26T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.5,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.6,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-27T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.6,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.7,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-28T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.7,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.8,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-29T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.8,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.9,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-30T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 6.9,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 7.0,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-31T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 7.0,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 7.1,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-32T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 7.1,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 7.2,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-33T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 7.2,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 7.3,
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "at": "2026-02-34T08:00:00.000Z",
+     "trusted": true,
+     "previous": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 7.3,
+       "weight": 1
+      }
+     ],
+     "next": [
+      {
+       "id": "a",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Test 1",
+       "date": "2026-01-05",
+       "mark": 7.4,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": null,
+   "expectVersions": {
+    "g1": {
+     "count": 30,
+     "first": 4.0,
+     "last": 7.4,
+     "second": 4.6
+    }
+   }
+  },
+  {
+   "name": "the oldest removed tracks are dropped beyond 3000",
+   "history": [],
+   "steps": [
+    {
+     "at": "2026-01-12T08:00:00.000Z",
+     "trusted": true,
+     "previous": [],
+     "next": [
+      {
+       "id": "fresh",
+       "course": "Mathematik",
+       "courseId": "MAT-1a",
+       "subject": "Mathematik",
+       "title": "Neu",
+       "date": "2026-01-05",
+       "mark": 5,
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "expect": null,
+   "generate": {
+    "removed": 3000
+   },
+   "expectTracks": {
+    "count": 3000,
+    "absent": [
+     "g1"
+    ],
+    "present": [
+     "g2",
+     "g3001"
+    ]
+   }
+  }
+ ]
+}

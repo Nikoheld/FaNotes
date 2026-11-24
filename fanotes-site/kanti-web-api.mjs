@@ -17,7 +17,7 @@ import { resolve } from 'node:path'
 import { credentialOr } from './credentials.mjs'
 import { CLASS_CODE, MAX_PDF_BYTES, ROOM_NAME } from './class-timetables.mjs'
 import { accountAcceptsAuthKey, loadSyncAccountByEmail, syncAuthStamp, syncPreloginKdf } from './sync-api.mjs'
-import { prepareGradeNotifications, unrevealedGradeIds, webGradeView } from './schulnetz-logic.mjs'
+import { prepareGradeNotifications, unrevealedGradeIds, webGradeView, webGradeHistoryView } from './schulnetz-logic.mjs'
 import { createServiceLog } from './service-log.mjs'
 import { parsePushSubscription, pushEndpointHost } from './web-push.mjs'
 
@@ -1213,9 +1213,14 @@ export const createKantiWebApi = (options = {}) => {
       return
     }
     if (tail === '/snapshot' && method === 'GET') {
-      const [snapshot, reveals] = await Promise.all([access.readSnapshot(accountId), revealView(accountId)])
+      const [snapshot, reveals, history] = await Promise.all([access.readSnapshot(accountId), revealView(accountId), access.readGradeHistory ? access.readGradeHistory(accountId) : []])
       const base = snapshot && typeof snapshot === 'object' ? snapshot : EMPTY_SNAPSHOT
-      send(response, 200, { ...base, grades: webGradeView(base.grades, reveals.hidden, reveals.guessGrades) })
+      send(response, 200, {
+        ...base,
+        grades: webGradeView(base.grades, reveals.hidden, reveals.guessGrades),
+        // Earlier versions and removed grades; an unrevealed grade's marks are withheld in every version.
+        gradeHistory: webGradeHistoryView(history, reveals.hidden, reveals.guessGrades),
+      })
       return
     }
     if (tail === '/status' && method === 'GET') {
