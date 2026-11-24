@@ -96,7 +96,7 @@ fun NoteReading(model: CompanionModel, editor: NoteEditorController, target: Doc
             }
             handwriting?.let { ink -> item(key = "ink:${ink.updatedAt}") {
                 SectionLabel(t(R.string.handwriting_preview))
-                InkPreview(ink, Modifier.fillMaxWidth().aspectRatio((ink.sourceWidth / ink.sourceHeight).toFloat().coerceAtLeast(0.1f)).background(LocalCompanionSemantics.current.paper))
+                InkReadPreview(ink, if (editor.readOnly) null else onInk)
                 if (!editor.readOnly) androidx.compose.material3.TextButton(onClick = onInk) { Text(t(R.string.open_handwriting_canvas)) }
             } }
         }
@@ -173,4 +173,21 @@ private fun LocalNoteImage(file: File?, label: String, zoom: Float = 1f, onOpen:
     }
     if (bitmap != null) Image(bitmap!!.asImageBitmap(), label, Modifier.fillMaxWidth().heightIn(max = 500.dp).clickable(role = Role.Button, onClickLabel = t(R.string.open_image), onClick = onOpen))
     else Text(label, style = MaterialTheme.typography.bodySmall.zoomed(zoom), color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/**
+ * The note's handwriting as one bounded bitmap at the page's true proportions. A live ink view the height of a long
+ * page needed a full-size bitmap and could run the phone out of memory. A tap opens the canvas, which zooms.
+ */
+@Composable
+private fun InkReadPreview(ink: ch.fasrv.fanotes.ink.InkDocument, onOpen: (() -> Unit)?) {
+    val ratio = (ink.sourceWidth / ink.sourceHeight.coerceAtLeast(1.0)).toFloat().coerceIn(0.0025f, 20f)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val widthPx = constraints.maxWidth.coerceIn(1, 2000)
+        val bitmap by produceState<Bitmap?>(null, ink.updatedAt, ink.strokes.size, widthPx) { value = rasterizeInkPage(ink, widthPx) }
+        Box(Modifier.fillMaxWidth().aspectRatio(ratio).background(LocalCompanionSemantics.current.paper)
+            .then(if (onOpen != null) Modifier.clickable(role = Role.Button, onClick = onOpen) else Modifier)) {
+            bitmap?.let { Image(it.asImageBitmap(), t(R.string.handwriting_preview), Modifier.fillMaxSize()) }
+        }
+    }
 }

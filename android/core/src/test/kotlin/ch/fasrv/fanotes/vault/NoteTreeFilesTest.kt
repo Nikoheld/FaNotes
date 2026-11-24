@@ -123,9 +123,11 @@ class NoteTreeFilesTest {
         val io = object : VaultIo by inner {
             override fun size(path: String): Long = if (path.endsWith(".famd")) MAX_SYNC_DOCUMENT_BYTES + 1L else inner.size(path)
         }
-        val store = NoteStore(io)
+        val store = NoteStore(io, noteReadLimit = { MAX_SYNC_DOCUMENT_BYTES.toLong() })
         val note = store.readNote("Big.md")
         assertTrue(note.inkTooLarge)
+        // A phone with room for it decodes the same file.
+        assertFalse(NoteStore(io, noteReadLimit = { MAX_SYNC_DOCUMENT_BYTES * 2L }).readNote("Big.md").inkTooLarge)
         assertTrue(note.document.strokes.isEmpty())
         assertEquals("Hello text", note.markdown.trim())
         val error = assertFailsWith<IllegalStateException> { store.save(note, note.document, "changed") }

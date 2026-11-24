@@ -212,7 +212,22 @@ const val INK_TOO_LARGE_MESSAGE = "This note's handwriting is too large to open 
 /** Most text a note body may have before only its start is shown (the same cap as a sync document). */
 private const val NOTE_TEXT_HEAD_BYTES = 1024 * 1024
 
-class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit = {}) {
+/**
+ * Largest handwriting file [NoteStore.readNote] decodes: the sync document cap, or more when the heap has room.
+ * Decoding costs about twelve times the file (UTF-16 text plus the parsed tree), so a big phone opens a 30 MB note
+ * that a small one shows as too large.
+ */
+fun defaultNoteReadLimit(): Long {
+    val runtime = Runtime.getRuntime()
+    val available = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
+    return maxOf(MAX_SYNC_DOCUMENT_BYTES.toLong(), available / 12)
+}
+
+class NoteStore(
+    private val io: VaultIo,
+    private val onSaved: (String) -> Unit = {},
+    private val noteReadLimit: () -> Long = ::defaultNoteReadLimit,
+) {
     /** [includeFiles] also lists images, audio and video as [NoteKind.IMAGE], [NoteKind.AUDIO] and [NoteKind.VIDEO]. */
     fun tree(includeFiles: Boolean = false): List<VaultNode> = buildTree("", includeFiles)
 
@@ -229,7 +244,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
             FAMD_EXTENSION -> companionPath(normalized, ".md").takeIf { io.exists(it) }
             else -> normalized
         }
-        val limit = MAX_SYNC_DOCUMENT_BYTES.toLong()
+        val limit = noteReadLimit()
         var tooLarge = false
         // A sidecar over the sync cap is never decoded: the phone could not hold the text and the parsed document.
         val famdBytes = if (io.size(famdPath) > limit) {

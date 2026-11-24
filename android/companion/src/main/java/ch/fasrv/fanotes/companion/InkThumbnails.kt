@@ -114,6 +114,25 @@ fun drawInkOnPdfPage(bitmap: Bitmap, document: InkDocument, page: PdfInkPage) {
     }
 }
 
+/**
+ * The whole page of [document] for the read view, [widthPx] wide, shrunk so the bitmap stays within [maxBytes]
+ * (a long handwritten page would otherwise need a bitmap many screens tall). Null when even that does not fit.
+ */
+suspend fun rasterizeInkPage(document: InkDocument, widthPx: Int, maxBytes: Long = 16L * 1024 * 1024): Bitmap? = withContext(Dispatchers.Default) {
+    val ratio = (document.sourceHeight / document.sourceWidth.coerceAtLeast(1.0)).coerceIn(0.05, 400.0)
+    var width = widthPx.coerceAtLeast(1)
+    while (width > 64 && width.toLong() * (width * ratio).toLong() * 4L > maxBytes) width = (width * 0.8).toInt()
+    val height = (width * ratio).toInt().coerceIn(1, 32_000)
+    try {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val scale = width / document.sourceWidth.toFloat().coerceAtLeast(1f)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+        document.strokes.forEach { stroke -> drawInkStroke(canvas, document, stroke, scale, scale, 0.0, paint, maxSegments = 0) }
+        bitmap
+    } catch (_: OutOfMemoryError) { null }
+}
+
 /** The power-of-two `inSampleSize` that brings an image of [width] x [height] within [maxSide] pixels on its longest side and [maxBytes] of ARGB_8888. */
 fun imageSampleSize(width: Int, height: Int, maxSide: Int = 4096, maxBytes: Long = 24L * 1024 * 1024): Int {
     if (width <= 0 || height <= 0) return 1
