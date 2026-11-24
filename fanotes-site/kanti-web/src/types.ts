@@ -39,6 +39,23 @@ export interface SchoolGrade {
   withheld?: boolean
 }
 
+/** One state of a grade the server has seen (the app's GradeVersion). A hidden grade's marks are null. */
+export interface GradeVersion { mark: number | null; weight: number; title: string; date: string; seenAt: string }
+/** The history of one grade: every version seen, and `removedAt` when Schulnetz no longer lists it. */
+export interface GradeTrack {
+  id: string
+  gradeId: string
+  courseId: string
+  course: string
+  title: string
+  date: string
+  firstSeenAt: string
+  versions: GradeVersion[]
+  removedAt?: string
+  /** Added by the server while the grade is still hidden: no version carries its mark. */
+  hidden?: boolean
+}
+
 export interface SchoolAbsence {
   id: string
   dateFrom: string
@@ -69,6 +86,8 @@ export interface Snapshot {
   fetchedAt: string
   profile?: { id: string; firstName: string; lastName: string; className: string; email: string } | null
   grades: SchoolGrade[]
+  /** Earlier versions and removed grades; absent on a server without the history. */
+  gradeHistory?: GradeTrack[]
   events: AgendaEvent[]
   exams: AgendaEvent[]
   absences: SchoolAbsence[]

@@ -1,7 +1,7 @@
 // The app's demo (DemoData.kt), the same invented school, built relative to "today" so the current
 // week and the coming weeks always have lessons. Nothing here is read from or sent to anywhere.
 import { addDays, weekMonday } from '@shared/schulnetz-logic'
-import type { AgendaEvent, SchoolGrade, Snapshot } from '../types'
+import type { AgendaEvent, GradeTrack, SchoolGrade, Snapshot } from '../types'
 import type { MensaDay, MensaFeed } from './mensa'
 
 export const DEMO_ID_PREFIX = 'demo-'
@@ -158,11 +158,25 @@ export const demoSnapshot = (today: string, now = new Date(`${today}T06:00:00Z`)
     grade('w1', 'Wirtschaft und Recht', 'Marktformen', addDays(today, -16), 4.5),
   ]
   const read = Object.fromEntries(weeks.map((week) => [week, stamp]))
+  // One grade the teacher corrected (4.0 became 4.5) and one that Schulnetz no longer lists.
+  const earlier = (days: number) => new Date(Date.parse(stamp) - days * 86_400_000).toISOString()
+  const version = (g: SchoolGrade, mark: number, seenAt: string) => ({ mark, weight: g.weight, title: g.title, date: g.date, seenAt })
+  const track = (id: string, g: SchoolGrade, versions: GradeTrack['versions'], removedAt?: string): GradeTrack => ({
+    id, gradeId: g.id, courseId: g.courseId, course: g.course, title: g.title, date: g.date, firstSeenAt: versions[0].seenAt, versions, ...(removedAt ? { removedAt } : {}),
+  })
+  const corrected = grades.find((item) => item.id.endsWith('grade-m2')) as SchoolGrade
+  const dropped = grade('p3', 'Physik', 'Test Optik', addDays(today, -30), 3.0)
+  const gradeHistory: GradeTrack[] = [
+    ...grades.filter((item) => item !== corrected).map((item, index) => track(`demo-h${index}`, item, [version(item, item.mark as number, earlier(20))])),
+    track('demo-hm2', corrected, [version(corrected, 4.0, earlier(18)), version(corrected, 4.5, earlier(9))]),
+    track('demo-hp3', dropped, [version(dropped, 3.0, earlier(25))], earlier(3)),
+  ]
   return {
     revision: 1,
     fetchedAt: stamp,
     profile: { id: `${DEMO_ID_PREFIX}profile`, firstName: 'Demo', lastName: 'Schüler:in', className: 'K26A', email: '' },
     grades,
+    gradeHistory,
     events: [...lessons, ...appointments],
     exams,
     // As in the app's demo: a booked entry and an open double lesson (estimated 2 + 1 = 3) of 30.

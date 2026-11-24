@@ -13,7 +13,7 @@ import { credentialOr } from './credentials.mjs'
 import { CLASS_CODE, isAksaBase } from './class-timetables.mjs'
 import { createCommute } from './commute.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
-import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, tagErrorStage, latencyPercentile, describePollError, FETCH_TIMEOUT_MS, TRANSIENT_HTTP, retryBackoffMs, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, teacherAbsenceField, newerTeacherAbsences, tamSchoolRoot } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, GRADES_HEADER, updateGradeHistory, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, tagErrorStage, latencyPercentile, describePollError, FETCH_TIMEOUT_MS, TRANSIENT_HTTP, retryBackoffMs, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, teacherAbsenceField, newerTeacherAbsences, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
   alertAllowed,
   applyEventWindow,
@@ -69,7 +69,7 @@ const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
 /** One Schulnetz page. Larger than a semester list, small enough that a runaway reply cannot fill memory. */
 export const SCHOOL_BODY_MAX = 8 * 1024 * 1024
-const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json', 'reveals.json', 'monitor.json', 'pushed-notices.json']
+const SCHOOL_FILES = ['link.json', 'snapshot.json', 'grade-history.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json', 'reveals.json', 'monitor.json', 'pushed-notices.json']
 // Pendelstrecken move with the identity (guest → account) like the school files.
 const COMMUTE_FILES = ['commute.json', 'commute-state.json']
 const GUEST_LIMIT = 30
@@ -519,13 +519,39 @@ export const createSchulnetzRuntime = (options = {}) => {
     return kept ? { teacherAbsences: kept } : {}
   }
 
+  /** Version history of every grade, next to snapshot.json: { version: 1, tracks }. Never breaks a poll. */
+  const readGradeHistory = async (accountId) => {
+    const stored = await readJson(resolve(accountDir(accountId), 'grade-history.json'))
+    return Array.isArray(stored?.tracks) ? stored.tracks : []
+  }
+
+  /**
+   * Called under the account lock with the lists the grade diff used. [trusted]: the read was complete
+   * and its grade list was taken over (keepLoadedGrades did not fall back to the old one).
+   */
+  const recordGradeHistory = async (accountId, previousGrades, nextGrades, trusted) => {
+    try {
+      const before = await readGradeHistory(accountId)
+      const after = updateGradeHistory(before, previousGrades, nextGrades, { at: now().toISOString(), trusted })
+      if (JSON.stringify(after) === JSON.stringify(before)) return
+      await writeJson(resolve(accountDir(accountId), 'grade-history.json'), { version: 1, tracks: after })
+    } catch {
+      // The history is an extra; a failed write must not lose the snapshot that is being saved.
+    }
+  }
+
   const acceptSnapshot = async (accountId, body) => {
     const link = await readLink(accountId)
     if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
     if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Der Schnappschuss ist ungültig.')
     const previous = await readSnapshotFile(accountId)
     const snapshot = { ...keepServerLessons(previous, body), revision: (link.revision || 0) + 1, fetchedAt: body.fetchedAt || now().toISOString() }
-    snapshot.grades = preserveExplicitZeroWeight(previous?.grades, keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot)))
+    // The phone's own history is never stored with the snapshot; the server keeps its own file.
+    delete snapshot.gradeHistory
+    const uploadedGrades = snapshot.grades
+    const keptGrades = keepLoadedGrades(previous?.grades, uploadedGrades, trustedGradeRead(snapshot))
+    const gradesTaken = keptGrades === uploadedGrades
+    snapshot.grades = preserveExplicitZeroWeight(previous?.grades, keptGrades)
     // The app reads every grade row; an upload whose grades were kept is stored as a complete list.
     snapshot.gradeParser = snapshot.grades === previous?.grades ? (Number(previous?.gradeParser) || 0) : GRADE_PARSER_VERSION
     // The phone's own read errors describe its read, not what the server holds: when the server reads
@@ -542,6 +568,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     Object.assign(snapshot, absenceFields(keepAbsenceRead(previous || {}, snapshot)))
     // A device link's changes were already announced on the phone that read them: feed only, no push.
     const changes = await publishChanges(accountId, link, await agendaDiff(accountId, uploadDiffBase(gradeDiffBase(previous, snapshot), snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot), { push: link.mode !== 'device' })
+    // The server keeps the history of every link, so the browser can show a device link (TAM) too.
+    await recordGradeHistory(accountId, gradeDiffBase(previous, snapshot)?.grades || [], snapshot.grades, gradesTaken)
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.needsReauth = false
@@ -1432,7 +1460,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
     let snapshot
     try { snapshot = parseRawSnapshot(raw, now().toISOString()) } catch (error) { throw tagErrorStage('parse-rest', error) }
-    snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
+    const readGrades = snapshot.grades
+    snapshot.grades = keepLoadedGrades(previous?.grades, readGrades, trustedGradeRead(snapshot))
+    const gradesTaken = snapshot.grades === readGrades
     const keptTeachers = newerTeacherAbsences(previous?.teacherAbsences, snapshot.teacherAbsences)
     if (keptTeachers) snapshot.teacherAbsences = keptTeachers
     // A missing or rejected Kontoauszug page is not an empty statement.
@@ -1470,6 +1500,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     snapshot.gradeParser = GRADE_PARSER_VERSION
     snapshot.revision = (link.revision || 0) + 1
     const changes = await publishChanges(accountId, link, await agendaDiff(accountId, gradeDiffBase(previous, snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot), { detectedAt: now().getTime() })
+    await recordGradeHistory(accountId, gradeDiffBase(previous, snapshot)?.grades || [], snapshot.grades, gradesTaken)
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.lastError = ''
@@ -1557,6 +1588,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     // A grade check does not open the statement. An empty body, a sign-in wall or another page is not an empty statement.
     const kontoHtml = gradesOnly ? '' : (scraped.kontoHtml || '')
     const kontoFresh = kontoStatementRead(kontoHtml)
+    const scrapedGrades = scraped.grades || []
+    const keptWebGrades = keepLoadedGrades(previous?.grades, scrapedGrades, !failed)
     const snapshot = {
       revision: (link.revision || 0) + 1,
       // A grade check reads the grades page only; the full read time stays what it was.
@@ -1564,7 +1597,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       // A grade check that also read this and next week's lessons (lessonCheckWeeks).
       lessonsFetchedAt: gradesOnly ? (scraped.lessonsRead && !failed ? now().toISOString() : (previous?.lessonsFetchedAt || '')) : now().toISOString(),
       gradesFetchedAt: scraped.gradesRead && !failed ? now().toISOString() : (previous?.gradesFetchedAt || ''),
-      grades: keepLoadedGrades(previous?.grades, scraped.grades || [], !failed),
+      grades: keptWebGrades,
       gradesReadComplete: !failed,
       gradeParser: failed ? (Number(previous?.gradeParser) || 0) : (scraped.gradeParser || 0),
       events: failed ? (previous?.events || []) : (scraped.events || []),
@@ -1590,6 +1623,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
     const detectedAt = now().getTime()
     const changes = await publishChanges(accountId, link, await agendaDiff(accountId, gradeDiffBase(previous, snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot), { detectedAt })
+    await recordGradeHistory(accountId, gradeDiffBase(previous, snapshot)?.grades || [], snapshot.grades, keptWebGrades === scrapedGrades && Boolean(scraped.gradesRead) && trustedGradeRead(snapshot))
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.lastError = ''
@@ -1942,7 +1976,9 @@ export const createSchulnetzRuntime = (options = {}) => {
         const absent = String(request.headers?.[ABSENCES_HEADER] || '') === String(ABSENCE_PARSER_VERSION) ? weeks : legacyAbsenceView(weeks)
         // A snapshot stored before the own-exams filter loses the other courses' exams here, silently.
         const snapshot = absent && Array.isArray(absent.exams) ? { ...absent, exams: ownExams(absent.exams, absent.events).exams } : absent
-        send(response, 200, snapshot || { revision: 0, grades: [], events: [], exams: [], absences: [], homework: [], messages: [], vacations: [], konto: [], kontoSaldo: '', startMessages: [] })
+        // Apps that show the grade history ask for it; older ones see no new field.
+        const wantsHistory = snapshot && String(request.headers?.[GRADES_HEADER] || '') === 'history'
+        send(response, 200, wantsHistory ? { ...snapshot, gradeHistory: await readGradeHistory(accountId) } : snapshot || { revision: 0, grades: [], events: [], exams: [], absences: [], homework: [], messages: [], vacations: [], konto: [], kontoSaldo: '', startMessages: [] })
         return true
       }
       if (route === '/changes' && method === 'GET') {
@@ -2052,6 +2088,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     },
     readStatus: async (accountId) => publicStatus(await readLink(accountId)),
     readSnapshot: async (accountId) => readJson(resolve(accountDir(accountId), 'snapshot.json')),
+    readGradeHistory,
     updateSettings: (accountId, body) => updateSettings(accountId, body),
     changesSince: (accountId, since) => changesSince(accountId, since, ''),
     readReveals,

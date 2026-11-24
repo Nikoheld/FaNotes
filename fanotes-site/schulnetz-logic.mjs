@@ -968,6 +968,144 @@ export const keepLoadedGrades = (previousGrades, nextGrades, complete = true) =>
   return next
 }
 
+/** At most this many versions are kept per grade: the first and the newest GRADE_HISTORY_MAX_VERSIONS - 1. */
+export const GRADE_HISTORY_MAX_VERSIONS = 30
+/** At most this many grades are tracked; the oldest removed ones go first. */
+export const GRADE_HISTORY_MAX_TRACKS = 3000
+
+const historyText = (value) => String(value ?? '').trim().replace(/\s+/g, ' ')
+const historyNumber = (value) => (value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value))
+
+const gradeVersion = (grade, at) => ({
+  mark: historyNumber(grade.mark),
+  weight: historyNumber(grade.weight) ?? 1,
+  title: String(grade.title ?? ''),
+  date: String(grade.date ?? ''),
+  seenAt: at,
+})
+
+const sameGradeVersion = (a, b) => numKey(a.mark) === numKey(b.mark) && numKey(a.weight ?? 1) === numKey(b.weight ?? 1)
+  && historyText(a.title) === historyText(b.title) && normalizeGradeDate(a.date) === normalizeGradeDate(b.date)
+
+/** A track as a grade row, so the shared matcher can match it. Its content is its newest version. */
+const trackAsGrade = (track) => {
+  const last = track.versions[track.versions.length - 1]
+  return { id: track.gradeId, courseId: track.courseId, course: track.course, date: last.date, title: last.title, mark: last.mark, weight: last.weight }
+}
+
+const cloneTrack = (track) => ({ ...track, versions: (track.versions || []).map((version) => ({ ...version })) })
+
+const trimHistory = (tracks) => {
+  for (const track of tracks) {
+    if (track.versions.length > GRADE_HISTORY_MAX_VERSIONS) {
+      track.versions = [track.versions[0], ...track.versions.slice(-(GRADE_HISTORY_MAX_VERSIONS - 1))]
+    }
+  }
+  let excess = tracks.length - GRADE_HISTORY_MAX_TRACKS
+  if (excess <= 0) return tracks
+  const drop = new Set()
+  const ageOf = (entry) => String(entry.track.removedAt || entry.track.firstSeenAt)
+  // Plain code-unit order (like the app's String compare), ties by position.
+  const byAge = (a, b) => (ageOf(a) < ageOf(b) ? -1 : ageOf(a) > ageOf(b) ? 1 : a.index - b.index)
+  const entries = tracks.map((track, index) => ({ track, index }))
+  for (const entry of entries.filter((item) => item.track.removedAt).sort(byAge)) {
+    if (excess-- <= 0) break
+    drop.add(entry.index)
+  }
+  for (const entry of entries.filter((item) => !item.track.removedAt).sort(byAge)) {
+    if (excess-- <= 0) break
+    drop.add(entry.index)
+  }
+  return tracks.filter((_, index) => !drop.has(index))
+}
+
+/**
+ * The version history of every grade. [history] is a list of tracks, one per grade:
+ * { id, gradeId, courseId, course, title, date, firstSeenAt, versions: [{ mark, weight, title, date, seenAt }], removedAt? }.
+ * Grade rows are matched with matchGradeLists, the matcher of the notification diff, so history and
+ * notifications agree. A changed mark, weight, title or day appends a version; a row still waiting for
+ * its mark makes none. A grade that no longer comes back gets `removedAt`, but only when [trusted]
+ * (a complete grade read that was taken over); it loses `removedAt` again when it reappears. The
+ * first call (no tracks yet) seeds one version per grade with the current time and removes nothing.
+ * [previousGrades] should be the list the notification diff compared against, so a parser upgrade
+ * (previous = next) makes no versions. Returns a new list.
+ */
+export const updateGradeHistory = (history, previousGrades, nextGrades, { at, trusted = false } = {}) => {
+  const stamp = typeof at === 'string' ? at : new Date(at ?? Date.now()).toISOString()
+  const tracks = (Array.isArray(history) ? history : []).filter((track) => track?.versions?.length).map(cloneTrack)
+  const next = withoutSummaryGrades(nextGrades)
+  const prev = withoutSummaryGrades(previousGrades)
+  let seq = tracks.reduce((max, track) => Math.max(max, Number(/^g(\d+)$/u.exec(track.id)?.[1]) || 0), 0)
+  const addTrack = (grade) => {
+    seq += 1
+    tracks.push({
+      id: `g${seq}`,
+      gradeId: grade.id,
+      courseId: grade.courseId || '',
+      course: grade.course || grade.subject || '',
+      title: String(grade.title ?? ''),
+      date: String(grade.date ?? ''),
+      firstSeenAt: stamp,
+      versions: [gradeVersion(grade, stamp)],
+    })
+  }
+  if (!tracks.length) {
+    for (const grade of next) if (grade.mark != null) addTrack(grade)
+    return trimHistory(tracks)
+  }
+
+  const live = tracks.filter((track) => !track.removedAt)
+  const prevToLive = matchGradeLists(live.map(trackAsGrade), prev).matches
+  const nextToPrev = matchGradeLists(prev, next).matches
+  const claimed = new Set()
+  const found = next.map((_, position) => {
+    const prevIndex = nextToPrev[position]
+    const track = prevIndex == null || prevToLive[prevIndex] == null ? null : live[prevToLive[prevIndex]]
+    if (track) claimed.add(track)
+    return track
+  })
+  const direct = (grade, pool) => {
+    const candidates = pool.filter((track) => !claimed.has(track))
+    const index = matchGradeLists(candidates.map(trackAsGrade), [grade]).matches[0]
+    return index == null ? null : candidates[index]
+  }
+  const removed = tracks.filter((track) => track.removedAt)
+  next.forEach((grade, position) => {
+    if (found[position] || nextToPrev[position] != null) return
+    // A grade the previous list did not hold: a tracked one the list lost earlier, or a removed one back.
+    const track = direct(grade, live) || direct(grade, removed)
+    if (track) {
+      found[position] = track
+      claimed.add(track)
+    }
+  })
+
+  next.forEach((grade, position) => {
+    const track = found[position]
+    if (!track) {
+      if (grade.mark != null) addTrack(grade)
+      return
+    }
+    delete track.removedAt
+    track.gradeId = grade.id
+    if (grade.mark == null) return
+    const prevIndex = nextToPrev[position]
+    const changed = prevIndex == null || !sameGradeContent(prev[prevIndex], grade)
+    const last = track.versions[track.versions.length - 1]
+    track.courseId = grade.courseId || track.courseId
+    track.course = grade.course || grade.subject || track.course
+    if (changed && !sameGradeVersion(last, grade)) track.versions.push(gradeVersion(grade, stamp))
+    const newest = track.versions[track.versions.length - 1]
+    track.title = newest.title
+    track.date = newest.date
+  })
+
+  if (trusted && next.length > 0) {
+    for (const track of live) if (!claimed.has(track)) track.removedAt = stamp
+  }
+  return trimHistory(tracks)
+}
+
 /**
  * The phone still reads an explicit weight of 0 as 1. An upload of that list must not
  * replace the server's 0, or every upload and the next Schulnetz read announce each other.
@@ -1505,7 +1643,14 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
  * Same mark under a new row id, or the same mark after the course label
  * changes, is not a new grade. A different mark on the same row is.
  */
-const diffGradeList = (previous, next, changes) => {
+/**
+ * The one matcher of old grade rows to new ones: row id first, then identical content, then the
+ * loose key (no course) when that mark is unique on both sides. Each old row is used at most once.
+ * The notification diff and the grade history both call this, so they always agree on what is
+ * "the same grade". Returns, per grade of [next], the index into [previous] or null, plus the loose
+ * key counts of [next] (the diff needs them for the notification keys).
+ */
+export const matchGradeLists = (previous, next) => {
   const consumed = new Set()
   const prevById = new Map(previous.map((grade, index) => [grade.id, index]))
   const prevByContent = new Map()
@@ -1519,7 +1664,7 @@ const diffGradeList = (previous, next, changes) => {
     looseBuckets.get(loose).push(index)
   })
   const nextLooseCounts = looseCounts(next)
-  for (const grade of next) {
+  const matches = next.map((grade) => {
     const content = partKey(gradeContentParts(grade))
     const loose = partKey(gradeLooseParts(grade))
     let matchedIndex = null
@@ -1532,14 +1677,25 @@ const diffGradeList = (previous, next, changes) => {
       const bucket = looseBuckets.get(loose) || []
       if (bucket.length === 1 && !consumed.has(bucket[0])) matchedIndex = bucket[0]
     }
-    const matched = matchedIndex == null ? null : previous[matchedIndex]
     if (matchedIndex != null) consumed.add(matchedIndex)
-    if (matched) {
-      const same = partKey(gradeContentParts(matched)) === content
-        || partKey(gradeLooseParts(matched)) === loose
-        || gradeKey(matched) === gradeKey(grade)
-      if (same) continue
-    }
+    return matchedIndex
+  })
+  return { matches, nextLooseCounts }
+}
+
+/** True when a matched old and new row carry the same grade (the notification diff's "not news"). */
+export const sameGradeContent = (matched, grade) =>
+  partKey(gradeContentParts(matched)) === partKey(gradeContentParts(grade))
+  || partKey(gradeLooseParts(matched)) === partKey(gradeLooseParts(grade))
+  || gradeKey(matched) === gradeKey(grade)
+
+const diffGradeList = (previous, next, changes) => {
+  const { matches, nextLooseCounts } = matchGradeLists(previous, next)
+  for (const [position, grade] of next.entries()) {
+    const loose = partKey(gradeLooseParts(grade))
+    const matchedIndex = matches[position]
+    const matched = matchedIndex == null ? null : previous[matchedIndex]
+    if (matched && sameGradeContent(matched, grade)) continue
     // A row still waiting for its mark is not news. Its mark arriving is a new grade.
     if (grade.mark == null) continue
     const key = gradeKey(grade)
@@ -2755,6 +2911,8 @@ export const legacyAbsenceView = (snapshot) => {
 }
 
 /** Header a client sends when its own notification diff handles every timetable week. */
+/** Apps that want the grade version history send `X-Kanti-Grades: history`; older apps never see it. */
+export const GRADES_HEADER = 'x-kanti-grades'
 export const TIMETABLE_WEEKS_HEADER = 'x-kanti-timetable'
 
 /**
@@ -2856,6 +3014,21 @@ export const webGradeView = (grades, hiddenIds, guessGrades) => {
     // A summary row (an average printed as a grade) of that course is withheld as well.
     if (coveredCourses.has(courseKeyOf(grade))) return isSummaryGrade(grade) ? { ...grade, mark: null, courseGrade: null, withheld: true } : { ...grade, courseGrade: null }
     return grade
+  })
+}
+
+/**
+ * The grade history the browser receives. A track is hidden when the target id of the grade (as it
+ * is now or as any earlier version) is still unrevealed: then every version's mark is withheld, also
+ * for a removed grade. Same ids as webGradeView, so the browser never learns a hidden mark.
+ */
+export const webGradeHistoryView = (tracks, hiddenIds, guessGrades) => {
+  const hidden = guessGrades ? new Set(hiddenIds || []) : new Set()
+  return (Array.isArray(tracks) ? tracks : []).map((track) => {
+    const ids = [gradeTargetId({ courseId: track.courseId, course: track.course, date: track.date, title: track.title }),
+      ...(track.versions || []).map((version) => gradeTargetId({ courseId: track.courseId, course: track.course, date: version.date, title: version.title }))]
+    if (!ids.some((id) => hidden.has(id))) return track
+    return { ...track, hidden: true, versions: (track.versions || []).map((version) => ({ ...version, mark: null })) }
   })
 }
 

@@ -41,6 +41,7 @@ fun SchoolMarkRow(
     onReveal: () -> Unit,
     onAdjust: () -> Unit,
     onRestore: () -> Unit,
+    onHistory: (() -> Unit)? = null,
 ) {
     val haptic = LocalHapticFeedback.current
     val reveal = {
@@ -70,6 +71,7 @@ fun SchoolMarkRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        if (onHistory != null) GradeHistoryButton(mark.label, onHistory)
         if ((mark.adjusted || mark.excluded) && !hidden) TextButton(onClick = onRestore) { Text(t(R.string.restore)) }
         if (hidden) Box(Modifier.size(40.dp).background(LocalCompanionSemantics.current.sunken, MaterialTheme.shapes.small), contentAlignment = Alignment.Center) {
             Text("?", style = TimeStyle.copy(fontSize = MaterialTheme.typography.titleLarge.fontSize), color = MaterialTheme.colorScheme.onSurface)

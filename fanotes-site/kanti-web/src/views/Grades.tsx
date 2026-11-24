@@ -11,6 +11,8 @@ import { Banner, Button, Card, Dialog, Empty, Icon, IconButton, SectionLabel, Ta
 import { MarkBadge } from './common'
 import { MarkTrend, ScaleBar } from '../components/charts'
 import { PASS_MARK } from '../lib/charts'
+import { changedTrack, lastVersion, removedTracks, seenLabel } from '../lib/gradeHistory'
+import type { GradeTrack } from '../types'
 
 export const Grades = () => {
   const kanti = useKanti()
@@ -109,7 +111,7 @@ const CourseDetail = ({ course: schoolCourse, onReveal }: { course: CourseSummar
   const vault = useVault()
   const { own, actions } = vault
   const editable = actions.schoolWritable
-  type Dialog = { type: 'own'; existing: OwnGrade | null } | { type: 'collective'; existing: CollectiveGrade | null } | { type: 'adjust'; mark: CourseMark } | { type: 'whatif' } | { type: 'archive' }
+  type Dialog = { type: 'own'; existing: OwnGrade | null } | { type: 'collective'; existing: CollectiveGrade | null } | { type: 'adjust'; mark: CourseMark } | { type: 'whatif' } | { type: 'archive' } | { type: 'history'; track: GradeTrack }
   const [dialog, setDialog] = useState<Dialog | null>(null)
   // With what-if marks the subject page shows the scenario (the app's course page does the same).
   const course = useMemo(() => (own.hypothetical.some((extra) => extra.courseId === schoolCourse.key)
@@ -121,6 +123,8 @@ const CourseDetail = ({ course: schoolCourse, onReveal }: { course: CourseSummar
   const [weight, setWeight] = useState(1)
   const wish = wishFor(course, target, weight)
   const wishTone = wish.alreadyMet ? 'success' : wish.achievable && wish.needed != null ? 'accent' : 'danger'
+  const history = data.snapshot?.gradeHistory
+  const removed = removedTracks(history, schoolCourse.key)
   const rowTools = (mark: CourseMark) => {
     if (mark.hypothetical) return <IconButton icon="close" label={t.removeLocalMark(mark.grade.title)} onClick={() => void actions.removeHypothetical(mark.sourceId || '')} />
     if (mark.collective) {
@@ -178,6 +182,7 @@ const CourseDetail = ({ course: schoolCourse, onReveal }: { course: CourseSummar
                   <span className="mark-title">{mark.grade.title}</span>
                   {mark.own ? <> <Tag tone={mark.hypothetical ? 'warning' : 'accent'}>{mark.hypothetical ? t.whatIf : t.own}</Tag></> : null}
                   {mark.mark == null && !mark.hidden ? <> <Tag>{t.pending}</Tag></> : null}
+                  {!mark.own ? <HistoryMarker track={changedTrack(history, mark.grade)} onOpen={(track) => setDialog({ type: 'history', track })} /> : null}
                   {mark.excluded ? <small className="block muted">{t.excludedSchool(markLabel(mark.displayMark), markLabel(mark.displayWeight))}</small> : mark.adjusted ? <small className="block muted">{t.adjustedSchool(markLabel(mark.displayMark), markLabel(mark.displayWeight))}</small> : null}
                   {mark.grade.comment ? <small className="block muted">{mark.grade.comment}</small> : null}
                 </td>
@@ -189,6 +194,34 @@ const CourseDetail = ({ course: schoolCourse, onReveal }: { course: CourseSummar
           </tbody>
         </table>
       </Card>
+      {removed.length ? (
+        <Card className="removed-grades">
+          <details>
+            <summary>{t.removedGrades} <Tag>{removed.length}</Tag></summary>
+            <p className="muted small">{t.removedNote}</p>
+            <table>
+              <thead><tr><th>{t.date}</th><th>{t.title}</th><th className="number">{t.weight}</th><th className="number">{t.mark}</th></tr></thead>
+              <tbody>
+                {removed.map((track) => {
+                  const last = lastVersion(track)
+                  return (
+                    <tr key={track.id}>
+                      <td className="tabular muted">{dateLabel(last.date, language, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                      <td>
+                        <span className="mark-title">{last.title}</span>
+                        <small className="block muted">{t.removedOn} {seenLabel(track.removedAt || '', language)}</small>
+                        <HistoryMarker track={track.versions.length > 1 ? track : null} onOpen={(item) => setDialog({ type: 'history', track: item })} />
+                      </td>
+                      <td className="number tabular muted">{markLabel(last.weight)}</td>
+                      <td className="number">{track.hidden ? <Tag>{t.hiddenGrade}</Tag> : <MarkBadge mark={last.mark} t={t} />}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </details>
+        </Card>
+      ) : null}
       {!course.sport ? (
         <Card className="wish">
           <SectionLabel>{t.wish}</SectionLabel>
@@ -199,12 +232,49 @@ const CourseDetail = ({ course: schoolCourse, onReveal }: { course: CourseSummar
           <p className={`wish-result wish-${wishTone}`}><Icon name={wishTone === 'danger' ? 'warning' : 'check'} size={20} /><span>{wish.alreadyMet ? t.wishMet : wish.achievable && wish.needed != null ? t.wishNeeded(markLabel(wish.neededHalf ?? wish.needed)) : t.wishImpossible}</span></p>
         </Card>
       ) : null}
+      {dialog?.type === 'history' ? <HistoryDialog track={dialog.track} onClose={() => setDialog(null)} /> : null}
       {dialog?.type === 'own' ? <OwnGradeDialog courseId={course.key} existing={dialog.existing} onClose={() => setDialog(null)} /> : null}
       {dialog?.type === 'collective' ? <CollectiveDialog courseId={course.key} existing={dialog.existing} onClose={() => setDialog(null)} /> : null}
       {dialog?.type === 'whatif' ? <WhatIfDialog courseId={course.key} onClose={() => setDialog(null)} /> : null}
       {dialog?.type === 'adjust' ? <AdjustDialog mark={dialog.mark} existing={own.book.adjustments.find((item) => item.targetId === dialog.mark.targetId) || null} onClose={() => setDialog(null)} /> : null}
       {dialog?.type === 'archive' ? <ConfirmDelete title={t.archiveTitle} body={t.archiveBody} confirm={t.archive} onConfirm={() => actions.archiveCourse(course.key)} onClose={() => setDialog(null)} /> : null}
     </>
+  )
+}
+
+/** The "Verlauf" marker of a grade that changed: opens the list of its versions. */
+const HistoryMarker = ({ track, onOpen }: { track: GradeTrack | null; onOpen: (track: GradeTrack) => void }) => {
+  const { t } = useKanti()
+  if (!track) return null
+  const title = lastVersion(track).title
+  return (
+    <button type="button" className="history-marker" aria-label={t.gradeHistoryOf(title)} title={t.gradeHistoryOf(title)} onClick={() => onOpen(track)}>
+      <Icon name="history" size={14} />{t.gradeHistory}
+    </button>
+  )
+}
+
+/** Every version the server saw, newest first, with the time it first saw it. */
+const HistoryDialog = ({ track, onClose }: { track: GradeTrack; onClose: () => void }) => {
+  const { t, language } = useKanti()
+  const versions = [...track.versions].reverse()
+  return (
+    <Dialog title={t.gradeHistoryOf(lastVersion(track).title)} onClose={onClose}>
+      <ol className="history-list">
+        {versions.map((version, index) => (
+          <li key={`${version.seenAt}-${index}`}>
+            <span className="history-mark">{track.hidden ? <Tag>{t.hiddenVersion}</Tag> : <MarkBadge mark={version.mark} t={t} />}</span>
+            <span className="history-detail">
+              <strong>{version.title}</strong>
+              <small className="block muted">{t.weight} {markLabel(version.weight)} · {dateLabel(version.date, language, { day: 'numeric', month: 'short', year: 'numeric' })}</small>
+              <small className="block muted">{t.seenOn} {seenLabel(version.seenAt, language)}{index === 0 && !track.removedAt ? ` · ${t.gradeCurrent}` : ''}</small>
+            </span>
+          </li>
+        ))}
+      </ol>
+      {track.removedAt ? <p className="muted small">{t.removedOn} {seenLabel(track.removedAt, language)}</p> : null}
+      <Button onClick={onClose}>{t.done}</Button>
+    </Dialog>
   )
 }
 

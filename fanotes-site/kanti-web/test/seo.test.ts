@@ -134,6 +134,13 @@ describe('/about/ landing page', () => {
     expect(privacy).toContain('gelöscht, sobald du die Schule trennst, deine Daten in der App löschst oder dein FaNotes-Konto löschst')
     expect(about).toContain('gelöscht, sobald du die Schule trennst, deine Daten in der App löschst oder dein FaNotes-Konto löschst')
   })
+  it('the privacy policy names the grade history in both languages', () => {
+    const privacy = readFileSync(new URL('../public/kantiplus/datenschutz/index.html', root), 'utf8')
+    expect(privacy).toContain('Notenverlauf')
+    expect(privacy).toContain('frühere Versionen')
+    expect(privacy).toContain('the grade history')
+    expect(privacy).toContain('deleted with it')
+  })
 })
 
 describe('404, sitemap, robots, verification', () => {

@@ -271,7 +271,8 @@ class SchulnetzClient(
     }
 
     fun uploadSnapshot(session: SchoolAuth, snapshot: SchulnetzSnapshot) {
-        val json = snapshot.toNormalizedJson()
+        // The grade history stays on the phone; the server keeps its own.
+        val json = snapshot.toNormalizedJson(withHistory = false)
         // A semester of lessons is several hundred KB of JSON, too big for a plain upload; gzip keeps
         // it small. A server without gzip support answers 400/413/415, then the plain body is sent.
         var (code, body) = fanotes("PUT", "/snapshot", session, json, gzip = true)
@@ -1077,6 +1078,8 @@ class SchulnetzClient(
                 "X-Kanti-Timetable" to "weeks",
                 // This app reads absence points and open reports; older apps get the rows their reader makes.
                 "X-Kanti-Absences" to ch.fasrv.fanotes.schulnetz.ABSENCE_PARSER_VERSION.toString(),
+                // This app shows the grade version history; older apps never see it.
+                "X-Kanti-Grades" to "history",
             ),
             json,
             client,

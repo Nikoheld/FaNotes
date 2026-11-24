@@ -38,6 +38,8 @@ fun adoptServerSnapshot(phone: SchulnetzSnapshot, server: SchulnetzSnapshot): Sc
         grades = if (serverGrades) keepGradeRead(phone.grades, server.grades, true) else phone.grades,
         gradesReadComplete = if (serverGrades) true else phone.gradesReadComplete,
         gradeParser = if (serverGrades) server.gradeParser else phone.gradeParser,
+        // The server's history (asked for with X-Kanti-Grades) wins; an older server sends none.
+        gradeHistory = server.gradeHistory.ifEmpty { phone.gradeHistory },
         events = mergedEvents,
         exams = ownExams(server.exams.ifEmpty { phone.exams }, mergedEvents).exams,
         examsUnfiltered = ownExams(server.exams.ifEmpty { phone.exams }, mergedEvents).unfiltered,
