@@ -1525,4 +1525,22 @@
     <string name="note_ink_too_large_body">Die Handschrift dieser Notiz ist zu gross, um auf diesem Handy angezeigt zu werden. Sie bleibt unverändert. Öffne die Notiz in FaNotes am Computer.</string>
     <string name="too_large_for_memory">Diese Notiz ist für den Speicher dieses Handys zu gross. Sie wurde nicht verändert.</string>
     <string name="too_large_for_memory_body">Diese Datei ist für den Speicher dieses Handys zu gross und kann hier nicht angezeigt werden. Die Originaldatei bleibt unverändert.</string>
+    <string name="grade_trend">Verlauf</string>
+    <string name="running_average">Laufender Schnitt</string>
+    <string name="pass_mark_4">Genügend ab 4</string>
+    <plurals name="trend_description">
+        <item quantity="one">Verlauf der Noten in %1$s: %2$d Note, aktueller Schnitt %3$s</item>
+        <item quantity="other">Verlauf der Noten in %1$s: %2$d Noten, aktueller Schnitt %3$s</item>
+    </plurals>
+    <string name="below_four">Unter 4</string>
+    <plurals name="below_four_of">
+        <item quantity="one">von %d Fach</item>
+        <item quantity="other">von %d Fächern</item>
+    </plurals>
+    <string name="best_subject">Bestes Fach</string>
+    <string name="changes">Änderungen</string>
+    <string name="no_changes_yet">Noch keine Änderungen in dieser App.</string>
+    <string name="show_more">Mehr zeigen</string>
+    <string name="appointments">Termine</string>
+    <string name="trend_needs_marks">Das Diagramm erscheint, sobald Noten da sind.</string>
 </resources>
