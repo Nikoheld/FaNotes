@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react'
-import { allEntries, byDay, daysBetween, isRunning, nextCommitment, clockMinutes, type Entry } from '../lib/agenda'
-import { courseSummaries, latestGrades, overallAverage, plusLabel, promotionTotals } from '../lib/grades'
+import { byDay, daysBetween, isRunning, nextCommitment, clockMinutes, type Entry } from '../lib/agenda'
+import { activeCourses, courseSummaries, latestGrades, overallAverage, plusLabel, promotionTotals } from '../lib/grades'
+import { useEntries } from '../vault/entries'
+import { useProvisional } from '../vault/planned'
+import { useVault } from '../vault/store'
+import { TasksCard } from '../vault/ui'
 import { dateLabel, markLabel, pointsLabel } from '../lib/i18n'
 import { pickMensaDay } from '../lib/mensa'
 import { useMensa } from '../lib/useMensa'
@@ -12,14 +16,15 @@ import { CommuteCard } from '../components/CommuteCard'
 import { useKanti } from '../state'
 import { Banner, Card, DayBand, Dialog, Empty, Icon, RoomPill, SectionLabel, Snowfall } from '../components/ui'
 import { EntryDetails, EntryRow, EntryTags, HomeworkDetails, HomeworkRow, MarkBadge, relativeDay, useClock } from './common'
-import { absenceTally, addDays, eventDate } from '@shared/schulnetz-logic'
+import { addDays, eventDate } from '@shared/schulnetz-logic'
 
 export const Today = () => {
   const kanti = useKanti()
   const { t, language, data, prefs } = kanti
   const clock = useClock()
   const snapshot = data.snapshot
-  const entries = useMemo(() => allEntries(snapshot), [snapshot])
+  const entries = useEntries()
+  const { own } = useVault()
   const days = useMemo(() => byDay(entries), [entries])
   const next = nextCommitment(entries, clock)
   const [selected, setSelected] = useState<Entry | null>(null)
@@ -29,13 +34,13 @@ export const Today = () => {
   const teachers = prefs.showTeacherAbsences ? teacherAbsencesToday(snapshot, clock.today) : null
   const homework = useMemo(() => homeworkDue(snapshot?.homework, clock.today, addDays(clock.today, 14)).slice(0, 4), [snapshot, clock.today])
   const todays = days.get(clock.today) || []
-  const courses = useMemo(() => courseSummaries(snapshot?.grades || []), [snapshot])
+  const courses = useMemo(() => activeCourses(courseSummaries(snapshot?.grades || [], { book: own.book })), [snapshot, own.book])
   const totals = promotionTotals(courses)
   const recent = latestGrades(snapshot?.grades || [], 5)
   const exams = entries.filter((entry) => entry.kind === 'exam' && !entry.cancelled && entry.key !== next?.key && (entry.day > clock.today || (entry.day === clock.today && (clockMinutes(entry.end) ?? 1440) > clock.minutes))).slice(0, 4)
   const appointments = entries.filter((entry) => entry.kind === 'appointment' && entry.day >= clock.today && entry.day <= addDays(clock.today, 21)).slice(0, 3)
   const excuses = (snapshot?.absences || []).filter((absence) => !absence.excused && absence.excuseUntil && (eventDate(absence.excuseUntil) || absence.excuseUntil) >= clock.today)
-  const absencePoints = useMemo(() => absenceTally(snapshot), [snapshot])
+  const absencePoints = useProvisional(clock.today).tally
   const snow = prefs.theme === 'snow' && prefs.snowfall
   const running = next ? isRunning(next, clock) : false
   const dayLessons = next ? (days.get(next.day) || []).filter((entry) => entry.kind === 'lesson' && entry.start) : []
@@ -164,6 +169,7 @@ export const Today = () => {
               </Card>
             </>
           ) : null}
+          <TasksCard />
           {/* Closes the "Von der Schule" block; without it, the card follows "Demnächst". */}
           <CommuteCard />
         </div>
@@ -181,7 +187,7 @@ export const Today = () => {
         </div>
       </div>
       {homeworkOpen ? <Dialog title={homeworkOpen.title} onClose={() => setHomeworkOpen(null)}><HomeworkDetails item={homeworkOpen} t={t} language={language} /></Dialog> : null}
-      {selected ? <Dialog title={selected.title} onClose={() => setSelected(null)}><EntryDetails entry={selected} t={t} language={language} /></Dialog> : null}
+      {selected ? <Dialog title={selected.title} onClose={() => setSelected(null)}><EntryDetails entry={selected} t={t} language={language} onDone={() => setSelected(null)} /></Dialog> : null}
     </div>
   )
 }

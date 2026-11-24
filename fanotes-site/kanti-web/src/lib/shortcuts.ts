@@ -1,8 +1,8 @@
 // Keyboard shortcuts. The mapping is pure (key event in, action out) so it is tested without a page.
 
-export type View = 'today' | 'timetable' | 'grades' | 'agenda' | 'absences' | 'updates' | 'mensa' | 'commute' | 'settings'
+export type View = 'today' | 'timetable' | 'grades' | 'agenda' | 'absences' | 'updates' | 'mensa' | 'commute' | 'notes' | 'settings'
 /** Every view in menu order, the optional Mensa included. */
-export const ALL_VIEWS: View[] = ['today', 'timetable', 'grades', 'agenda', 'absences', 'updates', 'mensa', 'commute', 'settings']
+export const ALL_VIEWS: View[] = ['today', 'timetable', 'grades', 'agenda', 'absences', 'updates', 'mensa', 'commute', 'notes', 'settings']
 /** The views in the menu while the Mensa is off (the default); the number keys count along this list. */
 export const VIEWS: View[] = ALL_VIEWS.filter((view) => view !== 'mensa')
 /** The views the menu, the number keys and the search offer: Mensa only when the person switched it on. */
@@ -31,7 +31,7 @@ export interface KeyInput {
   typing?: boolean
 }
 
-const LETTERS: Record<string, View> = { h: 'today', s: 'timetable', n: 'grades', p: 'agenda', a: 'absences', m: 'updates', l: 'mensa', w: 'commute', e: 'settings' }
+const LETTERS: Record<string, View> = { h: 'today', s: 'timetable', n: 'grades', p: 'agenda', a: 'absences', m: 'updates', l: 'mensa', o: 'notes', w: 'commute', e: 'settings' }
 
 /** `pending` is true right after a lone "g": the next letter picks a view (g h, g s, …). */
 export const shortcutFor = (input: KeyInput, pending = false, views: View[] = VIEWS): Action | 'g' | null => {

@@ -5,6 +5,7 @@ import { useKanti } from '../state'
 import { Banner, Button, Card, Dialog, Icon, Tag, Toggle } from '../components/ui'
 import { ago } from './common'
 import { PairingPanel } from './SignIn'
+import { VaultSettings } from '../vault/ui'
 import type { AlertSettings, Connection } from '../types'
 
 const ALERT_GROUPS: (keyof AlertSettings)[][] = [
@@ -135,6 +136,7 @@ export const Settings = () => {
   const accountGroup = (
       <Group title={t.account} body={t.accountBody}>
         <p className="settings-note"><Icon name="info" size={16} />{t.privacyNote}</p>
+        <VaultSettings />
         <div className="link-list">
           <a href="https://fanotes.fasrv.ch/kantiplus/datenschutz/" target="_blank" rel="noopener noreferrer"><Icon name="open" size={18} /><span>{t.privacy}</span></a>
           <a href="https://fanotes.fasrv.ch/kantiplus/konto-loeschen/" target="_blank" rel="noopener noreferrer"><Icon name="open" size={18} /><span>{t.deleteAccount}</span></a>

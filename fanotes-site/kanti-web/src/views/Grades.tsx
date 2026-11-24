@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { courseSummaries, overallAverage, plusLabel, promotionTotals, wishFor, type CourseMark, type CourseSummary } from '../lib/grades'
+import { activeCourses, courseSummaries, overallAverage, plusLabel, promotionTotals, wishFor, type CourseMark, type CourseSummary } from '../lib/grades'
+import { courseAlias, overrideColor } from '../vault/school'
+import { useVault } from '../vault/store'
+import { VaultHint, ConfirmDelete } from '../vault/ui'
+import { AdjustDialog, CollectiveDialog, OwnGradeDialog, WhatIfDialog } from '../vault/forms'
+import type { CollectiveGrade, OwnGrade } from '../vault/files'
 import { dateLabel, markLabel } from '../lib/i18n'
 import { useKanti } from '../state'
-import { Banner, Button, Card, Dialog, Empty, Icon, SectionLabel, Tag } from '../components/ui'
+import { Banner, Button, Card, Dialog, Empty, Icon, IconButton, SectionLabel, Tag } from '../components/ui'
 import { MarkBadge } from './common'
 import { MarkTrend, ScaleBar } from '../components/charts'
 import { PASS_MARK } from '../lib/charts'
@@ -10,11 +15,16 @@ import { PASS_MARK } from '../lib/charts'
 export const Grades = () => {
   const kanti = useKanti()
   const { t, data, route } = kanti
-  const courses = useMemo(() => courseSummaries(data.snapshot?.grades || []), [data.snapshot])
+  const vault = useVault()
+  const { own } = vault
+  const all = useMemo(() => courseSummaries(data.snapshot?.grades || [], { book: own.book }), [data.snapshot, own.book])
+  // Archived subjects leave the list, the overall average and the promotion points (as in the app).
+  const courses = useMemo(() => activeCourses(all), [all])
+  const archived = all.filter((course) => course.archived)
   const totals = promotionTotals(courses)
   const overall = overallAverage(courses)
   const requested = route.params.get('fach') || ''
-  const selected = courses.find((course) => course.key === requested) || null
+  const selected = all.find((course) => course.key === requested) || null
   const hidden = courses.reduce((sum, course) => sum + course.hidden, 0)
   const [revealing, setRevealing] = useState<CourseMark | null>(null)
   const averaged = courses.filter((course) => course.average != null)
@@ -36,10 +46,11 @@ export const Grades = () => {
     return () => window.removeEventListener('kanti:action', onAction)
   })
 
-  if (!courses.length) return <div className="view"><Card><Empty icon="grades">{t.noGrades}</Empty></Card></div>
+  if (!all.length) return <div className="view"><VaultHint /><Card><Empty icon="grades">{t.noGrades}</Empty></Card></div>
 
   return (
     <div className="view view-grades">
+      <VaultHint compact />
       <div className="metric-row">
         <Card className="metric"><span className="metric-label">{t.pluspunkte}</span><span className={`metric-value tabular ${totals.total >= 0 ? 'positive' : 'negative'}`}>{plusLabel(totals.total)}</span><small className="metric-sub tabular">+{totals.plus} / −{Math.abs(totals.minus)}</small></Card>
         <Card className="metric"><span className="metric-label">{t.overall}</span><span className="metric-value tabular">{markLabel(overall)}</span><small className="metric-sub">{t.subjects(courses.length)}</small></Card>
@@ -54,7 +65,7 @@ export const Grades = () => {
             {courses.map((course) => (
               <button type="button" role="option" aria-selected={course.key === selected?.key} key={course.key} className={`course-row${course.key === selected?.key ? ' selected' : ''}`} onClick={() => open(course)}>
                 <span className="course-main">
-                  <span className="course-name">{course.label}{course.hidden ? <Icon name="eyeOff" size={14} /> : null}</span>
+                  <span className="course-name">{colorDot(course.label, own.colors)}{courseAlias(course.label, own.desk.courseAliases)}{course.hidden ? <Icon name="eyeOff" size={14} /> : null}{course.marks.some((mark) => mark.own) ? <Tag tone="accent">{t.own}</Tag> : null}</span>
                   <ScaleBar value={course.average} />
                 </span>
                 <span className="course-average tabular">{markLabel(course.average)}</span>
@@ -63,6 +74,19 @@ export const Grades = () => {
               </button>
             ))}
           </div>
+          {archived.length ? (
+            <div className="archived-block">
+              <p className="archived-head">{t.archivedSubjects}</p>
+              <p className="muted small">{t.archivedNote}</p>
+              {archived.map((course) => (
+                <button type="button" key={course.key} className={`course-row archived${course.key === selected?.key ? ' selected' : ''}`} onClick={() => open(course)}>
+                  <span className="course-main"><span className="course-name">{courseAlias(course.label, own.desk.courseAliases)}</span></span>
+                  <span className="course-average tabular">{markLabel(course.average)}</span>
+                  <span /><span />
+                </button>
+              ))}
+            </div>
+          ) : null}
         </Card>
         <div className="column column-detail">
           {selected ? <CourseDetail course={selected} onReveal={setRevealing} /> : <Card><Empty>{t.pickCourse}</Empty></Card>}
@@ -74,21 +98,58 @@ export const Grades = () => {
   )
 }
 
-const CourseDetail = ({ course, onReveal }: { course: CourseSummary; onReveal: (mark: CourseMark) => void }) => {
-  const { t, language } = useKanti()
+/** The colour dot of a subject the student coloured in the app (colors.json); nothing when none was chosen. */
+const colorDot = (label: string, colors: Record<string, string>) => {
+  const color = overrideColor(label, colors)
+  return color ? <i className="subject-dot" style={{ background: color }} aria-hidden="true" /> : null
+}
+
+const CourseDetail = ({ course: schoolCourse, onReveal }: { course: CourseSummary; onReveal: (mark: CourseMark) => void }) => {
+  const { t, language, data } = useKanti()
+  const vault = useVault()
+  const { own, actions } = vault
+  const editable = actions.schoolWritable
+  type Dialog = { type: 'own'; existing: OwnGrade | null } | { type: 'collective'; existing: CollectiveGrade | null } | { type: 'adjust'; mark: CourseMark } | { type: 'whatif' } | { type: 'archive' }
+  const [dialog, setDialog] = useState<Dialog | null>(null)
+  // With what-if marks the subject page shows the scenario (the app's course page does the same).
+  const course = useMemo(() => (own.hypothetical.some((extra) => extra.courseId === schoolCourse.key)
+    ? courseSummaries(data.snapshot?.grades || [], { book: own.book, hypothetical: own.hypothetical }).find((item) => item.key === schoolCourse.key) || schoolCourse
+    : schoolCourse), [schoolCourse, own.book, own.hypothetical, data.snapshot])
+  const scenario = course !== schoolCourse
+  const decimals = own.desk.gradeDecimals
   const [target, setTarget] = useState(4.5)
   const [weight, setWeight] = useState(1)
   const wish = wishFor(course, target, weight)
   const wishTone = wish.alreadyMet ? 'success' : wish.achievable && wish.needed != null ? 'accent' : 'danger'
+  const rowTools = (mark: CourseMark) => {
+    if (mark.hypothetical) return <IconButton icon="close" label={t.removeLocalMark(mark.grade.title)} onClick={() => void actions.removeHypothetical(mark.sourceId || '')} />
+    if (mark.collective) {
+      const stored = own.book.collective.find((item) => item.id === mark.sourceId) || null
+      return <><IconButton icon="edit" label={t.editCollectiveGrade} onClick={() => setDialog({ type: 'collective', existing: stored })} /><IconButton icon="delete" label={t.deleteCollective(mark.grade.title)} onClick={() => void actions.deleteCollective(mark.sourceId || '')} /></>
+    }
+    if (mark.own) {
+      const stored = own.book.own.find((item) => item.id === mark.sourceId) || null
+      return <><IconButton icon="edit" label={t.editYourMark} onClick={() => setDialog({ type: 'own', existing: stored })} /><IconButton icon="delete" label={t.deleteOwnMark(mark.grade.title)} onClick={() => void actions.deleteOwnGrade(mark.sourceId || '')} /></>
+    }
+    if (mark.hidden || mark.mark == null || !mark.targetId) return null
+    return <><IconButton icon="edit" label={t.adjustSchoolMark} onClick={() => setDialog({ type: 'adjust', mark })} />{mark.adjusted || mark.excluded ? <Button tone="quiet" className="button-small" onClick={() => void actions.restoreAdjustment(mark.targetId || '')}>{t.restore}</Button> : null}</>
+  }
   return (
     <>
       <Card className="course-head">
         <div className="course-title">
-          <h2>{course.label}</h2>
-          <p className="muted">{course.sport ? t.sportNotCounted : `${t.weight} ${markLabel(course.weight)}`}</p>
+          <h2>{colorDot(course.label, own.colors)}{courseAlias(course.label, own.desk.courseAliases)}</h2>
+          <p className="muted">{course.archived ? t.archivedNote : course.sport ? t.sportNotCounted : `${t.weight} ${markLabel(course.weight)}`}</p>
         </div>
+        {editable ? (
+          <div className="course-tools">
+            {schoolCourse.archived
+              ? <Button tone="outline" icon="check" onClick={() => void actions.restoreCourse(course.key)}>{t.restoreSubject}</Button>
+              : <Button tone="quiet" onClick={() => setDialog({ type: 'archive' })}>{t.archiveSubject}</Button>}
+          </div>
+        ) : null}
         <div className="course-figures">
-          <span><small>{t.average}</small><strong className="tabular">{markLabel(course.average, 3)}</strong></span>
+          <span><small>{scenario ? t.projectedAverage : t.average}</small><strong className="tabular">{markLabel(course.average, scenario ? decimals : 3)}</strong></span>
           <span><small>{t.zeugnis}</small><MarkBadge mark={course.zeugnis} t={t} large /></span>
           <span><small>{t.pluspunkte}</small><strong className={`tabular ${course.pluspunkte >= 0 ? 'positive' : 'negative'}`}>{course.promotion ? plusLabel(course.pluspunkte) : '–'}</strong></span>
         </div>
@@ -96,19 +157,33 @@ const CourseDetail = ({ course, onReveal }: { course: CourseSummary; onReveal: (
       {course.marks.some((mark) => mark.counted && !mark.hidden) ? (
         <Card className="trend-card">
           <SectionLabel>{t.gradeTrend}</SectionLabel>
-          <MarkTrend marks={course.marks} label={course.label} t={t} language={language} />
+          <MarkTrend marks={course.marks.filter((mark) => !mark.hypothetical)} label={course.label} t={t} language={language} />
         </Card>
       ) : null}
       <Card className="marks">
+        {editable ? (
+          <div className="marks-tools">
+            <Button tone="outline" icon="plus" onClick={() => setDialog({ type: 'own', existing: null })}>{t.addYourMark}</Button>
+            <Button tone="outline" icon="plus" onClick={() => setDialog({ type: 'collective', existing: null })}>{t.collectiveGrade}</Button>
+            <Button tone="outline" icon="plus" onClick={() => setDialog({ type: 'whatif' })}>{t.whatIf}</Button>
+          </div>
+        ) : null}
         <table>
-          <thead><tr><th>{t.date}</th><th>{t.title}</th><th className="number">{t.weight}</th><th className="number">{t.mark}</th></tr></thead>
+          <thead><tr><th>{t.date}</th><th>{t.title}</th><th className="number">{t.weight}</th><th className="number">{t.mark}</th>{editable ? <th /> : null}</tr></thead>
           <tbody>
             {course.marks.map((mark) => (
-              <tr key={mark.grade.id} className={mark.hidden ? 'hidden-row' : ''}>
+              <tr key={`${mark.own ? 'own:' : ''}${mark.grade.id}`} className={mark.hidden ? 'hidden-row' : mark.excluded ? 'excluded-row' : ''}>
                 <td className="tabular muted">{dateLabel(mark.grade.date, language, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                <td><span className="mark-title">{mark.grade.title}</span>{mark.mark == null && !mark.hidden ? <> <Tag>{t.pending}</Tag></> : null}{mark.grade.comment ? <small className="block muted">{mark.grade.comment}</small> : null}</td>
+                <td>
+                  <span className="mark-title">{mark.grade.title}</span>
+                  {mark.own ? <> <Tag tone={mark.hypothetical ? 'warning' : 'accent'}>{mark.hypothetical ? t.whatIf : t.own}</Tag></> : null}
+                  {mark.mark == null && !mark.hidden ? <> <Tag>{t.pending}</Tag></> : null}
+                  {mark.excluded ? <small className="block muted">{t.excludedSchool(markLabel(mark.displayMark), markLabel(mark.displayWeight))}</small> : mark.adjusted ? <small className="block muted">{t.adjustedSchool(markLabel(mark.displayMark), markLabel(mark.displayWeight))}</small> : null}
+                  {mark.grade.comment ? <small className="block muted">{mark.grade.comment}</small> : null}
+                </td>
                 <td className="number tabular muted">{markLabel(mark.weight)}</td>
-                <td className="number">{mark.hidden ? <Button tone="outline" icon="eye" onClick={() => onReveal(mark)}>{t.reveal}</Button> : <MarkBadge mark={mark.mark} t={t} />}</td>
+                <td className="number">{mark.hidden ? <Button tone="outline" icon="eye" onClick={() => onReveal(mark)}>{t.reveal}</Button> : <MarkBadge mark={mark.excluded ? mark.displayMark : mark.mark} t={t} />}</td>
+                {editable ? <td className="row-tools">{rowTools(mark)}</td> : null}
               </tr>
             ))}
           </tbody>
@@ -124,6 +199,11 @@ const CourseDetail = ({ course, onReveal }: { course: CourseSummary; onReveal: (
           <p className={`wish-result wish-${wishTone}`}><Icon name={wishTone === 'danger' ? 'warning' : 'check'} size={20} /><span>{wish.alreadyMet ? t.wishMet : wish.achievable && wish.needed != null ? t.wishNeeded(markLabel(wish.neededHalf ?? wish.needed)) : t.wishImpossible}</span></p>
         </Card>
       ) : null}
+      {dialog?.type === 'own' ? <OwnGradeDialog courseId={course.key} existing={dialog.existing} onClose={() => setDialog(null)} /> : null}
+      {dialog?.type === 'collective' ? <CollectiveDialog courseId={course.key} existing={dialog.existing} onClose={() => setDialog(null)} /> : null}
+      {dialog?.type === 'whatif' ? <WhatIfDialog courseId={course.key} onClose={() => setDialog(null)} /> : null}
+      {dialog?.type === 'adjust' ? <AdjustDialog mark={dialog.mark} existing={own.book.adjustments.find((item) => item.targetId === dialog.mark.targetId) || null} onClose={() => setDialog(null)} /> : null}
+      {dialog?.type === 'archive' ? <ConfirmDelete title={t.archiveTitle} body={t.archiveBody} confirm={t.archive} onConfirm={() => actions.archiveCourse(course.key)} onClose={() => setDialog(null)} /> : null}
     </>
   )
 }

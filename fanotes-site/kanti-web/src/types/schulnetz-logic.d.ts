@@ -26,6 +26,7 @@ declare module '@shared/schulnetz-logic' {
   export function isSportCourse(name: string): boolean
   export function promotionPoints(zeugnis: number): number | null
   export function wunschnote(current: Mark[], target: number, nextWeight: number): WishResult
+  export function gradeTargetId(grade: Partial<SchoolGrade>): string
   export function isSummaryGrade(grade: Partial<SchoolGrade>): boolean
   export function looksLikeCourseCode(value: string): boolean
 }

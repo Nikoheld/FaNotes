@@ -10,6 +10,7 @@ export const PATHS: Record<View, string> = {
   updates: '/mitteilungen',
   mensa: '/mensa',
   commute: '/pendeln',
+  notes: '/notizen',
   settings: '/einstellungen',
 }
 

@@ -86,14 +86,17 @@ describe('Mensa navigation', () => {
     expect(VIEWS).not.toContain('mensa')
     expect(visibleViews(false)).toEqual(VIEWS)
     expect(visibleViews(true)).toEqual(ALL_VIEWS)
-    expect(ALL_VIEWS.slice(-3)).toEqual(['mensa', 'commute', 'settings'])
+    expect(ALL_VIEWS.slice(-4)).toEqual(['mensa', 'commute', 'notes', 'settings'])
   })
   it('keeps the number keys of the default menu and shifts them with the Mensa on', () => {
     expect(shortcutFor({ key: '7' })).toEqual({ type: 'view', view: 'commute' })
-    expect(shortcutFor({ key: '9' })).toBeNull()
+    // Notizen was added after Pendeln: 7 and 8 keep their meaning, Einstellungen moves to 9 (and stays on the comma key).
+    expect(shortcutFor({ key: '8' })).toEqual({ type: 'view', view: 'notes' })
+    expect(shortcutFor({ key: '9' })).toEqual({ type: 'view', view: 'settings' })
     const views = visibleViews(true)
     expect(shortcutFor({ key: '7' }, false, views)).toEqual({ type: 'view', view: 'mensa' })
-    expect(shortcutFor({ key: '9' }, false, views)).toEqual({ type: 'view', view: 'settings' })
+    expect(shortcutFor({ key: '9' }, false, views)).toEqual({ type: 'view', view: 'notes' })
+    expect(shortcutFor({ key: ',' }, false, views)).toEqual({ type: 'view', view: 'settings' })
   })
   it('g l opens the Mensa only while it is on', () => {
     expect(shortcutFor({ key: 'l' }, true)).toBeNull()

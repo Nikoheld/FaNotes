@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
-import { allEntries, weekMonday } from './lib/agenda'
+import { weekMonday } from './lib/agenda'
+import { useEntries } from './vault/entries'
+import { useVault } from './vault/store'
 import { courseSummaries } from './lib/grades'
 import { dateLabel } from './lib/i18n'
 import { kantiPalette, paletteVariables } from './lib/palette'
@@ -19,6 +21,7 @@ const Absences = lazy(() => import('./views/Absences').then((module) => ({ defau
 const Agenda = lazy(() => import('./views/Agenda').then((module) => ({ default: module.Agenda })))
 const Mensa = lazy(() => import('./views/Mensa').then((module) => ({ default: module.Mensa })))
 const Grades = lazy(() => import('./views/Grades').then((module) => ({ default: module.Grades })))
+const Notes = lazy(() => import('./views/Notes').then((module) => ({ default: module.Notes })))
 const Settings = lazy(() => import('./views/Settings').then((module) => ({ default: module.Settings })))
 const Timetable = lazy(() => import('./views/Timetable').then((module) => ({ default: module.Timetable })))
 const Updates = lazy(() => import('./views/Updates').then((module) => ({ default: module.Updates })))
@@ -28,7 +31,7 @@ const ViewLoading = () => <div className="loading"><span className="spinner" /><
 /** Where a new group starts in the sidebar: school, on the way, then the settings at the bottom. */
 const NAV_CLASS: Partial<Record<View, string>> = { timetable: 'nav-group', commute: 'nav-group', settings: 'nav-end' }
 
-const ICONS: Record<View, IconName> = { today: 'today', timetable: 'timetable', grades: 'grades', agenda: 'agenda', absences: 'absences', updates: 'updates', mensa: 'restaurant', commute: 'train', settings: 'settings' }
+const ICONS: Record<View, IconName> = { today: 'today', timetable: 'timetable', grades: 'grades', agenda: 'agenda', absences: 'absences', updates: 'updates', mensa: 'restaurant', commute: 'train', notes: 'note', settings: 'settings' }
 
 /** The theme as CSS variables on the root, following the system light/dark switch for "system". */
 const useTheme = () => {
@@ -106,8 +109,9 @@ const CommandPalette = ({ onClose }: { onClose: () => void }) => {
   const { t, data, language, prefs } = kanti
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
-  const entries = useMemo(() => allEntries(data.snapshot), [data.snapshot])
-  const courses = useMemo(() => courseSummaries(data.snapshot?.grades || []), [data.snapshot])
+  const entries = useEntries()
+  const { own } = useVault()
+  const courses = useMemo(() => courseSummaries(data.snapshot?.grades || [], { book: own.book }), [data.snapshot, own.book])
   const today = zurichToday()
   const hits = useMemo(() => search(query, { entries, courses, snapshot: data.snapshot, today, views: visibleViews(prefs.showMensa).map((view) => ({ id: view, title: t[view] })) }), [query, entries, courses, data.snapshot, today, t, prefs.showMensa])
   const open = (hit: Hit) => {
@@ -254,7 +258,7 @@ export const App = () => {
     )
   }
 
-  const views: Record<View, ComponentType> = { today: Today, timetable: Timetable, grades: Grades, agenda: Agenda, absences: Absences, updates: Updates, mensa: Mensa, commute: Commute, settings: Settings }
+  const views: Record<View, ComponentType> = { today: Today, timetable: Timetable, grades: Grades, agenda: Agenda, absences: Absences, updates: Updates, mensa: Mensa, commute: Commute, notes: Notes, settings: Settings }
   const Current = views[route.view]
   const status = data.status
   return (

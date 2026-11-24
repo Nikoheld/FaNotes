@@ -20,6 +20,9 @@
       "vite/client"
     ],
     "paths": {
+      "@sync/*": [
+        "../../fanotes/src/lib/sync/*"
+      ],
       "@shared/schulnetz-logic": [
         "./src/types/schulnetz-logic.d.ts"
       ]
