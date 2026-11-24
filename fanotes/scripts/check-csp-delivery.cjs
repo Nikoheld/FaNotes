@@ -71,8 +71,14 @@ const directives = (policy) => new Map(policy.split(';').map((entry) => entry.tr
   assert.match(main, /installSecurityHeaders\(currentSession,/u, 'installSecurityPolicy installs the shared policy on the default session')
   assert.doesNotMatch(main, /['"]Content-Security-Policy['"]/u, 'no second, hand-written policy in main.cjs')
   assert.match(main, /installSecurityPolicy\(\)\s*registerIpcHandlers\(\)\s*await createWindow\(\)/u, 'the policy is installed before the first window is created')
-  assert.equal([...main.matchAll(/new BrowserWindow\(/gu)].length, 2, 'two windows exist; both use the default session')
-  assert.doesNotMatch(main, /partition\s*:/u, 'a window with its own partition would escape the default-session headers')
+  assert.equal([...main.matchAll(/new BrowserWindow\(/gu)].length, 3, 'three windows exist: two use the default session, the third is the hidden note-export print window')
+  // The print window loads one generated, script-free page from a temp file. It needs its own in-memory partition,
+  // because it cancels every request except that page and data: URLs (that must not touch the app's session), and it
+  // carries its own CSP in the page (default-src none). No other window may use a partition.
+  const partitions = [...main.matchAll(/partition\s*:\s*([^,\n]+)/gu)].map((match) => match[1].trim())
+  assert.deepEqual(partitions, ['`fanotes-note-export-${id}`'], 'only the note-export print window has its own partition')
+  assert.match(main, /renderNoteHtmlPdf[\s\S]*?sandbox: true[\s\S]*?nodeIntegration: false/u, 'the print window is sandboxed without node integration')
+  assert.match(main, /onBeforeRequest\(\(details, callback\) => callback\(\{ cancel: !\(details\.url === pageUrl/u, 'the print window can load nothing but its page and data: URLs')
   const html = read('index.html')
   assert.deepEqual([...html.matchAll(/<script\b[^>]*>/giu)].filter((match) => !/\bsrc=/iu.test(match[0])).map((match) => match[0]), [], 'index.html has no inline script, the policy would block it')
   assert.ok(JSON.parse(read('package.json')).build.files.includes('electron/**/*'), 'every module in electron/ ships with the app')

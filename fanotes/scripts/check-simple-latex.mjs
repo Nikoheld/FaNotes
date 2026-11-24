@@ -145,11 +145,10 @@ try {
     assert.ok(toolbar.includes('simple-latex-tools'))
 
     const exportsHtml = renderToStaticMarkup(createElement(exportModule.EditorExportControls, {
-      onExportPdf: () => undefined,
-      onExportLatex: () => undefined,
+      onExport: () => undefined,
     }))
-    assert.ok(exportsHtml.includes('aria-label="Als PDF exportieren"'))
-    assert.ok(exportsHtml.includes('aria-label="Als LaTeX-Code exportieren"'))
+    assert.ok(exportsHtml.includes('aria-label="Exportieren …"'))
+    assert.equal(exportsHtml.includes('Als PDF exportieren'), false, 'the single export entry replaces the separate PDF button')
 
     const appSource = readFileSync(join(root, 'src/App.tsx'), 'utf8')
     const drawingSource = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
@@ -158,14 +157,12 @@ try {
     assert.match(appSource, /if \(slot === 'ink'\) return <>\{pdfSlot\}<div id=\{INK_TOOLBAR_SLOT_ID\}/)
     assert.match(appSource, /id=\{PDF_TOOLBAR_SLOT_ID\} className="pdf-toolbar-slot"/)
     assert.match(appSource, /<FormattingToolbar[\s\S]*?onInsertLatex=\{insertSimpleLatex\}/)
-    assert.match(appSource, /<EditorExportControls[\s\S]*?onExportPdf=/)
-    assert.match(appSource, /onExportLatex=/)
-    assert.match(appSource, /exportNotePdf\(/)
-    assert.match(appSource, /exportNotePdf\(current\.note/)
+    assert.match(appSource, /<EditorExportControls[\s\S]*?onExport=/)
+    assert.match(appSource, /exportNonTextNote\(/)
+    assert.match(appSource, /import\('\.\/lib\/noteExport'\)/)
     assert.match(appSource, /noteInkId\(current\.note\)/)
-    assert.match(appSource, /exportOpenCanvas\(/)
+    assert.match(appSource, /exportNonTextNoteBytes\(/)
     assert.match(appSource, /finishCanvasExport\(/)
-    assert.match(appSource, /exportNoteLatex\(/)
     assert.equal(drawingSource.includes('simple-latex-tools'), false)
     assert.equal(drawingSource.includes('EditorExportControls'), false)
     assert.equal(drawingSource.includes('onInsertLatex'), false)
@@ -182,7 +179,7 @@ try {
       canvasRed: expectedRgb[0],
       canvasPixels: expectedRgb.length,
       toolbar: toolbar.includes('aria-label="Bruch"'),
-      exports: exportsHtml.includes('Als LaTeX-Code exportieren'),
+      exports: exportsHtml.includes('Exportieren …'),
     }
   }
 

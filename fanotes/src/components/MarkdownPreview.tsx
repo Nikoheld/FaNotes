@@ -10,7 +10,7 @@ import rehypeRaw from 'rehype-raw'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import { defaultSchema, type Schema } from 'hast-util-sanitize'
+import { markdownSanitizeSchema } from '../lib/markdownSanitizeSchema'
 import type { Nodes, Root } from 'hast'
 import { renderStudyBlockHtml } from '../lib/study/registry'
 import type { StudyKind } from '../lib/study/blocks'
@@ -24,19 +24,6 @@ export type MarkdownPreviewProps = {
   resolveImage?: (src: string) => Promise<string>
   className?: string
   emptyMessage?: ReactNode
-}
-
-const markdownSanitizeSchema: Schema = {
-  ...defaultSchema,
-  attributes: {
-    ...defaultSchema.attributes,
-    '*': [...(defaultSchema.attributes?.['*'] ?? []), 'id'],
-    code: [
-      ...(defaultSchema.attributes?.code ?? []),
-      ['className', 'language-math', 'math-inline', 'math-display'],
-    ],
-    details: [...(defaultSchema.attributes?.details ?? []), 'open'],
-  },
 }
 
 function textContent(node: Nodes): string {

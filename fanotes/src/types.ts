@@ -801,6 +801,9 @@ export type FaNotesApi = {
   listNoteHistory?: (relativePath: string) => Promise<NoteHistorySnapshot[]>
   readNoteHistory?: (relativePath: string, snapshotId: string) => Promise<{ id: string; createdAt: string; content: string; companion?: string }>
   exportNotePdf?: () => Promise<{ filePath: string } | null>
+  /** Desktop only: prints a self-contained note HTML page to PDF bytes from a hidden window. */
+  renderNoteHtmlToPdf?: (payload: { id: string; html: string; title: string; pageSize: 'A4' | 'Letter'; margins: { top: number; bottom: number; left: number; right: number }; pageNumbers: boolean }) => Promise<Uint8Array>
+  cancelNoteHtmlToPdf?: (id: string) => Promise<void>
   lmStudioListModels: (baseUrl: string, apiToken?: string) => Promise<LmStudioModel[]>
   lmStudioTransform: (payload: {
     baseUrl: string
