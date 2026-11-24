@@ -14,6 +14,10 @@ name: Handwriting note opens stable
 # pinch, wheel, keyboard or button zoom, the sharp page within its budget and
 # the zoom percentage in step with the picture
 # (fanotes/scripts/check-zoom-ink-registration.mjs, about three minutes).
+# Zooming a note with 48 sections and heavy handwriting does not re-render the
+# section bands and does not restyle the bands far from the view, without a
+# main-thread task over its budget (fanotes/scripts/check-zoom-sections-perf.mjs,
+# about two minutes).
 # Never builds or publishes a release.
 on:
   pull_request:
@@ -43,6 +47,7 @@ on:
       - 'fanotes/scripts/check-text-field-position.mjs'
       - 'fanotes/scripts/check-text-field-toolbar.mjs'
       - 'fanotes/scripts/check-zoom-ink-registration.mjs'
+      - 'fanotes/scripts/check-zoom-sections-perf.mjs'
       - '.github/workflows/famd-open-stable.yml'
   workflow_dispatch:
 
@@ -88,3 +93,7 @@ jobs:
         run: npm run check:text-field-toolbar
       - name: Zooming keeps the handwriting on the paper in every frame
         run: npm run check:zoom-ink-registration
+      - name: Zooming a note with many sections and handwriting stays light
+        run: npm run check:zoom-sections-perf
+        env:
+          FANOTES_ZOOM_PERF_SLACK: '2'
