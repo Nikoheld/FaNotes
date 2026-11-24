@@ -150,12 +150,12 @@ export const WeekGrid = ({ days, today, nowMinutes, entries, selectedKey, onSele
 }
 
 /** The sticky card beside the grid: the picked entry in full, or a friendly hint. */
-export const DetailsPanel = ({ entry }: { entry: GridEntry | null }) => {
+export const DetailsPanel = ({ entry, onDone }: { entry: GridEntry | null; onDone?: () => void }) => {
   const { t, language } = useKanti()
   return (
     <aside className="column column-side details-panel">
       <Card className={`detail-card${entry ? ` kind-${entry.kind}${entry.cancelled ? ' cancelled' : ''}` : ''}`}>
-        {entry ? <EntryDetails entry={entry} t={t} language={language} /> : (
+        {entry ? <EntryDetails entry={entry} t={t} language={language} onDone={onDone} /> : (
           <div className="detail-empty">
             <span className="detail-empty-icon"><Icon name="timetable" size={22} /></span>
             <strong>{t.details}</strong>

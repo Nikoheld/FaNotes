@@ -4,7 +4,9 @@ import { zurichNow, type Clock, type Entry as AgendaEntry } from '../lib/agenda'
 import { dateLabel, markLabel, type Language, type Strings } from '../lib/i18n'
 import { markTone } from '../lib/grades'
 import { Icon, RoomPill, Tag } from '../components/ui'
+import { EntryActions, HomeworkCopy } from '../vault/ui'
 import { daysBetween } from '../lib/agenda'
+import type { HomeworkItem } from '../lib/homework'
 
 /** The Zurich clock, ticking once a minute. */
 export const useClock = (): Clock => {
@@ -34,7 +36,8 @@ export const ago = (iso: string, t: Strings) => {
 /** What the views draw of an entry; entries without an agenda event (the school's PDF) fit too. */
 type Entry = Omit<AgendaEntry, 'event'>
 
-export const kindLabel = (entry: Entry, t: Strings) => (entry.kind === 'exam' ? t.exam : entry.kind === 'appointment' ? t.appointment : t.lesson)
+export const kindLabel = (entry: Entry, t: Strings) =>
+  (entry.own?.type === 'task' ? t.task : entry.own?.type === 'event' ? t.ownEvent : entry.kind === 'exam' ? t.exam : entry.kind === 'appointment' ? t.appointment : t.lesson)
 
 /** The tags a lesson carries beyond its title: cancelled wins, otherwise the mark and the substitution. */
 export const EntryTags = ({ entry, t, detail = false }: { entry: Entry; t: Strings; detail?: boolean }) => {
@@ -74,7 +77,7 @@ export const MarkBadge = ({ mark, hidden, t, large = false }: { mark: number | n
   return <span className={`mark mark-${markTone(mark)}${large ? ' large' : ''} tabular`}>{mark == null ? '–' : markLabel(mark)}</span>
 }
 
-export const EntryDetails = ({ entry, t, language }: { entry: Entry; t: Strings; language: Language }) => (
+export const EntryDetails = ({ entry, t, language, onDone }: { entry: Entry; t: Strings; language: Language; /** Called after a change made from the details (the entry may be gone). */ onDone?: () => void }) => (
   <div className="details">
     <p className="details-kind">{kindLabel(entry, t)}</p>
     <h3 className={entry.cancelled ? 'struck' : ''}>{entry.title}</h3>
@@ -88,5 +91,30 @@ export const EntryDetails = ({ entry, t, language }: { entry: Entry; t: Strings;
     <div className="details-tags">
       <EntryTags entry={entry} t={t} detail />
     </div>
+    <EntryActions entry={entry} t={t} onDone={onDone} />
+  </div>
+)
+
+/** One school assignment: title, course and the due day. Opens its description in a dialog. */
+export const HomeworkRow = ({ item, t, language, today, onOpen }: { item: HomeworkItem; t: Strings; language: Language; today: string; onOpen: () => void }) => (
+  <button type="button" className="hw-row" onClick={onOpen}>
+    <span className="hw-main">
+      <span className="hw-title">{item.title}</span>
+      <small className="hw-meta">{[item.courseName, t.assignment].filter(Boolean).join(' · ')}</small>
+    </span>
+    {item.day ? <span className={`tag${item.day < today ? '' : item.day === today ? ' tag-accent' : ''}`}>{relativeDay(item.day, today, t, language)}</span> : null}
+  </button>
+)
+
+export const HomeworkDetails = ({ item, t, language }: { item: HomeworkItem; t: Strings; language: Language }) => (
+  <div className="details">
+    <p className="details-kind">{t.assignment}</p>
+    <h3>{item.title}</h3>
+    <dl>
+      {item.courseName ? <><dt>{t.subject}</dt><dd>{item.courseName}</dd></> : null}
+      {item.day ? <><dt>{t.date}</dt><dd>{dateLabel(item.day, language, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</dd></> : null}
+      {item.description ? <><dt>{t.note}</dt><dd>{item.description}</dd></> : null}
+    </dl>
+    <HomeworkCopy item={item} t={t} />
   </div>
 )

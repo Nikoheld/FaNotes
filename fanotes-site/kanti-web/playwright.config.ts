@@ -25,6 +25,8 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 30_000,
     env: { E2E_PORT: String(port) },
+    stdout: 'ignore',
+    stderr: 'pipe',
   },
   projects: [
     { name: 'desktop', use: { browserName: 'chromium', viewport: { width: 1440, height: 900 } } },

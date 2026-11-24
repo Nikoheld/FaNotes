@@ -1,10 +1,12 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
-import { allEntries, weekMonday } from './lib/agenda'
+import { weekMonday } from './lib/agenda'
+import { useEntries } from './vault/entries'
+import { useVault } from './vault/store'
 import { courseSummaries } from './lib/grades'
 import { dateLabel } from './lib/i18n'
 import { kantiPalette, paletteVariables } from './lib/palette'
 import { search, type Hit } from './lib/search'
-import { isTypingTarget, shortcutFor, VIEWS, type View } from './lib/shortcuts'
+import { isTypingTarget, shortcutFor, visibleViews, type View } from './lib/shortcuts'
 import { useKanti } from './state'
 import { Banner, Button, Dialog, Icon, IconButton, Kbd, Logo, type IconName } from './components/ui'
 import { ago } from './views/common'
@@ -17,7 +19,9 @@ const AdminTimetable = lazy(() => import('./views/AdminTimetable').then((module)
 const Commute = lazy(() => import('./views/Commute').then((module) => ({ default: module.Commute })))
 const Absences = lazy(() => import('./views/Absences').then((module) => ({ default: module.Absences })))
 const Agenda = lazy(() => import('./views/Agenda').then((module) => ({ default: module.Agenda })))
+const Mensa = lazy(() => import('./views/Mensa').then((module) => ({ default: module.Mensa })))
 const Grades = lazy(() => import('./views/Grades').then((module) => ({ default: module.Grades })))
+const Notes = lazy(() => import('./views/Notes').then((module) => ({ default: module.Notes })))
 const Settings = lazy(() => import('./views/Settings').then((module) => ({ default: module.Settings })))
 const Timetable = lazy(() => import('./views/Timetable').then((module) => ({ default: module.Timetable })))
 const Updates = lazy(() => import('./views/Updates').then((module) => ({ default: module.Updates })))
@@ -27,7 +31,7 @@ const ViewLoading = () => <div className="loading"><span className="spinner" /><
 /** Where a new group starts in the sidebar: school, on the way, then the settings at the bottom. */
 const NAV_CLASS: Partial<Record<View, string>> = { timetable: 'nav-group', commute: 'nav-group', settings: 'nav-end' }
 
-const ICONS: Record<View, IconName> = { today: 'today', timetable: 'timetable', grades: 'grades', agenda: 'agenda', absences: 'absences', updates: 'updates', commute: 'train', settings: 'settings' }
+const ICONS: Record<View, IconName> = { today: 'today', timetable: 'timetable', grades: 'grades', agenda: 'agenda', absences: 'absences', updates: 'updates', mensa: 'restaurant', commute: 'train', notes: 'note', settings: 'settings' }
 
 /** The theme as CSS variables on the root, following the system light/dark switch for "system". */
 const useTheme = () => {
@@ -49,7 +53,7 @@ const useTheme = () => {
 }
 
 const Onboarding = ({ onDone }: { onDone: () => void }) => {
-  const { t } = useKanti()
+  const { t, prefs } = useKanti()
   const [step, setStep] = useState(0)
   const last = step === t.onboardingTitles.length - 1
   return (
@@ -64,7 +68,7 @@ const Onboarding = ({ onDone }: { onDone: () => void }) => {
         </div>
         <h1>{t.onboardingTitles[step]}</h1>
         <p>{t.onboardingBodies[step]}</p>
-        {step === 2 ? <p className="onboarding-keys muted small"><Kbd>1</Kbd>–<Kbd>8</Kbd> {t.keyNav} · <Kbd>←</Kbd> <Kbd>→</Kbd> {t.keyWeek} · <Kbd>/</Kbd> {t.keySearch} · <Kbd>?</Kbd> {t.keyHelp}</p> : null}
+        {step === 2 ? <p className="onboarding-keys muted small"><Kbd>1</Kbd>–<Kbd>{visibleViews(prefs.showMensa).length}</Kbd> {t.keyNav} · <Kbd>←</Kbd> <Kbd>→</Kbd> {t.keyWeek} · <Kbd>/</Kbd> {t.keySearch} · <Kbd>?</Kbd> {t.keyHelp}</p> : null}
         <div className="onboarding-actions">
           <Button tone="quiet" onClick={onDone}>{t.skip}</Button>
           <Button onClick={() => (last ? onDone() : setStep(step + 1))} autoFocus>{last ? t.start : t.next}</Button>
@@ -75,10 +79,11 @@ const Onboarding = ({ onDone }: { onDone: () => void }) => {
 }
 
 const ShortcutHelp = ({ onClose }: { onClose: () => void }) => {
-  const { t } = useKanti()
+  const { t, prefs } = useKanti()
+  const views = visibleViews(prefs.showMensa)
   const rows: [string[], string][] = [
-    [['1', '…', '8'], t.keyNav],
-    [['g', 'h / s / n / p / a / m / w / e'], t.keyNav],
+    [['1', '…', String(views.length)], t.keyNav],
+    [['g', prefs.showMensa ? 'h / s / n / p / a / m / l / w / e' : 'h / s / n / p / a / m / w / e'], t.keyNav],
     [['←', '→'], t.keyWeek],
     [['↑', '↓'], t.grades],
     [['t'], t.keyToday],
@@ -94,20 +99,21 @@ const ShortcutHelp = ({ onClose }: { onClose: () => void }) => {
       <table className="shortcuts">
         <tbody>{rows.map(([keys, label]) => <tr key={keys.join() + label}><td>{keys.map((key) => (key === '…' ? ' … ' : <Kbd key={key}>{key}</Kbd>))}</td><td>{label}</td></tr>)}</tbody>
       </table>
-      <p className="muted small">{VIEWS.map((view, index) => `${index + 1} ${t[view]}`).join(' · ')}</p>
+      <p className="muted small">{views.map((view, index) => `${index + 1} ${t[view]}`).join(' · ')}</p>
     </Dialog>
   )
 }
 
 const CommandPalette = ({ onClose }: { onClose: () => void }) => {
   const kanti = useKanti()
-  const { t, data, language } = kanti
+  const { t, data, language, prefs } = kanti
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
-  const entries = useMemo(() => allEntries(data.snapshot), [data.snapshot])
-  const courses = useMemo(() => courseSummaries(data.snapshot?.grades || []), [data.snapshot])
+  const entries = useEntries()
+  const { own } = useVault()
+  const courses = useMemo(() => courseSummaries(data.snapshot?.grades || [], { book: own.book }), [data.snapshot, own.book])
   const today = zurichToday()
-  const hits = useMemo(() => search(query, { entries, courses, snapshot: data.snapshot, today, views: VIEWS.map((view) => ({ id: view, title: t[view] })) }), [query, entries, courses, data.snapshot, today, t])
+  const hits = useMemo(() => search(query, { entries, courses, snapshot: data.snapshot, today, views: visibleViews(prefs.showMensa).map((view) => ({ id: view, title: t[view] })) }), [query, entries, courses, data.snapshot, today, t, prefs.showMensa])
   const open = (hit: Hit) => {
     onClose()
     if (hit.type === 'view') kanti.navigate(hit.key as View)
@@ -152,7 +158,7 @@ const CommandPalette = ({ onClose }: { onClose: () => void }) => {
 
 const Sidebar = () => {
   const kanti = useKanti()
-  const { t, route, connections, active, data, demo } = kanti
+  const { t, route, connections, active, data, demo, prefs } = kanti
   return (
     <nav className="sidebar" aria-label="Kanti+">
       <a className="brand" href="/" onClick={(event) => { event.preventDefault(); kanti.navigate('today') }}><Logo size={36} /><span className="brand-name">Kanti+</span></a>
@@ -165,7 +171,7 @@ const Sidebar = () => {
         </label>
       ) : active ? <p className="connection-name" title={active.label}><i className={`connection-dot${data.status?.needsReauth || kanti.offline ? ' off' : ''}`} aria-hidden="true" /><span>{active.label}</span></p> : null}
       <ul className="nav">
-        {VIEWS.map((view, index) => (
+        {visibleViews(prefs.showMensa).map((view, index) => (
           <li key={view} className={NAV_CLASS[view]}>
             <a
               href={view === 'today' ? '/' : undefined}
@@ -202,6 +208,9 @@ export const App = () => {
   const pending = useRef(false)
   const pendingTimer = useRef(0)
 
+  // The Mensa view has its own public feed: it reloads on the same shortcut and button.
+  const refreshAll = () => { void kanti.refresh(); window.dispatchEvent(new CustomEvent('kanti:action', { detail: 'refresh' })) }
+
   useEffect(() => { document.documentElement.lang = kanti.language }, [kanti.language])
   useEffect(() => { document.title = phase === 'ready' ? `${t[route.view]} · Kanti+` : 'Kanti+' }, [route.view, phase, t])
 
@@ -209,7 +218,7 @@ export const App = () => {
     if (phase !== 'ready') return
     const onKey = (event: KeyboardEvent) => {
       if (document.querySelector('.backdrop, .onboarding') && event.key !== 'Escape' && !((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k')) return
-      const action = shortcutFor({ key: event.key, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey, typing: isTypingTarget(event.target) }, pending.current)
+      const action = shortcutFor({ key: event.key, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey, typing: isTypingTarget(event.target) }, pending.current, visibleViews(prefs.showMensa))
       pending.current = false
       window.clearTimeout(pendingTimer.current)
       if (action === 'g') {
@@ -224,7 +233,7 @@ export const App = () => {
         case 'view': kanti.navigate(action.view); break
         case 'search': setPalette(true); break
         case 'help': setHelp(true); break
-        case 'refresh': void kanti.refresh(); break
+        case 'refresh': refreshAll(); break
         case 'connection': kanti.cycleConnection(); break
         case 'today':
           if (route.view === 'timetable') window.dispatchEvent(new CustomEvent('kanti:action', { detail: 'today' }))
@@ -235,7 +244,7 @@ export const App = () => {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [phase, kanti, route.view])
+  }, [phase, kanti, route.view, prefs.showMensa])
 
   // The operator's upload page needs no Kanti+ session and is in no menu.
   if (route.admin === 'timetable') return <Suspense fallback={<div className="boot"><Logo size={56} /></div>}><AdminTimetable /></Suspense>
@@ -249,7 +258,7 @@ export const App = () => {
     )
   }
 
-  const views: Record<View, ComponentType> = { today: Today, timetable: Timetable, grades: Grades, agenda: Agenda, absences: Absences, updates: Updates, commute: Commute, settings: Settings }
+  const views: Record<View, ComponentType> = { today: Today, timetable: Timetable, grades: Grades, agenda: Agenda, absences: Absences, updates: Updates, mensa: Mensa, commute: Commute, notes: Notes, settings: Settings }
   const Current = views[route.view]
   const status = data.status
   return (
@@ -266,7 +275,7 @@ export const App = () => {
             <Icon name="search" size={18} /><span>{t.search}</span><Kbd>/</Kbd>
           </button>
           <div className="topbar-actions">
-            {!demo ? <IconButton icon="refresh" label={`${t.refresh} (r)`} onClick={() => void kanti.refresh()} /> : null}
+            {!demo ? <IconButton icon="refresh" label={`${t.refresh} (r)`} onClick={refreshAll} /> : null}
             <IconButton icon="keyboard" label={`${t.shortcuts} (?)`} onClick={() => setHelp(true)} />
           </div>
         </header>
@@ -286,7 +295,7 @@ export const App = () => {
         </div>
       </main>
       <nav className="bottombar" aria-label="Kanti+">
-        {VIEWS.filter((view) => view !== 'absences' && view !== 'updates').map((view) => (
+        {visibleViews(false).filter((view) => view !== 'absences' && view !== 'updates').map((view) => (
           <button type="button" key={view} className={route.view === view ? 'active' : ''} onClick={() => kanti.navigate(view)} aria-label={t[view]}>
             <Icon name={ICONS[view]} /><span>{t[view]}</span>
           </button>

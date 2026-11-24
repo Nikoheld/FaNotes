@@ -19,6 +19,7 @@ import { CLASS_CODE, MAX_PDF_BYTES, ROOM_NAME } from './class-timetables.mjs'
 import { accountAcceptsAuthKey, loadSyncAccountByEmail, syncAuthStamp, syncPreloginKdf } from './sync-api.mjs'
 import { prepareGradeNotifications, unrevealedGradeIds, webGradeView } from './schulnetz-logic.mjs'
 import { createServiceLog } from './service-log.mjs'
+import { parsePushSubscription, pushEndpointHost } from './web-push.mjs'
 
 export const KANTI_WEB_PREFIX = '/api/v1/kanti-web'
 export const SESSION_COOKIE = '__Host-kanti'
@@ -242,11 +243,35 @@ export const createKantiWebStore = (options = {}) => {
       && typeof session.fanotes.stamp === 'string' && session.fanotes.stamp.length > 0 && session.fanotes.stamp.length <= 200
     ))
 
+  // Web Push (session.push): one browser subscription per session and the connection ids it is on
+  // for. Anything that no longer matches a connection of the session is dropped whenever the session
+  // is saved, so removing a connection, an account or a sign-in also removes its subscription.
+  const pushedConnections = (session) => {
+    const push = session.push
+    if (!plainObject(push) || typeof push.endpoint !== 'string') return []
+    const ids = new Set((session.connections || []).map((connection) => connection.id))
+    return (Array.isArray(push.connections) ? push.connections : []).filter((id) => ids.has(id))
+  }
+  const pushedAccountIds = (session) => {
+    const on = new Set(pushedConnections(session))
+    return [...new Set((session.connections || []).filter((connection) => on.has(connection.id)).map((connection) => connection.accountId))]
+  }
+  const prunePush = (session) => {
+    if (session.push == null) return session
+    const connections = pushedConnections(session)
+    if (!connections.length) {
+      const { push: _gone, ...rest } = session
+      return rest
+    }
+    return connections.length === session.push.connections.length ? session : { ...session, push: { ...session.push, connections } }
+  }
+
   // Which sessions read which identity, so the app's status call does not scan the directory.
   let index = null
   const indexEntry = (session) => ({
     publicId: session.publicId,
     accountIds: [...new Set((session.connections || []).map((connection) => connection.accountId))],
+    pushAccountIds: pushedAccountIds(session),
     expiresAt: session.expiresAt,
     maxUntil: session.maxUntil,
   })
@@ -280,8 +305,9 @@ export const createKantiWebStore = (options = {}) => {
     return alive(session) ? session : null
   }
   const saveSession = async (hash, session) => {
-    await writeJson(sessionPath(hash), session)
-    ;(await loadIndex()).set(hash, indexEntry(session))
+    const kept = prunePush(session)
+    await writeJson(sessionPath(hash), kept)
+    ;(await loadIndex()).set(hash, indexEntry(kept))
   }
   const deleteSession = async (hash) => {
     await fs.rm(sessionPath(hash), { force: true })
@@ -536,6 +562,71 @@ export const createKantiWebStore = (options = {}) => {
     }
   }
 
+  // ── Web Push subscriptions ──────────────────────────────────────────────
+
+  /** Switch the connection on for this browser's subscription (a new endpoint replaces the old one). */
+  const addPush = (hash, subscription, connectionId, lang) => updateSession(hash, (session) => {
+    if (!(session.connections || []).some((connection) => connection.id === connectionId)) return null
+    const same = session.push?.endpoint === subscription.endpoint
+    const connections = same ? [...new Set([...pushedConnections(session), connectionId])] : [connectionId]
+    return {
+      ...session,
+      push: {
+        endpoint: subscription.endpoint,
+        p256dh: subscription.p256dh,
+        auth: subscription.auth,
+        lang: lang === 'en' ? 'en' : 'de',
+        connections,
+        createdAt: same && session.push.createdAt ? session.push.createdAt : now().toISOString(),
+      },
+    }
+  })
+
+  /** Switch one connection off, or the whole subscription when no connection is named. */
+  const removePush = (hash, connectionId = '') => updateSession(hash, (session) => {
+    if (!session.push) return null
+    if (!connectionId) {
+      const { push: _gone, ...rest } = session
+      return rest
+    }
+    return { ...session, push: { ...session.push, connections: (session.push.connections || []).filter((id) => id !== connectionId) } }
+  })
+
+  /** The subscription of exactly this endpoint is gone at the push service (404/410). */
+  const dropPush = (hash, endpoint) => updateSession(hash, (session) => {
+    if (session.push?.endpoint !== endpoint) return null
+    const { push: _gone, ...rest } = session
+    return rest
+  })
+
+  /** Who gets a push for this identity: every live session whose subscription is on for it. */
+  const pushTargets = async (accountId) => {
+    const out = []
+    const seen = new Set()
+    for (const [hash, entry] of await loadIndex()) {
+      if (!entry.pushAccountIds?.includes(accountId)) continue
+      if (Date.parse(entry.expiresAt) <= nowMs() || Date.parse(entry.maxUntil) <= nowMs()) continue
+      let session
+      try { session = await readSession(hash) } catch { continue }
+      if (!session?.push) continue
+      const on = new Set(pushedConnections(session))
+      for (const connection of session.connections || []) {
+        if (connection.accountId !== accountId || !on.has(connection.id)) continue
+        const key = `${session.push.endpoint}\n${connection.id}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push({
+          hash,
+          subscription: { endpoint: session.push.endpoint, p256dh: session.push.p256dh, auth: session.push.auth },
+          lang: session.push.lang === 'en' ? 'en' : 'de',
+          connectionId: connection.id,
+          label: (session.connections || []).length > 1 ? String(connection.label || '') : '',
+        })
+      }
+    }
+    return out
+  }
+
   let lastSweep = 0
   /** Drops expired sessions and pairing codes. Cheap enough to run every quarter hour on a request. */
   const sweep = async (force = false) => {
@@ -590,6 +681,10 @@ export const createKantiWebStore = (options = {}) => {
     countFor,
     revoke,
     forgetAccount,
+    addPush,
+    removePush,
+    dropPush,
+    pushTargets,
     sweep,
   }
 }
@@ -651,6 +746,8 @@ export const createKantiWebAppRoutes = (store, options = {}) => {
     countFor: (accountId) => store.countFor(accountId),
     revoke: (accountId, publicId) => store.revoke(accountId, publicId),
     forgetAccount: (accountId) => store.forgetAccount(accountId),
+    pushTargets: (accountId) => store.pushTargets(accountId),
+    dropPush: (hash, endpoint) => store.dropPush(hash, endpoint),
   }
 }
 
@@ -674,6 +771,11 @@ export const createKantiWebApi = (options = {}) => {
   const acceptsKey = options.accountAcceptsAuthKey || accountAcceptsAuthKey
   const preloginKdf = options.syncPreloginKdf || syncPreloginKdf
   const readVersion = options.readVersion || (async () => null)
+  // Web Push sender (web-push.mjs). Without it, or without its key file, the feature is off.
+  const webPush = options.webPush || null
+  const pushEnabled = async () => {
+    try { return Boolean(webPush) && await webPush.enabled() } catch { return false }
+  }
   // The operator's timetable upload: the server holds only the SHA-256 (hex) of the admin token.
   const timetables = options.timetables || null
   const adminTokenFile = options.adminTokenFile || credentialOr('kanti-admin-token', '/etc/fanotes/kanti-admin-token.sha256')
@@ -1010,6 +1112,8 @@ export const createKantiWebApi = (options = {}) => {
     createdAt: session.createdAt,
     expiresAt: session.expiresAt,
     account: session.fanotes ? 'fanotes' : null,
+    // The UI offers notifications with a closed tab only when this is true.
+    webPush: await pushEnabled(),
     connections: await Promise.all((session.connections || []).map(connectionView)),
   })
 
@@ -1043,6 +1147,44 @@ export const createKantiWebApi = (options = {}) => {
     targetId: String(change.targetId || ''),
     courseId: String(change.courseId || ''),
   })
+
+  const pushView = (session) => {
+    const ids = new Set((session.connections || []).map((connection) => connection.id))
+    const connections = (session.push && Array.isArray(session.push.connections) ? session.push.connections : []).filter((id) => ids.has(id))
+    return { enabled: true, subscribed: connections.length > 0, connections, host: connections.length ? pushEndpointHost(session.push.endpoint) : '' }
+  }
+
+  /** Subscriptions for notifications with the tab closed (retention: see fanotes-site/README.md). */
+  const pushRoute = async (request, response, session, hash, name, method) => {
+    if (!(await pushEnabled())) fail(404, 'Benachrichtigungen bei geschlossenem Tab sind hier nicht eingerichtet.')
+    if (name === 'status' && method === 'GET') {
+      send(response, 200, pushView(session))
+      return
+    }
+    if (name === 'subscribe' && method === 'POST') {
+      assertSameOrigin(request)
+      assertCsrf(request, session)
+      rate(`push:${hash}`, 30)
+      const body = await readBody(request)
+      const subscription = parsePushSubscription(body.subscription)
+      if (!subscription) fail(400, 'Dieses Abonnement wird nicht unterstützt.')
+      const connection = connectionOf(session, body.connectionId)
+      const updated = await store.addPush(hash, subscription, connection.id, body.lang)
+      send(response, 200, pushView(updated || session))
+      return
+    }
+    if (name === 'unsubscribe' && method === 'POST') {
+      assertSameOrigin(request)
+      assertCsrf(request, session)
+      rate(`push:${hash}`, 30)
+      const body = await readBody(request)
+      if (body.connectionId != null) connectionOf(session, body.connectionId)
+      const updated = await store.removePush(hash, body.connectionId == null ? '' : String(body.connectionId))
+      send(response, 200, pushView(updated || session))
+      return
+    }
+    fail(404, 'Diesen Endpunkt gibt es nicht.')
+  }
 
   const connectionRoute = async (request, response, url, session, hash, id, tail, method) => {
     const connection = connectionOf(session, id)
@@ -1260,6 +1402,12 @@ export const createKantiWebApi = (options = {}) => {
         send(response, 200, { signedIn: true, ...(await sessionView(current.session)) })
         return true
       }
+      // The public half of the VAPID key: the browser needs it to subscribe.
+      if (route === '/push/key' && method === 'GET') {
+        const publicKey = (await pushEnabled()) ? await webPush.publicKey() : ''
+        send(response, 200, { enabled: Boolean(publicKey), publicKey })
+        return true
+      }
       const { hash, session } = await authorize(request)
       rate(`session:${hash}`, 900, 60 * 1000)
       if (route === '/logout' && method === 'POST') {
@@ -1267,6 +1415,11 @@ export const createKantiWebApi = (options = {}) => {
         assertCsrf(request, session)
         await store.updateSession(hash, () => 'delete')
         send(response, 200, { signedOut: true }, [clearCookie(SESSION_COOKIE)])
+        return true
+      }
+      const pushMatch = /^\/push\/(status|subscribe|unsubscribe)$/u.exec(route)
+      if (pushMatch) {
+        await pushRoute(request, response, session, hash, pushMatch[1], method)
         return true
       }
       const timetableMatch = /^\/connections\/([^/]+)\/timetables(?:\/(class|room)\/([^/]+))?$/u.exec(route)

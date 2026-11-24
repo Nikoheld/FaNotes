@@ -289,6 +289,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var email by mutableStateOf("")
     var password by mutableStateOf("")
     var snapshot by mutableStateOf(graph.snapshot.value)
+    /** Bumps when the stored change history grew; the Updates page re-reads it. */
+    var changeTick by mutableStateOf(0)
     /** False until the cached school snapshot has been read and shown. */
     var schoolReady by mutableStateOf(false)
     /** Invented school data for app review; see CompanionGraph.demoActive(). */
@@ -386,6 +388,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         viewModelScope.launch { graph.connections.collect { connections = it } }
         // Settings or hidden grades changed in the browser and were taken over.
         viewModelScope.launch { graph.sharedChanges.collect { settings = graph.notifySettings(); unrevealedIds = graph.unrevealedGradeIds() } }
+        viewModelScope.launch { graph.historyTick.collect { changeTick = it } }
         viewModelScope.launch { graph.docSearch.status.collect { docStatus = it } }
         viewModelScope.launch { graph.snapshotReady.collect { ready -> if (ready && snapshot === graph.snapshot.value) schoolReady = true } }
         viewModelScope.launch {

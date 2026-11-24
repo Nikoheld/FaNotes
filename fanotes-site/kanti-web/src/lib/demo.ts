@@ -2,6 +2,7 @@
 // week and the coming weeks always have lessons. Nothing here is read from or sent to anywhere.
 import { addDays, weekMonday } from '@shared/schulnetz-logic'
 import type { AgendaEvent, SchoolGrade, Snapshot } from '../types'
+import type { MensaDay, MensaFeed } from './mensa'
 
 export const DEMO_ID_PREFIX = 'demo-'
 const WEEKS_BACK = 2
@@ -173,7 +174,12 @@ export const demoSnapshot = (today: string, now = new Date(`${today}T06:00:00Z`)
     absenceQuota: 30,
     absenceRemaining: 25,
     absenceParser: 2,
-    homework: [],
+    homework: [
+      { id: `${DEMO_ID_PREFIX}homework-1`, title: 'Aufgaben 4 bis 7 lösen', description: 'Buch Seite 82, Aufgaben 4 bis 7 (Demo).', dueDate: weekday(addDays(today, 1)), courseId: '', courseName: 'Mathematik' },
+      { id: `${DEMO_ID_PREFIX}homework-2`, title: 'Kapitel 3 lesen', description: 'Zusammenfassung in fünf Sätzen (Demo).', dueDate: weekday(addDays(today, 6)), courseId: '', courseName: 'Deutsch' },
+      { id: `${DEMO_ID_PREFIX}homework-3`, title: 'Vocabulary Unit 5', description: '', dueDate: weekday(addDays(today, 12)), courseId: '', courseName: 'Englisch' },
+    ],
+    teacherAbsences: { day: today, absent: ['Lehrperson A', 'Lehrperson B'], excursion: ['Lehrperson C (7.30 - 12.45 Uhr)'] },
     messages: [{ id: `${DEMO_ID_PREFIX}message-1`, title: 'Willkommen im Demo-Modus', body: 'Alle Angaben in diesem Modus sind erfunden. Kanti+ liest im Demo-Modus nichts aus Schulnetz und sendet nichts an einen Server.', at: stamp }],
     vacations: [],
     konto: [
@@ -188,4 +194,23 @@ export const demoSnapshot = (today: string, now = new Date(`${today}T06:00:00Z`)
     weekSpanStart: weeks[0],
     weekSpanEnd: addDays(weeks[weeks.length - 1], 4),
   }
+}
+
+/** Invented Mensa menus for this week and next, for demo mode. */
+export const demoMensa = (today: string, now = new Date(`${today}T06:00:00Z`)): MensaFeed => {
+  const monday = weekMonday(today)
+  const dishes = [
+    ['Gemüsecurry mit Reis', 'Kokosmilch, saisonales Gemüse', 'Vegi'],
+    ['Pouletgeschnetzeltes mit Nudeln', 'Rahmsauce', 'Daily'],
+    ['Pasta Napoli', 'Tomatensauce, Basilikum', 'Vegi'],
+    ['Fischknusperli mit Kartoffelsalat', 'Zitronen-Dip', 'Daily'],
+    ['Rösti mit Spiegelei', 'Dazu Salat', 'Vegi'],
+  ]
+  const days: MensaDay[] = [0, 1].flatMap((week) => dishes.map(([name, description, label], index) => {
+    const date = addDays(monday, week * 7 + index)
+    // The demo's second Friday is closed, to show that state.
+    if (week === 1 && index === 4) return { date, weekday: '', closed: true, note: 'Mensa geschlossen (Demo)', menus: [] }
+    return { date, weekday: '', closed: false, note: '', menus: [{ name, description, label, price: 12.5, studentPrice: 10.5 }, { name: 'Salatbuffet', description: '', label: 'Salat', price: 9, studentPrice: 7.5 }] }
+  }))
+  return { fetchedAt: now.toISOString(), stale: false, day: null, days }
 }

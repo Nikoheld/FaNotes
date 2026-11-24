@@ -451,6 +451,8 @@ data class SchulnetzChange(
     val correlation: String = "",
     /** Position in one delivery batch. Zero for school changes. */
     val sequence: Int = 0,
+    /** ISO time the server recorded the change. Blank when the payload had none. */
+    val at: String = "",
 ) {
     fun linkIds(): List<String> = targetIds.ifEmpty { listOf(targetId).filter { it.isNotBlank() } }
 }

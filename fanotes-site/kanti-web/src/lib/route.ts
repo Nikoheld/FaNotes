@@ -8,7 +8,9 @@ export const PATHS: Record<View, string> = {
   agenda: '/termine',
   absences: '/absenzen',
   updates: '/mitteilungen',
+  mensa: '/mensa',
   commute: '/pendeln',
+  notes: '/notizen',
   settings: '/einstellungen',
 }
 

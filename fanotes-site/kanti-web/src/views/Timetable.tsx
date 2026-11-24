@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { allEntries, vacationOn, weekDays, weekMonday, weekRange, weekState, addDays } from '../lib/agenda'
+import { vacationOn, weekDays, weekMonday, weekRange, weekState, addDays } from '../lib/agenda'
 import { dateLabel } from '../lib/i18n'
 import { useKanti } from '../state'
 import { Banner, Empty, IconButton, Tag } from '../components/ui'
 import { DetailsPanel, WeekGrid } from '../components/WeekGrid'
 import { isAksaConnection, readSummary, type TimetableSummary } from '../lib/timetables'
+import { useEntries } from '../vault/entries'
 import { useClock } from './common'
 import { OtherTimetables } from './OtherTimetables'
 
@@ -13,7 +14,7 @@ export const Timetable = () => {
   const kanti = useKanti()
   const { t, language, data, prefs, route, active, demo, api } = kanti
   const clock = useClock()
-  const entries = useMemo(() => allEntries(data.snapshot), [data.snapshot])
+  const entries = useEntries()
   const weeks = useMemo(() => weekRange(data.snapshot, entries, clock.today), [data.snapshot, entries, clock.today])
   const requested = route.params.get('woche') || ''
   const monday = /^\d{4}-\d{2}-\d{2}$/u.test(requested) ? weekMonday(requested) : weekMonday(clock.today)
@@ -95,7 +96,7 @@ export const Timetable = () => {
           isVacation={(day) => Boolean(vacationOn(data.snapshot, day))}
           emptyLabel={state !== 'unread' ? <Empty icon="timetable">{state === 'holiday' ? t.holiday : t.weekFree}</Empty> : null}
         />
-        <DetailsPanel entry={selected} />
+        <DetailsPanel entry={selected} onDone={() => setSelectedKey('')} />
       </div>
     </div>
   )

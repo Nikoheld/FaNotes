@@ -5,6 +5,7 @@ import { useKanti } from '../state'
 import { Banner, Button, Card, Dialog, Icon, Tag, Toggle } from '../components/ui'
 import { ago } from './common'
 import { PairingPanel } from './SignIn'
+import { VaultSettings } from '../vault/ui'
 import type { AlertSettings, Connection } from '../types'
 
 const ALERT_GROUPS: (keyof AlertSettings)[][] = [
@@ -18,7 +19,7 @@ const COMMUTE_ALERTS: (keyof AlertSettings)[] = ['commuteDelay', 'commuteCancell
 
 export const Settings = () => {
   const kanti = useKanti()
-  const { t, prefs, setPrefs, data, demo, connections, active } = kanti
+  const { t, prefs, setPrefs, data, demo, connections, active, webPush } = kanti
   const [browserPermission, setBrowserPermission] = useState(permission())
   const [adding, setAdding] = useState(false)
   const [renaming, setRenaming] = useState<Connection | null>(null)
@@ -57,7 +58,8 @@ export const Settings = () => {
         </label>
         <Toggle checked={prefs.snowfall} onChange={(value) => setPrefs({ snowfall: value })} label={t.snowfall} disabled={prefs.theme !== 'snow'} />
         <Toggle checked={prefs.showWeekend} onChange={(value) => setPrefs({ showWeekend: value })} label={kanti.language === 'de' ? 'Wochenende im Stundenplan' : 'Weekend in the timetable'} />
-        <Toggle checked={prefs.showMensa} onChange={(value) => setPrefs({ showMensa: value })} label={t.mensaSetting} />
+        <Toggle checked={prefs.showMensa} onChange={(value) => setPrefs({ showMensa: value })} label={t.mensaSetting} detail={t.mensaSettingBody} />
+        <Toggle checked={prefs.showTeacherAbsences} onChange={(value) => setPrefs({ showTeacherAbsences: value })} label={t.teacherAbsencesSetting} detail={t.teacherAbsencesSettingBody} />
         <label className="setting-row">
           <span className="setting-text">{t.language}</span>
           <select value={prefs.language} onChange={(event) => setPrefs({ language: event.target.value as 'auto' | 'de' | 'en' })}>
@@ -77,6 +79,18 @@ export const Settings = () => {
           detail={browserPermission === 'denied' ? t.browserAlertsBlocked : t.browserAlertsBody}
           disabled={browserPermission === 'unsupported' || browserPermission === 'denied' || demo}
         />
+        {webPush.available && active ? (
+          <>
+            <Toggle
+              checked={webPush.enabled.has(active.id)}
+              onChange={(on) => (on ? webPush.enable(active.id) : webPush.disable(active.id))}
+              label={t.pushClosed}
+              detail={webPush.blocked ? t.browserAlertsBlocked : connections.length > 1 ? t.pushClosedFor(active.label) : t.pushClosedBody}
+              disabled={webPush.busy || (webPush.blocked && !webPush.enabled.has(active.id))}
+            />
+            {webPush.error ? <Banner tone="danger" icon="warning">{webPush.error}</Banner> : null}
+          </>
+        ) : null}
         {linked ? (
           <>
             <p className="settings-note"><Icon name="info" size={16} />{t.alertsShared}{active ? ` (${active.label})` : ''}</p>
@@ -122,6 +136,7 @@ export const Settings = () => {
   const accountGroup = (
       <Group title={t.account} body={t.accountBody}>
         <p className="settings-note"><Icon name="info" size={16} />{t.privacyNote}</p>
+        <VaultSettings />
         <div className="link-list">
           <a href="https://fanotes.fasrv.ch/kantiplus/datenschutz/" target="_blank" rel="noopener noreferrer"><Icon name="open" size={18} /><span>{t.privacy}</span></a>
           <a href="https://fanotes.fasrv.ch/kantiplus/konto-loeschen/" target="_blank" rel="noopener noreferrer"><Icon name="open" size={18} /><span>{t.deleteAccount}</span></a>

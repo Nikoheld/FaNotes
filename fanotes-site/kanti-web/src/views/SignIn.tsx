@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiError } from '../lib/api'
-import { deriveAuthKey, kdfSupported } from '../lib/auth'
+import { deriveFromPassword, type SyncKdf } from '@sync/crypto'
+import { kdfSupported } from '../lib/auth'
 import { useKanti } from '../state'
+import { useVault } from '../vault/store'
 import { Banner, Button, Card, Icon, Logo, type IconName } from '../components/ui'
 
 /** Shows a pairing code, waits for the app to approve it, then reports how many connections came. */
@@ -105,6 +107,7 @@ export const ClaimCode = ({ onDone }: { onDone: (added: number) => void | Promis
 
 const FaNotesLogin = () => {
   const kanti = useKanti()
+  const vault = useVault()
   const { api, t } = kanti
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -116,9 +119,11 @@ const FaNotesLogin = () => {
     try {
       const { kdf } = await api.prelogin(email.trim())
       if (!kdfSupported(kdf)) throw new Error(t.error)
-      const authKey = await deriveAuthKey(password, kdf)
+      // One derivation, two halves: the auth key goes to the server, the wrapping key opens the vault and stays here.
+      const { authKey, wrappingKey } = await deriveFromPassword(password, kdf as SyncKdf)
       await api.login(email.trim(), authKey)
       setPassword('')
+      await vault.open({ email: email.trim(), authKey, wrappingKey })
       await kanti.start()
     } catch (failure) {
       setError(failure instanceof ApiError && failure.status === 401 ? t.wrongLogin : failure instanceof Error ? failure.message : t.error)

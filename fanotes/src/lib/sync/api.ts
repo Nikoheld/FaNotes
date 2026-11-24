@@ -139,7 +139,7 @@ export class SyncApi {
     return await response.json() as T
   }
 
-  private post(path: string, body: unknown, session?: SyncSession | null) {
+  private post(_path: string, body: unknown, session?: SyncSession | null) {
     return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), session }
   }
 

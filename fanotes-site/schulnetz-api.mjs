@@ -63,6 +63,7 @@ import {
   isValidFcmToken,
   readServiceAccount,
 } from './fcm.mjs'
+import { buildWebPushPayload } from './web-push-notice.mjs'
 
 const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
@@ -952,8 +953,54 @@ export const createSchulnetzRuntime = (options = {}) => {
     return result?.skipped ? result : { status: result.status, drop: result.drop, attempts: result.attempts }
   }
 
-  const ping = async (accountId, link, event, priority = 'HIGH', changes = []) => {
+  /**
+   * Web Push to the browsers (kanti-web sessions) that switched alerts on for this connection, with
+   * the same notices the app gets: `changes` is the list already filtered by the alert settings and
+   * redacted for hidden grades. Commute pings are silent data for the widget, so browsers get none.
+   * Returns one status per browser. A 404/410 removes that browser's subscription.
+   */
+  const pingWeb = async (accountId, event, priority, changes) => {
+    const sender = options.webPush
+    if (!sender || !web?.pushTargets || (event !== 'sync' && event !== 'reauth' && event !== 'reauth-soon')) return []
+    const results = []
+    try {
+      if (!(await sender.enabled())) return []
+      for (const target of await web.pushTargets(accountId)) {
+        const payload = buildWebPushPayload({ event, changes, connectionId: target.connectionId, label: target.label, lang: target.lang })
+        if (!payload) continue
+        try {
+          const grade = event === 'sync' && changes.some((change) => change.category === 'grade')
+          const high = priority === 'HIGH' || grade || event !== 'sync'
+          const result = await sender.send({
+            subscription: target.subscription,
+            payload,
+            urgency: high ? 'high' : 'normal',
+            ttl: high ? 21600 : 3600,
+            // One slot per connection (like the FCM collapse key): a newer push replaces a waiting one.
+            topic: `${event.startsWith('reauth') ? 'r' : 's'}${connectionRouteKey(accountId)}`,
+          })
+          const status = Number(result?.status)
+          results.push(Number.isInteger(status) && status >= 100 ? status : (result?.skipped ? 'skipped' : 'failed'))
+          if (result?.drop) await web.dropPush(target.hash, target.subscription.endpoint)
+        } catch (error) {
+          results.push(describePollError(error).code)
+        }
+      }
+    } catch (error) {
+      log('warn', `Web-Push fehlgeschlagen (${error?.name || 'error'})`)
+    }
+    return results
+  }
+
+  /** FCM and Web Push go out together, so neither waits for the other. `report.web` gets the browser statuses. */
+  const ping = async (accountId, link, event, priority = 'HIGH', changes = [], report = null) => {
     if (event !== 'sync' && event !== 'reauth' && event !== 'reauth-soon' && event !== 'test' && event !== 'commute') return
+    const [fcm, webResults] = await Promise.all([pingFcm(accountId, link, event, priority, changes), pingWeb(accountId, event, priority, changes)])
+    if (report) report.web = webResults
+    return fcm
+  }
+
+  const pingFcm = async (accountId, link, event, priority, changes) => {
     const tokens = (link.fcmTokens || []).filter(isValidFcmToken)
     if (!tokens.length) return []
     const results = []
@@ -1113,9 +1160,10 @@ export const createSchulnetzRuntime = (options = {}) => {
     const outbound = await claimPushKeys(resolve(accountDir(accountId), 'pushed-notices.json'), fresh)
     const priority = fcmPriorityForChanges(outbound, now())
     if (priority && push) {
-      const fcm = await ping(accountId, link, 'sync', priority, outbound)
-      // First sight of the change (the read that parsed it) to the FCM HTTP response.
-      if (detectedAt > 0) await recordPush(accountId, detectedAt, fcm, outbound.filter((change) => change.category === 'grade').length)
+      const report = {}
+      const fcm = await ping(accountId, link, 'sync', priority, outbound, report)
+      // First sight of the change (the read that parsed it) to the FCM and Web Push HTTP responses.
+      if (detectedAt > 0) await recordPush(accountId, detectedAt, fcm, outbound.filter((change) => change.category === 'grade').length, report.web)
     }
     return fresh
   }
@@ -1181,18 +1229,22 @@ export const createSchulnetzRuntime = (options = {}) => {
     await writeJson(monitorPath(accountId), monitor)
     log('info', `Noten geprüft ${accountId.slice(0, 8)} ${kind} ${ok ? 'ok' : 'fehlgeschlagen'} ${Math.round(ms)} ms`)
   }
-  const recordPush = async (accountId, seenAt, fcmStatuses, grades) => {
+  const recordPush = async (accountId, seenAt, fcmStatuses, grades, webStatuses = []) => {
     const respondedAt = now().getTime()
     const latencyMs = Math.max(0, Math.round(respondedAt - seenAt))
     const fcm = (Array.isArray(fcmStatuses) ? fcmStatuses : []).map((status) => {
       const token = typeof status === 'number' ? String(status) : String(status || 'failed')
       return /^[A-Za-z0-9_-]{1,24}$/u.test(token) ? token : 'failed'
     }).slice(0, 8)
+    const webCodes = (Array.isArray(webStatuses) ? webStatuses : []).map((status) => {
+      const token = typeof status === 'number' ? String(status) : String(status || 'failed')
+      return /^[A-Za-z0-9_-]{1,24}$/u.test(token) ? token : 'failed'
+    }).slice(0, 8)
     const monitor = await readMonitor(accountId)
     // seenAt is when this process first read the grade. respondedAt is the FCM HTTP response, not the phone.
-    monitor.pushes = [...(monitor.pushes || []), { at: new Date(seenAt).toISOString(), respondedAt: new Date(respondedAt).toISOString(), latencyMs, grades, fcm }].slice(-100)
+    monitor.pushes = [...(monitor.pushes || []), { at: new Date(seenAt).toISOString(), respondedAt: new Date(respondedAt).toISOString(), latencyMs, grades, fcm, ...(webCodes.length ? { web: webCodes } : {}) }].slice(-100)
     await writeJson(monitorPath(accountId), monitor)
-    log('info', `Push gesendet ${accountId.slice(0, 8)} ${latencyMs} ms nach Erkennung${grades ? ` (${grades} Noten)` : ''} FCM ${fcm.join(',') || 'none'}`)
+    log('info', `Push gesendet ${accountId.slice(0, 8)} ${latencyMs} ms nach Erkennung${grades ? ` (${grades} Noten)` : ''} FCM ${fcm.join(',') || 'none'}${webCodes.length ? ` Web ${webCodes.join(',')}` : ''}`)
     if (grades > 0 && latencyMs > GRADE_SLA_MS) {
       log('warn', `Noten-Push über 10 Minuten ${accountId.slice(0, 8)} ${latencyMs} ms FCM ${fcm.join(',') || 'none'}`)
     }

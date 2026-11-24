@@ -1,4 +1,5 @@
 // German first, like the app; English when the browser asks for it or the user picks it.
+import { vaultDe, vaultEn, type VaultStrings } from './i18n-vault'
 
 const de = {
   appName: 'Kanti+',
@@ -85,6 +86,9 @@ const de = {
   alerts: 'Benachrichtigungen', alertsShared: 'Diese Einstellungen gelten auch in der App.',
   browserAlerts: 'Benachrichtigungen in diesem Browser', browserAlertsBody: 'Solange Kanti+ in einem Tab offen ist.',
   browserAlertsBlocked: 'Der Browser blockiert Benachrichtigungen für diese Seite.',
+  pushClosed: 'Benachrichtigungen auch bei geschlossenem Tab',
+  pushClosedBody: 'Neue Noten und Änderungen kommen auch an, wenn Kanti+ nicht offen ist. Der Push-Dienst deines Browsers liefert sie Ende-zu-Ende verschlüsselt aus.',
+  pushClosedFor: (label: string) => `Gilt für «${label}». Der Push-Dienst deines Browsers liefert die Meldungen Ende-zu-Ende verschlüsselt aus, auch wenn Kanti+ nicht offen ist.`,
   alertNames: {
     enabled: 'Schulbenachrichtigungen', gradeNew: 'Neue Noten', gradeChanged: 'Geänderte Noten', lessonCancelled: 'Ausfälle', lessonChanged: 'Stundenplanänderungen',
     examNew: 'Neue Prüfungen', examMoved: 'Verschobene Prüfungen', examCancelled: 'Abgesagte Prüfungen', examRoom: 'Raumänderungen bei Prüfungen',
@@ -115,6 +119,16 @@ const de = {
   subjects: (count: number) => (count === 1 ? 'ein Fach' : `${count} Fächer`),
   mensa: 'Mensa', mensaClosed: 'Mensa geschlossen', mensaStudentPrice: (price: string) => `Schüler CHF ${price}`,
   mensaSetting: 'Mensa-Menü auf der Startseite',
+  mensaSettingBody: 'Zeigt unter Heute das Menü der Mensa Alte Kanti und eine Wochenansicht im Menü. Standardmässig aus.',
+  mensaWeek: 'Woche', mensaThisWeek: 'Diese Woche', mensaNextWeek: 'Nächste Woche', mensaNoMenuDay: 'Für diesen Tag wurde kein Menü veröffentlicht.',
+  mensaEmptyTitle: 'Noch kein Menü', mensaEmptyBody: 'Das Mensa-Menü erscheint hier, sobald es veröffentlicht ist. Mit «Neu laden» erneut versuchen.',
+  mensaOfflineBody: 'Es besteht keine Verbindung und kein Menü ist gespeichert. Lade neu, sobald du wieder online bist.',
+  mensaStale: 'Dieses Menü konnte nicht erneuert werden und ist eventuell nicht mehr aktuell.',
+  mensaUpdated: (when: string) => `Menü aktualisiert ${when}`, offlineUpdated: (when: string) => `Offline · Stand ${when}`,
+  teacherAbsencesSetting: 'Abwesende Lehrpersonen auf Heute',
+  teacherAbsencesSettingBody: 'Zeigt die Lehrpersonen, die laut Schulnetz-Startseite heute abwesend oder auf Exkursion sind. Standardmässig aus.',
+  teacherAbsences: 'Abwesende Lehrpersonen', teacherAbsencesNone: 'Heute keine Abwesenheiten gemeldet', teacherOnExcursion: (names: string) => `auf Exkursion: ${names}`,
+  schoolAssignments: 'Schulaufträge', noSchoolAssignments: 'Keine Schulaufträge', assignment: 'Schulauftrag', dueOn: (when: string) => `Fällig: ${when}`,
   ownMarksNote: 'Eigene Noten und Anpassungen aus der App bleiben auf dem Handy; hier zählen die Noten der Schule.',
   otherTimetables: 'Andere Klassen & Räume', backToTimetable: 'Zurück zum Stundenplan',
   classesTab: 'Klassen', roomsTab: 'Räume', pickClass: 'Klasse', pickRoom: 'Raum', classTeacher: 'Klassenlehrperson',
@@ -201,9 +215,9 @@ const de = {
   pinnedFirstCancelled: (line: string, time: string, arrival: string) => `Erste Stunde fällt aus – später: ${line || 'Zug'} ab ${time}${arrival ? `, an ${arrival}` : ''}`,
 }
 
-export type Strings = typeof de
+export type Strings = typeof de & VaultStrings
 
-const en: Strings = {
+const en: typeof de = {
   ...de,
   tagline: 'Your school day, on the big screen.',
   today: 'Today', timetable: 'Timetable', grades: 'Grades', agenda: 'Exams & events', absences: 'Absences', updates: 'Messages', settings: 'Settings',
@@ -288,6 +302,9 @@ const en: Strings = {
   alerts: 'Notifications', alertsShared: 'These settings apply in the app too.',
   browserAlerts: 'Notifications in this browser', browserAlertsBody: 'While Kanti+ is open in a tab.',
   browserAlertsBlocked: 'The browser blocks notifications for this site.',
+  pushClosed: 'Notifications even when the tab is closed',
+  pushClosedBody: 'New grades and changes arrive even when Kanti+ is not open. Your browser’s push service delivers them end-to-end encrypted.',
+  pushClosedFor: (label: string) => `Applies to “${label}”. Your browser’s push service delivers the alerts end-to-end encrypted, even when Kanti+ is not open.`,
   alertNames: {
     enabled: 'School notifications', gradeNew: 'New grades', gradeChanged: 'Changed grades', lessonCancelled: 'Cancellations', lessonChanged: 'Timetable changes',
     examNew: 'New exams', examMoved: 'Moved exams', examCancelled: 'Cancelled exams', examRoom: 'Exam room changes',
@@ -318,6 +335,16 @@ const en: Strings = {
   subjects: (count: number) => (count === 1 ? 'one subject' : `${count} subjects`),
   mensa: 'Mensa', mensaClosed: 'Mensa closed', mensaStudentPrice: (price: string) => `Students CHF ${price}`,
   mensaSetting: 'Mensa menu on the start page',
+  mensaSettingBody: "Shows today's menu of the Mensa Alte Kanti on Today and a week view in the menu. Off by default.",
+  mensaWeek: 'Week', mensaThisWeek: 'This week', mensaNextWeek: 'Next week', mensaNoMenuDay: 'No menu has been published for this day.',
+  mensaEmptyTitle: 'No menu yet', mensaEmptyBody: 'The Mensa menu will show up here as soon as it has been published. Use "Reload" to try again.',
+  mensaOfflineBody: 'There is no connection and no saved menu. Reload once you are online.',
+  mensaStale: 'This menu could not be refreshed and may be out of date.',
+  mensaUpdated: (when: string) => `Menu updated ${when}`, offlineUpdated: (when: string) => `Offline · last updated ${when}`,
+  teacherAbsencesSetting: 'Absent teachers on Today',
+  teacherAbsencesSettingBody: 'Shows the teachers the school lists as absent or on an excursion today, read from the Schulnetz start page. Off by default.',
+  teacherAbsences: 'Absent teachers', teacherAbsencesNone: 'No absences reported today', teacherOnExcursion: (names: string) => `on excursion: ${names}`,
+  schoolAssignments: 'School assignments', noSchoolAssignments: 'No school assignments', assignment: 'Assignment', dueOn: (when: string) => `Due: ${when}`,
   ownMarksNote: 'Own marks and adjustments from the app stay on the phone; here the school’s marks count.',
   otherTimetables: 'Other classes & rooms', backToTimetable: 'Back to the timetable',
   classesTab: 'Classes', roomsTab: 'Rooms', pickClass: 'Class', pickRoom: 'Room', classTeacher: 'Class teacher',
@@ -404,7 +431,7 @@ const en: Strings = {
   pinnedFirstCancelled: (line: string, time: string, arrival: string) => `First lesson is cancelled – later: ${line || 'train'} at ${time}${arrival ? `, arrives ${arrival}` : ''}`,
 }
 
-export const STRINGS = { de, en }
+export const STRINGS: { de: Strings; en: Strings } = { de: { ...de, ...vaultDe }, en: { ...en, ...vaultEn } }
 export type Language = keyof typeof STRINGS
 
 export const pickLanguage = (choice: string, browserLanguages: readonly string[] = []): Language => {

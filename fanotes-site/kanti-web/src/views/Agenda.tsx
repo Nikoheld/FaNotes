@@ -1,11 +1,15 @@
 import { useMemo, useState } from 'react'
-import { allEntries, daysBetween, weekMonday, type Entry } from '../lib/agenda'
+import { daysBetween, weekMonday, type Entry } from '../lib/agenda'
+import { useEntries } from '../vault/entries'
+import { EventDialog } from '../vault/forms'
+import { useVault } from '../vault/store'
 import { dateLabel } from '../lib/i18n'
 import { useKanti } from '../state'
-import { Card, Dialog, Empty, RoomPill, Toggle } from '../components/ui'
-import { EntryDetails, EntryTags, kindLabel, relativeDay, useClock } from './common'
+import { Button, Card, Dialog, Empty, RoomPill, Toggle } from '../components/ui'
+import { homeworkList, type HomeworkItem } from '../lib/homework'
+import { EntryDetails, EntryTags, HomeworkDetails, HomeworkRow, kindLabel, relativeDay, useClock } from './common'
 
-type Filter = 'all' | 'exam' | 'appointment'
+type Filter = 'all' | 'exam' | 'appointment' | 'homework'
 
 const groupByWeek = (entries: Entry[]) => {
   const groups = new Map<string, Entry[]>()
@@ -23,11 +27,16 @@ export const Agenda = () => {
   const [past, setPast] = useState(false)
   const [filter, setFilter] = useState<Filter>('all')
   const [selected, setSelected] = useState<Entry | null>(null)
-  const entries = useMemo(() => allEntries(data.snapshot), [data.snapshot])
+  const [homeworkOpen, setHomeworkOpen] = useState<HomeworkItem | null>(null)
+  const vault = useVault()
+  const [creating, setCreating] = useState(false)
+  const entries = useEntries()
   const pool = (kind: Entry['kind']) => entries.filter((entry) => entry.kind === kind && (past ? entry.day < clock.today : entry.day >= clock.today))
   const exams = pool('exam')
   const appointments = pool('appointment')
+  const homework = useMemo(() => homeworkList(data.snapshot?.homework, clock.today, past), [data.snapshot, clock.today, past])
   const list = useMemo(() => {
+    if (filter === 'homework') return []
     const merged = filter === 'exam' ? [...exams] : filter === 'appointment' ? [...appointments] : [...exams, ...appointments]
     merged.sort((a, b) => (a.day + a.start).localeCompare(b.day + b.start))
     return past ? merged.reverse() : merged
@@ -39,8 +48,8 @@ export const Agenda = () => {
     if (delta < 0) return relativeDay(entry.day, clock.today, t, language)
     return delta === 0 ? t.today : delta === 1 ? t.tomorrow : t.inDays(delta)
   }
-  const options: [Filter, string, number][] = [['all', t.filterAll, exams.length + appointments.length], ['exam', t.exams, exams.length], ['appointment', t.appointments, appointments.length]]
-  const emptyText = filter === 'exam' ? t.noExams : filter === 'appointment' ? t.noAppointments : `${t.noExams} ${t.noAppointments}`
+  const options: [Filter, string, number][] = [['all', t.filterAll, exams.length + appointments.length], ['exam', t.exams, exams.length], ['appointment', t.appointments, appointments.length], ...(data.snapshot?.homework?.length ? [['homework', t.schoolAssignments, homework.length] as [Filter, string, number]] : [])]
+  const emptyText = filter === 'homework' ? t.noSchoolAssignments : filter === 'exam' ? t.noExams : filter === 'appointment' ? t.noAppointments : `${t.noExams} ${t.noAppointments}`
 
   return (
     <div className="view view-agenda">
@@ -52,7 +61,10 @@ export const Agenda = () => {
             </button>
           ))}
         </div>
-        <div className="toolbar-group"><Toggle checked={past} onChange={setPast} label={t.showPast} /></div>
+        <div className="toolbar-group">
+          {vault.mode === 'ready' && vault.actions.writable && vault.own.calendarReadable ? <Button tone="outline" icon="plus" onClick={() => setCreating(true)}>{t.newEvent}</Button> : null}
+          <Toggle checked={past} onChange={setPast} label={t.showPast} />
+        </div>
       </div>
       <div className="agenda-layout">
         <div className="agenda-timeline">
@@ -87,7 +99,15 @@ export const Agenda = () => {
                 })}
               </Card>
             </section>
-          )) : <Card><Empty icon="agenda">{emptyText}</Empty></Card>}
+          )) : filter === 'homework' && homework.length ? null : <Card><Empty icon="agenda">{emptyText}</Empty></Card>}
+          {homework.length && (filter === 'all' || filter === 'homework') ? (
+            <section className="tl-week hw-section" aria-label={t.schoolAssignments}>
+              <h3 className="tl-week-head">{t.schoolAssignments}</h3>
+              <Card className="list tl-list">
+                {homework.map((item) => <HomeworkRow key={item.id} item={item} t={t} language={language} today={clock.today} onOpen={() => setHomeworkOpen(item)} />)}
+              </Card>
+            </section>
+          ) : null}
         </div>
         <aside className="agenda-side">
           <Card className="agenda-glance">
@@ -106,7 +126,9 @@ export const Agenda = () => {
           </Card>
         </aside>
       </div>
-      {selected ? <Dialog title={selected.title} onClose={() => setSelected(null)}><EntryDetails entry={selected} t={t} language={language} /></Dialog> : null}
+      {homeworkOpen ? <Dialog title={homeworkOpen.title} onClose={() => setHomeworkOpen(null)}><HomeworkDetails item={homeworkOpen} t={t} language={language} /></Dialog> : null}
+      {creating ? <EventDialog onClose={() => setCreating(false)} /> : null}
+      {selected ? <Dialog title={selected.title} onClose={() => setSelected(null)}><EntryDetails entry={selected} t={t} language={language} onDone={() => setSelected(null)} /></Dialog> : null}
     </div>
   )
 }
