@@ -1,5 +1,14 @@
 # Änderungsverlauf
 
+## 2026.11.5
+
+- Windows: Updates werden wieder zuverlässig installiert. FaNotes schliesst sich nicht mehr kurz nach dem Start, wenn der Update-Helfer nicht startet; ein fehlgeschlagenes Update wird nicht endlos wiederholt.
+- Wichtig für Windows: Wer mit 2026.11.4 oder älter in der Neustart-Schleife steckt, installiert diese Version einmal manuell (FaNotes-Setup-2026.11.5-x64.exe).
+- Rechtschreibung: Deutsch, Englisch und Französisch werden pro Notiz und pro Abschnitt automatisch erkannt, auch gemischt (z. B. Vokabellisten).
+- Neues französisches Wörterbuch für Prüfung, Vorschläge und Autokorrektur.
+- Autokorrektur ändert nur noch eindeutige Tippfehler; Wörter in Sprachen ohne Wörterbuch (z. B. Italienisch) bleiben unberührt.
+- Kanti+: Notenverlauf und Trenddiagramm, Absenzen-Karte mit allen Namen, Agenda-Filter.
+
 ## 2026.11.4
 
 - **Export.** Neuer Export-Dialog: Text-, Handschrift- und PDF-Notizen als PDF oder Word. Handschrift wird ein scharfes Vektor-PDF, PDF-Notizen behalten Handschrift und Markierungen.
