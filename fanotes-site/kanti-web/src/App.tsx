@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
-import { allEntries, weekMonday } from './lib/agenda'
+import { weekMonday } from './lib/agenda'
+import { useEntries } from './vault/entries'
+import { useVault } from './vault/store'
 import { courseSummaries } from './lib/grades'
 import { dateLabel } from './lib/i18n'
 import { kantiPalette, paletteVariables } from './lib/palette'
@@ -106,8 +108,9 @@ const CommandPalette = ({ onClose }: { onClose: () => void }) => {
   const { t, data, language, prefs } = kanti
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
-  const entries = useMemo(() => allEntries(data.snapshot), [data.snapshot])
-  const courses = useMemo(() => courseSummaries(data.snapshot?.grades || []), [data.snapshot])
+  const entries = useEntries()
+  const { own } = useVault()
+  const courses = useMemo(() => courseSummaries(data.snapshot?.grades || [], { book: own.book }), [data.snapshot, own.book])
   const today = zurichToday()
   const hits = useMemo(() => search(query, { entries, courses, snapshot: data.snapshot, today, views: visibleViews(prefs.showMensa).map((view) => ({ id: view, title: t[view] })) }), [query, entries, courses, data.snapshot, today, t, prefs.showMensa])
   const open = (hit: Hit) => {

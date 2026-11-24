@@ -128,3 +128,48 @@ export const commuteBoard = (routeId: string) => {
     trips: [cancelled, alternative], alternatives: [alternative], viaDropped: false, updatedAt: iso(0), stale: false,
   }
 }
+
+// ---- The vault: an account whose files are encrypted exactly like the apps do it ----
+
+import { deriveFromPassword, newKdf, newVaultSecret, wrapVaultSecret } from '../../../fanotes/src/lib/sync/crypto'
+import { VaultClient } from '../src/vault/client'
+import { createMemoryStore } from '../src/vault/keystore'
+import {
+  CALENDAR_NOTE_PATH, GRADE_BOOK_PATH, HOMEWORK_NOTE_PATH, emptyCalendar, serializeCalendar, serializeGradeBook, serializeHomework,
+} from '../src/vault/files'
+
+export const OWN_MARK_TITLE = 'E2E Eigene Note Zeta'
+export const TASK_TITLE = 'E2E Aufgabe Eta'
+export const EVENT_TITLE = 'E2E Termin Theta'
+export const NOTE_PATH = 'E2E Fach/E2E Notiz Iota.md'
+export const NOTE_TEXT = '# E2E Überschrift Kappa\n\nEin **fetter** Text mit [Link](https://example.test) und <script>alert(1)</script>.\n'
+
+const enc = (text: string) => new TextEncoder().encode(text)
+
+/**
+ * A FaNotes account with a real vault key (the password wraps a random vault secret), the school link and
+ * snapshot like `fanotesAccount`, and own data in the vault: one own mark, one task, one event, one note.
+ * `client` is a second device of the same account, to read back what the page wrote.
+ */
+export const vaultAccount = async (base: string, extra: Record<string, string> = {}) => {
+  const email = `e2e-${randomBytes(4).toString('hex')}@example.test`
+  const kdf = newKdf()
+  const { wrappingKey, authKey } = await deriveFromPassword(PASSWORD, kdf)
+  const vaultKeyWrap = await wrapVaultSecret(newVaultSecret(), wrappingKey)
+  const account = await request(base, {}, 'POST', '/api/v1/sync/register', { email, authKey, kdf, vaultKeyWrap, device: { name: 'E2E', platform: 'android' } })
+  const headers = { Authorization: `Bearer ${account.token}`, 'X-FaNotes-Account': account.accountId }
+  await request(base, headers, 'PUT', '/api/v1/schulnetz/link', link)
+  await request(base, headers, 'PUT', '/api/v1/schulnetz/snapshot', snapshot())
+  // The registration opened a session without the vault secret. Open the vault as a second device would.
+  const client = await VaultClient.login({ email, authKey, wrappingKey, deviceName: 'E2E Gerät' }, { origin: base, store: createMemoryStore() })
+  const tomorrow = day(1)
+  const files: Record<string, string> = {
+    [GRADE_BOOK_PATH]: serializeGradeBook({ own: [{ id: 'e2e-own-1', courseId: 'ALPHA-1', title: OWN_MARK_TITLE, mark: 6, weight: 1, date: day(-3) }], collective: [], adjustments: [], archivedCourseIds: [] }),
+    [HOMEWORK_NOTE_PATH]: serializeHomework({ publishedIds: [], tasks: [{ id: 'e2e-task-1', title: TASK_TITLE, notes: '', subject: SUBJECT, dueDate: tomorrow, dueTime: null, done: false, kind: 'homework', priority: 'normal', createdAt: '', updatedAt: '' }] }),
+    [CALENDAR_NOTE_PATH]: serializeCalendar({ ...emptyCalendar(), events: [{ id: 'e2e-event-1', calendarId: 'personal', title: EVENT_TITLE, start: `${day(0)}T16:00`, end: `${day(0)}T17:00`, allDay: false, location: '', notes: '', notePath: '', recurrence: 'none', recurrenceUntil: null, exceptionDates: [] }] }),
+    [NOTE_PATH]: NOTE_TEXT,
+    ...extra,
+  }
+  for (const [path, text] of Object.entries(files)) await client.update(path, () => enc(text))
+  return { email, client }
+}

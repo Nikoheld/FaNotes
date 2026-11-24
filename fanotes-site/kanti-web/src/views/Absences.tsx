@@ -1,9 +1,10 @@
-import { useMemo } from 'react'
-import { absenceTally, eventDate, type AbsenceEstimate } from '@shared/schulnetz-logic'
+import { eventDate, type AbsenceEstimate } from '@shared/schulnetz-logic'
 import { dateLabel, pointsLabel, type Strings } from '../lib/i18n'
 import { useKanti } from '../state'
 import { Card, Empty, Icon, Tag } from '../components/ui'
 import { QuotaRing } from '../components/charts'
+import { useProvisional } from '../vault/planned'
+import { PlannedAbsences } from '../vault/ui'
 import { useClock } from './common'
 import type { SchoolAbsence } from '../types'
 
@@ -28,7 +29,8 @@ export const Absences = () => {
   const { t, language, data } = useKanti()
   const clock = useClock()
   const snapshot = data.snapshot
-  const tally = useMemo(() => absenceTally(snapshot), [snapshot])
+  const provisional = useProvisional(clock.today)
+  const tally = provisional.tally
   const absences = [...(snapshot?.absences || [])].sort((left, right) => isoDay(right.dateFrom).localeCompare(isoDay(left.dateFrom)) || left.hourFrom.localeCompare(right.hourFrom))
   const open = absences.filter(isOpen).length
   const withPoints = tally.quota != null || absences.some((absence) => absence.pending || absence.points != null)
@@ -72,6 +74,7 @@ export const Absences = () => {
           </div>
         </aside>
       ) : null}
+      <PlannedAbsences />
       <Card className="table-card">
         {absences.length ? (
           <table>

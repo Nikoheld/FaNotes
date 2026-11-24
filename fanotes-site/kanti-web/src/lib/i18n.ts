@@ -1,4 +1,5 @@
 // German first, like the app; English when the browser asks for it or the user picks it.
+import { vaultDe, vaultEn, type VaultStrings } from './i18n-vault'
 
 const de = {
   appName: 'Kanti+',
@@ -214,9 +215,9 @@ const de = {
   pinnedFirstCancelled: (line: string, time: string, arrival: string) => `Erste Stunde fällt aus – später: ${line || 'Zug'} ab ${time}${arrival ? `, an ${arrival}` : ''}`,
 }
 
-export type Strings = typeof de
+export type Strings = typeof de & VaultStrings
 
-const en: Strings = {
+const en: typeof de = {
   ...de,
   tagline: 'Your school day, on the big screen.',
   today: 'Today', timetable: 'Timetable', grades: 'Grades', agenda: 'Exams & events', absences: 'Absences', updates: 'Messages', settings: 'Settings',
@@ -430,7 +431,7 @@ const en: Strings = {
   pinnedFirstCancelled: (line: string, time: string, arrival: string) => `First lesson is cancelled – later: ${line || 'train'} at ${time}${arrival ? `, arrives ${arrival}` : ''}`,
 }
 
-export const STRINGS = { de, en }
+export const STRINGS: { de: Strings; en: Strings } = { de: { ...de, ...vaultDe }, en: { ...en, ...vaultEn } }
 export type Language = keyof typeof STRINGS
 
 export const pickLanguage = (choice: string, browserLanguages: readonly string[] = []): Language => {

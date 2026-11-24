@@ -24,6 +24,8 @@ export interface Entry {
   marker: string
   substitute: string
   event: AgendaEvent
+  /** The student's own task or calendar event (from the vault), not a school entry. */
+  own?: { type: 'task' | 'event'; id: string; occurrence?: string }
 }
 
 export const clockMinutes = (clock: string): number | null => {
@@ -190,6 +192,8 @@ export const nextCommitment = (entries: Entry[], clock: Clock): Entry | null => 
   for (const entry of entries) {
     if (entry.day < clock.today || entry.day > horizon) continue
     if (entry.kind === 'lesson' && entry.cancelled) continue
+    // A task without a time is a day-long reminder, not what comes next.
+    if (entry.own?.type === 'task' && !entry.start) continue
     if (entry.day === clock.today) {
       const end = clockMinutes(entry.end) ?? clockMinutes(entry.start)
       if (end != null && end <= clock.minutes) continue

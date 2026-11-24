@@ -13,6 +13,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@shared/schulnetz-logic': here('../schulnetz-logic.mjs'),
+      // The FaNotes sync client's pure WebCrypto and HTTP modules (also used by the desktop app).
+      '@sync': here('../../fanotes/src/lib/sync'),
       '@brand': here('../../android/companion/docs/brand'),
       '@font': here('../../android/companion/src/main/res/font'),
       // The browser never calls the few server-only helpers (gzip, sha256, IP literals).
@@ -23,7 +25,11 @@ export default defineConfig({
       }),
     },
   },
-  server: { fs: { allow: [here('..'), here('../../android/companion')] } },
+  server: {
+    fs: { allow: [here('..'), here('../../android/companion'), here('../../fanotes/src/lib/sync')] },
+    // Dev: the page talks to the API on its own origin, like behind nginx.
+    proxy: { '/api': { target: process.env.KANTI_WEB_DEV_API || 'http://127.0.0.1:18185', changeOrigin: false } },
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

@@ -1,8 +1,11 @@
 import { useMemo, useState } from 'react'
-import { allEntries, daysBetween, weekMonday, type Entry } from '../lib/agenda'
+import { daysBetween, weekMonday, type Entry } from '../lib/agenda'
+import { useEntries } from '../vault/entries'
+import { EventDialog } from '../vault/forms'
+import { useVault } from '../vault/store'
 import { dateLabel } from '../lib/i18n'
 import { useKanti } from '../state'
-import { Card, Dialog, Empty, RoomPill, Toggle } from '../components/ui'
+import { Button, Card, Dialog, Empty, RoomPill, Toggle } from '../components/ui'
 import { homeworkList, type HomeworkItem } from '../lib/homework'
 import { EntryDetails, EntryTags, HomeworkDetails, HomeworkRow, kindLabel, relativeDay, useClock } from './common'
 
@@ -25,7 +28,9 @@ export const Agenda = () => {
   const [filter, setFilter] = useState<Filter>('all')
   const [selected, setSelected] = useState<Entry | null>(null)
   const [homeworkOpen, setHomeworkOpen] = useState<HomeworkItem | null>(null)
-  const entries = useMemo(() => allEntries(data.snapshot), [data.snapshot])
+  const vault = useVault()
+  const [creating, setCreating] = useState(false)
+  const entries = useEntries()
   const pool = (kind: Entry['kind']) => entries.filter((entry) => entry.kind === kind && (past ? entry.day < clock.today : entry.day >= clock.today))
   const exams = pool('exam')
   const appointments = pool('appointment')
@@ -56,7 +61,10 @@ export const Agenda = () => {
             </button>
           ))}
         </div>
-        <div className="toolbar-group"><Toggle checked={past} onChange={setPast} label={t.showPast} /></div>
+        <div className="toolbar-group">
+          {vault.mode === 'ready' && vault.actions.writable && vault.own.calendarReadable ? <Button tone="outline" icon="plus" onClick={() => setCreating(true)}>{t.newEvent}</Button> : null}
+          <Toggle checked={past} onChange={setPast} label={t.showPast} />
+        </div>
       </div>
       <div className="agenda-layout">
         <div className="agenda-timeline">
@@ -119,7 +127,8 @@ export const Agenda = () => {
         </aside>
       </div>
       {homeworkOpen ? <Dialog title={homeworkOpen.title} onClose={() => setHomeworkOpen(null)}><HomeworkDetails item={homeworkOpen} t={t} language={language} /></Dialog> : null}
-      {selected ? <Dialog title={selected.title} onClose={() => setSelected(null)}><EntryDetails entry={selected} t={t} language={language} /></Dialog> : null}
+      {creating ? <EventDialog onClose={() => setCreating(false)} /> : null}
+      {selected ? <Dialog title={selected.title} onClose={() => setSelected(null)}><EntryDetails entry={selected} t={t} language={language} onDone={() => setSelected(null)} /></Dialog> : null}
     </div>
   )
 }

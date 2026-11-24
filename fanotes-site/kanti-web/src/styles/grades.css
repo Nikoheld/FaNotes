@@ -133,3 +133,12 @@
   .trend-readout .trend-avg small { display: none; }
   .marks th, .marks td { padding-left: var(--s2); padding-right: var(--s2); }
 }
+
+/* Own data: the subject colour the student chose, excluded and archived rows */
+.subject-dot { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 50%; }
+.course-head h2 { display: flex; align-items: center; gap: var(--s2); }
+.excluded-row td { color: var(--muted); }
+.excluded-row .mark-title { text-decoration: line-through; }
+.archived-block { margin-top: var(--s4); padding: var(--s3) var(--s3) 0; border-top: 1px solid var(--hairline); }
+.archived-head { margin: 0; color: var(--muted); font-size: var(--text-xs); font-weight: 650; letter-spacing: 0.01em; text-transform: uppercase; }
+.course-row.archived { opacity: 0.75; }
