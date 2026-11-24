@@ -315,11 +315,19 @@ section('export', async () => {
       await sleep(800)
       const pdfNoteExport = await exportVia('pdf')
       const exported = fs.readFileSync(pdfNoteExport)
-      ok('exporting a PDF note saves the PDF itself (its pages and text), not an empty sheet', exported.equals(fs.readFileSync(path.join(profile.vault, 'Biologie', 'Blatt.pdf'))), `${exported.length} bytes`)
+      // The export is the original PDF with the user's marks drawn on; without marks it keeps the pages and text.
+      const exportedDocument = await pdfjs.getDocument({ data: new Uint8Array(exported), verbosity: 0 }).promise
+      const exportedPages = []
+      for (let number = 1; number <= exportedDocument.numPages; number += 1) {
+        const exportedPage = await exportedDocument.getPage(number)
+        const viewport = exportedPage.getViewport({ scale: 1 })
+        exportedPages.push({ landscape: viewport.width > viewport.height, text: (await exportedPage.getTextContent()).items.map((item) => item.str).join('') })
+      }
+      ok('exporting a PDF note saves the PDF itself (its pages and text), not an empty sheet', exported.subarray(0, 5).toString() === '%PDF-' && exportedPages.length === 2 && !exportedPages[0].landscape && exportedPages[1].landscape && exportedPages.every((entry) => entry.text.includes('Original')), JSON.stringify(exportedPages))
       await page.locator('button[aria-label="Weitere Notizaktionen"]').first().click()
       await page.locator('[role=menuitem][aria-label="Exportieren …"]').click()
       await dialog.waitFor({ state: 'visible', timeout: 15_000 })
-      ok('LaTeX export is not offered for a PDF note, and Word is disabled', await dialog.locator('[data-format="latex"]').count() === 0 && await dialog.locator('[data-format="docx"]').isDisabled())
+      ok('LaTeX export is not offered for a PDF note, and Word is', await dialog.locator('[data-format="latex"]').count() === 0 && await dialog.locator('[data-format="docx"]').isEnabled())
       await page.keyboard.press('Escape')
       await dialog.waitFor({ state: 'hidden', timeout: 5000 })
 

@@ -207,12 +207,13 @@ try {
     const fallback = await index.exportTextNote({ markdown: 'x ≤ 1, α→β, 日本', title: 'T' }, { ...types.DEFAULT_NOTE_EXPORT_OPTIONS, format: 'pdf' })
     assert.equal(fallback.filename, 'T.pdf')
   })
-  await test('dialog: handwriting notes offer PDF only (Word disabled with its note), text notes offer all four', async () => {
+  await test('dialog: handwriting and PDF notes offer PDF and Word (plus their own options), text notes offer all four', async () => {
     const dialogModule = await load('/src/components/NoteExportDialog.tsx')
     const render = (kind) => renderToStaticMarkup(createElement(dialogModule.NoteExportDialog, { title: 'N', kind, onExport: async () => undefined, onClose: () => undefined }))
     const ink = render('ink')
-    assert.ok(/data-format="docx"/u.test(ink) && /<button[^>]*disabled=""[^>]*data-format="docx"|<button[^>]*data-format="docx"[^>]*disabled=""/u.test(ink), 'Word is disabled for ink')
-    assert.ok(ink.includes('nur PDF für Handschrift') && !ink.includes('data-format="latex"'))
+    assert.ok(/data-format="docx"/u.test(ink) && !/<button[^>]*disabled=""[^>]*data-format="docx"|<button[^>]*data-format="docx"[^>]*disabled=""/u.test(ink), 'Word is enabled for ink')
+    assert.ok(!ink.includes('data-format="latex"') && ink.includes('Papier im Hintergrund'))
+    assert.ok(render('pdf').includes('Original ohne Anmerkungen') && !render('text').includes('Papier im Hintergrund'))
     const text = render('text')
     for (const format of ['pdf', 'docx', 'latex', 'markdown']) assert.ok(text.includes(`data-format="${format}"`), format)
     assert.ok(!/<button[^>]*disabled=""[^>]*data-format="docx"/u.test(text))
@@ -220,7 +221,7 @@ try {
   await test('options: stored values are validated', () => {
     assert.deepEqual(types.normalizeNoteExportOptions(null), types.DEFAULT_NOTE_EXPORT_OPTIONS)
     const stored = types.normalizeNoteExportOptions({ format: 'docx', pageSize: 'letter', margins: 'wide', includeTitle: false, pageNumbers: false, extra: 1 })
-    assert.deepEqual(stored, { format: 'docx', pageSize: 'letter', margins: 'wide', includeTitle: false, pageNumbers: false })
+    assert.deepEqual(stored, { format: 'docx', pageSize: 'letter', margins: 'wide', includeTitle: false, pageNumbers: false, paperBackground: false, annotations: true })
     assert.equal(types.normalizeNoteExportOptions({ format: 'exe', pageSize: 'a0' }).format, 'pdf')
   })
   await test('images: sizes are read from PNG, JPEG, GIF and WebP headers', () => {

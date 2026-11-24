@@ -12,6 +12,10 @@ export type NoteExportOptions = {
   includeTitle: boolean
   /** PDF only: a "page / pages" footer. */
   pageNumbers: boolean
+  /** Handwriting and PDF notes: draw the ruling (grid, lines, dots) behind the ink. Default off. */
+  paperBackground?: boolean
+  /** PDF notes: draw the user's ink, highlights and text boxes onto the PDF. Default on; off keeps the original. */
+  annotations?: boolean
 }
 
 export const DEFAULT_NOTE_EXPORT_OPTIONS: NoteExportOptions = {
@@ -20,6 +24,8 @@ export const DEFAULT_NOTE_EXPORT_OPTIONS: NoteExportOptions = {
   margins: 'normal',
   includeTitle: true,
   pageNumbers: true,
+  paperBackground: false,
+  annotations: true,
 }
 
 /** Page sizes in millimetres. */
@@ -55,5 +61,7 @@ export function normalizeNoteExportOptions(value: unknown): NoteExportOptions {
     margins: raw.margins === 'narrow' || raw.margins === 'wide' || raw.margins === 'normal' ? raw.margins : d.margins,
     includeTitle: typeof raw.includeTitle === 'boolean' ? raw.includeTitle : d.includeTitle,
     pageNumbers: typeof raw.pageNumbers === 'boolean' ? raw.pageNumbers : d.pageNumbers,
+    paperBackground: raw.paperBackground === true,
+    annotations: raw.annotations !== false,
   }
 }

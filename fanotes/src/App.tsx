@@ -5829,37 +5829,38 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [])
 
   // ---- Non-text notes (handwriting, PDF notes) -------------------------------------------------------------
-  // The handwriting/PDF export has its own entry point, `exportNonTextNote`. Today it keeps the old behaviour:
-  // a handwriting note is the raster PDF of the open sheet, a PDF note saves its original PDF, and Word is not
-  // offered for either (the dialog disables it). Replace the body of this function to extend those exports.
+  // A handwriting note becomes a vector PDF (or a DOCX of page pictures plus its text boxes); a PDF note is its
+  // original PDF with the user's ink, highlights and text boxes drawn onto the pages (or the untouched original).
   const exportNonTextNote = useCallback(async (
     kind: 'ink' | 'pdf',
     format: 'pdf' | 'docx',
-    _options: NoteExportOptions,
+    options: NoteExportOptions,
     current: { note: string; title: string },
   ): Promise<{ filename: string; blob: Blob; message: string } | null> => {
-    if (format !== 'pdf') throw new Error(kind === 'ink' ? 'nur PDF für Handschrift' : 'Bei PDF-Notizen nur als PDF')
-    if (kind === 'pdf') {
-      // A PDF note has no text of its own (its note text is only the marks block): export the PDF itself.
-      const pdfPath = activePathRef.current
-      if (!pdfPath) return null
-      const { loadVaultPdfBytes } = await import('./lib/pdfDocument')
-      const original = await loadVaultPdfBytes(pdfPath)
-      const copy = new Uint8Array(original.byteLength)
-      copy.set(original)
-      return { filename: `${noteExportBaseName(current.title)}.pdf`, blob: new Blob([copy], { type: 'application/pdf' }), message: 'Original-PDF gespeichert. Handschrift und Markierungen sind nicht enthalten.' }
-    }
+    const { exportNonTextNoteBytes } = await import('./lib/noteExport/nonTextNote')
+    const pdfPath = activePathRef.current ?? undefined
     // A handwriting note is the sheet on screen, with every section open.
-    const folds = editorRef.current?.captureFolds() ?? []
+    const folds = kind === 'ink' ? editorRef.current?.captureFolds() ?? [] : null
     try {
-      const pictured = await drawingBoardRef.current?.exportOpenCanvas(current.title)
-      if (!pictured) throw new Error('PDF-Export fehlgeschlagen.')
-      const copy = new Uint8Array(pictured.byteLength)
-      copy.set(pictured)
-      return { filename: `${noteExportBaseName(current.title)}.pdf`, blob: new Blob([copy], { type: 'application/pdf' }), message: 'PDF gespeichert.' }
+      const bytes = await exportNonTextNoteBytes(kind, format, options, {
+        board: drawingBoardRef.current,
+        pdfPath,
+        note: current.note,
+        title: current.title,
+      })
+      const copy = new Uint8Array(bytes.byteLength)
+      copy.set(bytes)
+      const docx = format === 'docx'
+      const type = docx ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/pdf'
+      const original = kind === 'pdf' && format === 'pdf' && options.annotations === false
+      return {
+        filename: `${noteExportBaseName(current.title)}.${docx ? 'docx' : 'pdf'}`,
+        blob: new Blob([copy], { type }),
+        message: docx ? 'Word-Dokument gespeichert.' : original ? 'Original-PDF gespeichert. Handschrift und Markierungen sind nicht enthalten.' : kind === 'pdf' ? 'PDF mit Handschrift und Markierungen gespeichert.' : 'PDF gespeichert.',
+      }
     } finally {
-      editorRef.current?.restoreFolds(folds)
-      drawingBoardRef.current?.finishCanvasExport()
+      if (folds) editorRef.current?.restoreFolds(folds)
+      if (kind === 'ink') drawingBoardRef.current?.finishCanvasExport()
     }
   }, [])
 

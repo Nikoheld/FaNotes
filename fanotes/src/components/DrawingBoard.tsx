@@ -66,6 +66,8 @@ import { mountPenPointer } from '../lib/penPointer'
 import { clampPaperSquareMm } from '../lib/paperSquare'
 import { beautifyInk, beautifyPaperStep, blendStrokePoints, isBeautifyCandidate, normalizeBeautifyStrength } from '../lib/inkBeautify'
 import { pdfFromRgbaPages, type CanvasPdfPage } from '../lib/canvasPdf'
+import type { NoteExportOptions } from '../lib/noteExport/types'
+import type { PdfNoteMarksSnapshot } from '../lib/noteExport/pdfNote'
 import { rasterizePaperLayers, scrollPaperTo, waitForPaperPaint } from '../lib/canvasSnapshot'
 import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
 import { TextToHandwritingDialog } from './TextToHandwritingDialog'
@@ -860,6 +862,10 @@ export type DrawingBoardHandle = {
   applySupportTool?: (tool: string) => void
   /** Picture of the open sheet. Null when the page cannot be drawn. */
   exportOpenCanvas: (pdfTitle?: string) => Promise<Uint8Array | null>
+  /** Vector PDF or DOCX of the open sheet (strokes as paths, text boxes as real text). Null when it cannot be built. */
+  exportInkDocument: (format: 'pdf' | 'docx', options: NoteExportOptions, documentTitle?: string) => Promise<Uint8Array | null>
+  /** Ink, text boxes and page boxes of a PDF note, for drawing them onto the PDF's own pages. */
+  exportPdfNoteMarks: () => Promise<PdfNoteMarksSnapshot | null>
   /** Paint the restored sheet once heading folds are back. */
   finishCanvasExport: () => void
 }
@@ -7801,7 +7807,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
    * model is put back before this resolves. A save waits until
    * `finishCanvasExport`, after the editor has restored heading folds.
    */
-  const exportOpenCanvas = useCallback(async (pdfTitle?: string): Promise<Uint8Array | null> => {
+  const runOpenSheet = useCallback(async <T,>(
+    pdfTitle?: string,
+    sheetWork?: (sheet: { paper: HTMLElement; cssWidth: number; cssHeight: number }) => Promise<T | null>,
+    /** When the sheet work fails, paint the page picture instead (PDF only). */
+    pictureFallback = false,
+  ): Promise<T | null> => {
     if (exportingCanvasRef.current) return null
     const paper = resolvePaperElement()
     const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
@@ -7938,6 +7949,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const planeColor = plane ? getComputedStyle(plane).backgroundColor : ''
       const scrollerColor = getComputedStyle(scroller).backgroundColor
       const fill = opaque(paperColor) ? paperColor : opaque(planeColor) ? planeColor : opaque(scrollerColor) ? scrollerColor : '#ffffff'
+      if (sheetWork) {
+        let built: T | null = null
+        try {
+          built = await sheetWork({ paper, cssWidth, cssHeight })
+        } catch (error) {
+          if (!pictureFallback) throw error
+          console.error('Vektor-Export fehlgeschlagen, die Seite wird als Bild exportiert.', error)
+        }
+        if (built || !pictureFallback) return built
+      }
       const pages: CanvasPdfPage[] = []
       let y = 0
       while (y < cssHeight - 0.5 && pages.length < 200) {
@@ -8001,7 +8022,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         y += regionH
       }
       if (!pages.length) return null
-      return await pdfFromRgbaPages(pages, pdfTitle || title)
+      return await pdfFromRgbaPages(pages, pdfTitle || title) as T
     } catch {
       return null
     } finally {
@@ -8012,6 +8033,39 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       })
     }
   }, [applyInkExtentStyles, cancelInkPaint, finishCanvasExport, paperStyle, resolvePaperElement, settings.paperSquareMm, settings.smoothing, title, toggleSection])
+
+  const exportOpenCanvas = useCallback((pdfTitle?: string) => runOpenSheet<Uint8Array>(pdfTitle), [runOpenSheet])
+
+  /** Stroke list as the screen paints it: stamps carry their path data. */
+  const exportStrokes = useCallback(() => strokesRef.current.map((stroke) => ({ ...stroke, symbolPaths: placedSymbolPaths(stroke) })), [])
+
+  const exportInkDocument = useCallback((format: 'pdf' | 'docx', options: NoteExportOptions, documentTitle?: string) => runOpenSheet<Uint8Array>(title, async ({ paper, cssWidth, cssHeight }) => {
+    const { buildInkDocument } = await import('../lib/noteExport/inkDocument')
+    return buildInkDocument(format, options, {
+      paper,
+      title: documentTitle ?? title,
+      width: cssWidth,
+      height: cssHeight,
+      strokes: exportStrokes(),
+      fields: textFieldsRef.current,
+      smoothing: settings.smoothing,
+      paperStyle,
+      squareMm: clampPaperSquareMm(settings.paperSquareMm),
+    })
+  }, format === 'pdf'), [exportStrokes, paperStyle, runOpenSheet, settings.paperSquareMm, settings.smoothing, title])
+
+  const exportPdfNoteMarks = useCallback(() => runOpenSheet<PdfNoteMarksSnapshot>(title, async ({ paper, cssWidth, cssHeight }) => {
+    const { captureTextFields, capturePdfPageBoxes } = await import('../lib/noteExport/sheetCapture')
+    const fields = captureTextFields(paper, textFieldsRef.current)
+    return {
+      paperWidth: cssWidth,
+      paperHeight: cssHeight,
+      strokes: exportStrokes(),
+      smoothing: settings.smoothing,
+      pages: capturePdfPageBoxes(paper),
+      fields: fields.map((field) => ({ id: field.id, page: field.page, left: field.left, top: field.top, width: field.width, fontSize: field.fontSize, color: field.color, bold: field.bold, text: field.text })),
+    }
+  }), [exportStrokes, runOpenSheet, settings.smoothing, title])
 
   const saveDrawing = useCallback((insertAfterSave: boolean, silent = false) => {
     // Every board save comes through here: autosave, unmount, retry, the
@@ -8174,8 +8228,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setGraphPanelOpen(false)
     },
     exportOpenCanvas,
+    exportInkDocument,
+    exportPdfNoteMarks,
     finishCanvasExport,
-  }), [drawingPayload, exportOpenCanvas, finishCanvasExport, inkLoadBlocksSave, inkMode, inkRecordExists, restoreUnmovedSelection, setDirty, tool, waitForCanvasExport, writeInkPage])
+  }), [drawingPayload, exportInkDocument, exportOpenCanvas, exportPdfNoteMarks, finishCanvasExport, inkLoadBlocksSave, inkMode, inkRecordExists, restoreUnmovedSelection, setDirty, tool, waitForCanvasExport, writeInkPage])
 
   useEffect(() => () => {
     if (saveRetryTimerRef.current !== null) window.clearTimeout(saveRetryTimerRef.current)

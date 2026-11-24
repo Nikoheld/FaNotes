@@ -64,11 +64,8 @@ export function NoteExportDialog({ title, kind, onExport, onClose }: NoteExportD
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
 
-  // Until handwriting and PDF notes can be written as Word files, they only export as PDF.
-  const inkDocxBlocked = kind !== 'text'
-  const docxBlockedNote = kind === 'ink' ? 'nur PDF für Handschrift' : 'Bei PDF-Notizen nur als PDF'
   const formats = kind === 'text' ? FORMAT_CHOICES : FORMAT_CHOICES.filter((choice) => choice.id === 'pdf' || choice.id === 'docx')
-  const effective: NoteExportOptions = inkDocxBlocked && options.format === 'docx' ? { ...options, format: 'pdf' } : options
+  const effective: NoteExportOptions = options
   const paged = effective.format === 'pdf' || effective.format === 'docx'
   const current = formats.find((choice) => choice.id === effective.format)
 
@@ -133,7 +130,6 @@ export function NoteExportDialog({ title, kind, onExport, onClose }: NoteExportD
             <legend>Format</legend>
             <div className="note-export-dialog__choices" role="radiogroup" aria-label="Format">
               {formats.map((choice) => {
-                const blocked = inkDocxBlocked && choice.id === 'docx'
                 return (
                   <button
                     key={choice.id}
@@ -141,8 +137,6 @@ export function NoteExportDialog({ title, kind, onExport, onClose }: NoteExportD
                     role="radio"
                     aria-checked={effective.format === choice.id}
                     className={effective.format === choice.id ? 'is-active' : ''}
-                    disabled={blocked}
-                    title={blocked ? docxBlockedNote : undefined}
                     data-format={choice.id}
                     onClick={() => patch({ format: choice.id })}
                   >
@@ -151,7 +145,6 @@ export function NoteExportDialog({ title, kind, onExport, onClose }: NoteExportD
                 )
               })}
             </div>
-            {inkDocxBlocked && <small>{docxBlockedNote}</small>}
             {current && <small className="note-export-dialog__hint">{current.hint}</small>}
           </fieldset>
           <fieldset className="note-export-dialog__group" disabled={busy || !paged}>
@@ -174,13 +167,25 @@ export function NoteExportDialog({ title, kind, onExport, onClose }: NoteExportD
           <fieldset className="note-export-dialog__group" disabled={busy}>
             <legend>Inhalt</legend>
             <label className="note-export-dialog__check">
-              <input type="checkbox" checked={effective.includeTitle} disabled={!paged || kind !== 'text'} onChange={(event) => patch({ includeTitle: event.target.checked })} />
+              <input type="checkbox" checked={effective.includeTitle} disabled={!paged || kind === 'pdf'} onChange={(event) => patch({ includeTitle: event.target.checked })} />
               Titel der Notiz als Überschrift
             </label>
             <label className="note-export-dialog__check">
               <input type="checkbox" checked={effective.pageNumbers} disabled={effective.format !== 'pdf'} onChange={(event) => patch({ pageNumbers: event.target.checked })} />
               Seitenzahlen unten (nur PDF)
             </label>
+            {kind === 'ink' && (
+              <label className="note-export-dialog__check">
+                <input type="checkbox" checked={effective.paperBackground === true} onChange={(event) => patch({ paperBackground: event.target.checked })} />
+                Kariertes oder liniertes Papier im Hintergrund
+              </label>
+            )}
+            {kind === 'pdf' && (
+              <label className="note-export-dialog__check">
+                <input type="checkbox" checked={effective.annotations !== false} onChange={(event) => patch({ annotations: event.target.checked })} />
+                Handschrift, Markierungen und Textfelder einfügen (aus: Original ohne Anmerkungen)
+              </label>
+            )}
             {paged && <small>Der Export ist immer hell, auch im dunklen Design.</small>}
           </fieldset>
           {busy && <p className="note-export-dialog__progress" role="status"><span className="note-export-dialog__spinner" aria-hidden="true" />Exportiere …</p>}

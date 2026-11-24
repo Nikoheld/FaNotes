@@ -12,6 +12,7 @@ on:
       - 'fanotes/electron/**'
       - 'fanotes/scripts/check-desktop-untested-flows.mjs'
       - 'fanotes/scripts/check-note-export*.mjs'
+      - 'fanotes/scripts/check-ink-*export.mjs'
       - 'fanotes/scripts/electron-test-stub.cjs'
       - 'fanotes/scripts/lib/desktop-flow.mjs'
       - '.github/workflows/desktop-flows.yml'
@@ -53,3 +54,5 @@ jobs:
         run: npm run check:note-export-unit
       - name: Note export (PDF and Word through the real dialog)
         run: npm run check:note-export || { echo "::warning::note export check failed once; retrying"; npm run check:note-export; }
+      - name: Ink and PDF note export (vector PDF, DOCX)
+        run: npm run check:ink-vector-export && (npm run check:ink-export || { echo "::warning::ink export check failed once; retrying"; npm run check:ink-export; })
