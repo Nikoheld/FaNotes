@@ -466,6 +466,7 @@ function PdfPage({
     <article
       className={`pdf-note-page ${mounted ? 'is-visible' : 'is-virtualized'} ${active ? 'is-current' : ''}`}
       data-pdf-page={number}
+      data-pdf-view-rotation={rotation}
       ref={hostRef}
       style={{ aspectRatio: `1 / ${ratio}` }}
     >

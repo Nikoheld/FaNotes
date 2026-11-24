@@ -5837,15 +5837,23 @@ export default function App({ startupBootstrap }: AppProps) {
     const inkNote = Boolean(noteInkId(current.note))
     const pdfPath = activePathRef.current
     if (pdfPath && isPdfNotePath(pdfPath)) {
-      // A PDF note has no text of its own (its note text is only the marks block): export the PDF itself
-      // instead of an empty text sheet.
+      // A PDF note has no text of its own (its note text is only the marks block): export the PDF itself,
+      // with the user's highlights, ink and text boxes drawn onto its pages.
       try {
-        const { loadVaultPdfBytes } = await import('./lib/pdfDocument')
-        const original = await loadVaultPdfBytes(pdfPath)
-        const copy = new Uint8Array(original.byteLength)
-        copy.set(original)
+        const [{ exportNonTextNoteBytes }, { DEFAULT_NOTE_EXPORT_OPTIONS }] = await Promise.all([
+          import('./lib/noteExport/nonTextNote'),
+          import('./lib/noteExport/types'),
+        ])
+        const bytes = await exportNonTextNoteBytes('pdf', 'pdf', DEFAULT_NOTE_EXPORT_OPTIONS, {
+          board: drawingBoardRef.current,
+          pdfPath,
+          note: current.note,
+          title: current.title,
+        })
+        const copy = new Uint8Array(bytes.byteLength)
+        copy.set(bytes)
         saveExportFile(`${noteExportBaseName(current.title)}.pdf`, new Blob([copy], { type: 'application/pdf' }))
-        toast('Original-PDF gespeichert. Handschrift und Markierungen sind nicht enthalten.', 'info')
+        toast('PDF mit Handschrift und Markierungen gespeichert.', 'success')
       } catch (error) {
         toast(error instanceof Error ? error.message : 'PDF-Export fehlgeschlagen.', 'error')
       }
@@ -5855,7 +5863,9 @@ export default function App({ startupBootstrap }: AppProps) {
     try {
       let bytes: Uint8Array
       if (inkNote) {
-        const pictured = await drawingBoardRef.current?.exportOpenCanvas(current.title)
+        const { DEFAULT_NOTE_EXPORT_OPTIONS } = await import('./lib/noteExport/types')
+        // Vector PDF; the board falls back to the page picture when it cannot read the sheet.
+        const pictured = await drawingBoardRef.current?.exportInkDocument('pdf', DEFAULT_NOTE_EXPORT_OPTIONS)
         if (!pictured) throw new Error('PDF-Export fehlgeschlagen.')
         bytes = pictured
       } else {

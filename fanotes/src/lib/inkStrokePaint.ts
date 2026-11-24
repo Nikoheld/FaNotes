@@ -548,6 +548,22 @@ export const translucentPassAlphas = (
   return brushPasses(inkBrushOf(stroke)).map((pass) => opacity * pass.alpha)
 }
 
+/**
+ * Brush, stroke opacity and stacked passes of a stroke, for painters that do not
+ * use a canvas (the vector note export). The same tables the canvas paint uses.
+ */
+export const inkBrushPlan = (
+  stroke: Pick<InkPaintStroke, 'purpose' | 'brush' | 'opacity'>,
+) => {
+  const brush = inkBrushOf(stroke)
+  return {
+    brush,
+    opacity: inkOpacityOf(stroke),
+    passes: brush === 'calligraphy' ? OPAQUE_PASS : brushPasses(brush),
+    markerLike: markerBrush(brush),
+  }
+}
+
 type InkScratchCanvas = { width: number; height: number; getContext: (kind: '2d') => InkPaintContext | null }
 let scratchCanvas: InkScratchCanvas | null = null
 let scratchContext: InkPaintContext | null = null
