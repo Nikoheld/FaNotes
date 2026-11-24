@@ -122,13 +122,14 @@ export type PaperViewController = Pick<PaperViewApi, 'zoomBy' | 'zoomTo' | 'rota
   /**
    * The zoom on screen, frame by frame: called after every preview frame of a
    * wheel or pinch zoom (`preview` true, the sheet is a compositor scale of
-   * the committed camera) and once when the gesture ends (`preview` false).
+   * the committed camera; `settleMs` is how long the preview waits for a next
+   * step before it commits) and once when the gesture ends (`preview` false).
    * The committed camera still comes through `subscribe`.
    */
   subscribeLiveZoom: (listener: PaperLiveZoomListener) => () => void
 }
 
-export type PaperLiveZoomListener = (zoom: number, preview: boolean) => void
+export type PaperLiveZoomListener = (zoom: number, preview: boolean, settleMs: number) => void
 
 /** Longest the sheet stays hidden while the remembered camera is applied. */
 const PAPER_VIEW_REVEAL_CAP_MS = 450
@@ -233,8 +234,8 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   const noteTextMissRef = useRef(false)
   const commitZoomGestureRef = useRef(() => {})
   const liveZoomListenersRef = useRef(new Set<PaperLiveZoomListener>())
-  const notifyLiveZoomRef = useRef((zoom: number, preview: boolean) => {
-    for (const listener of [...liveZoomListenersRef.current]) listener(zoom, preview)
+  const notifyLiveZoomRef = useRef((zoom: number, preview: boolean, settleMs = 0) => {
+    for (const listener of [...liveZoomListenersRef.current]) listener(zoom, preview, settleMs)
   })
   const cancelZoomGestureRef = useRef(() => {})
   const pushZoomGestureRef = useRef<(factor: number, origin: { x: number; y: number }) => void>(() => {})
@@ -1033,13 +1034,13 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       notifyLiveZoomRef.current(viewRef.current.zoom, false)
       return
     }
-    notifyLiveZoomRef.current(gesture.zoom, true)
     // No guard check here: reading the line's offset each preview frame
     // forces a layout. CodeMirror's re-measure resizes the text, and the
     // guard's ResizeObserver catches that before paint.
     clearZoomGestureClock()
     const settleMs = zoomGestureSettleMsRef.current
     zoomGestureSettleMsRef.current = PAPER_ZOOM_GESTURE_SETTLE_MS
+    notifyLiveZoomRef.current(gesture.zoom, true, settleMs)
     zoomGestureTimerRef.current = window.setTimeout(() => {
       zoomGestureTimerRef.current = 0
       zoomGestureCommitFrameRef.current = window.requestAnimationFrame(() => {

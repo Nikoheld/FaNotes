@@ -242,7 +242,7 @@ const runOnce = () => {
   // settle re-plans it around the visible sheet before the sharp repaint.
   assert.match(board, /planInkWindow\(/)
   assert.match(board, /placeInkWindow\(/)
-  assert.match(board, /const settleZoomedInk = useCallback\(\(repaint = false\) => \{\n    if \(activeStrokeRef\.current\) return\n[\s\S]{0,120}previewRasterZoomRef\.current = null\n    planInkWindowNow\(true\)\n    canvasQualityKeyRef\.current = ''\n[\s\S]{0,260}if \(repaint\) committedCanvasDirtyRef\.current = true\n    redraw\(true\)/)
+  assert.match(board, /const settleZoomedInk = useCallback\(\(repaint = false\) => \{\n[\s\S]{0,200}previewRasterZoomRef\.current = null\n    if \(activeStrokeRef\.current\) return\n    planInkWindowNow\(true\)\n    canvasQualityKeyRef\.current = ''\n[\s\S]{0,260}if \(repaint\) committedCanvasDirtyRef\.current = true\n    redraw\(true\)/)
   // The committed canvas takes the box of a slice only together with that
   // slice's bitmap (fanotes/scripts/check-zoom-ink-registration.mjs drives it):
   // the slice planner never moves the canvas, the paint does.

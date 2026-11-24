@@ -84,6 +84,7 @@ import { decodeInkHistory, encodeInkHistory, type EncodedInkHistory } from '../l
 import { expandPackedStroke, frameBudgetOpen, INK_OPEN_ONE_PASS_POINTS, inkPageIsHeavy, packedInkPoints } from '../lib/packedInk'
 import { inkStrokeAllowsShapeSnap, shapeSnapAllowsLiveSample, shapeSnapProfile, snapStrokeToShape } from '../lib/shapeSnap'
 import {
+  PAPER_ZOOM_GESTURE_SETTLE_MS,
   VIEW_ROTATE_STEP,
   applyPaperViewToElements,
   applyPaperZoomStayPut,
@@ -489,6 +490,12 @@ const ZOOM_SETTLE_MS = 48
  * well under way, at the commit.
  */
 const ZOOM_PREVIEW_RASTER_MS = 60
+/**
+ * Outside a gesture (a programmatic zoom: a PDF fit, a reset) the visible
+ * sheet is covered at once at most this often; a burst of camera writes still
+ * folds into the one settle, as before.
+ */
+const ZOOM_COVER_FOLD_MS = 250
 
 /**
  * Visible sheet range in paper layout px. Client rects carry the plane's CSS
@@ -1747,6 +1754,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const committedShownRef = useRef<{ top: number; bottom: number; drawing: string | null } | null>(null)
   /** Visible sheet rows (layout px) at the last slice measurement. */
   const inkVisibleRef = useRef<InkVisibleRange | null>(null)
+  /** When a camera change outside a gesture last re-sliced or painted at once. */
+  const looseZoomCoverAtRef = useRef(-Infinity)
   /** Set below, once the slice planner exists; the scroll listener above it calls through this. */
   const coverZoomPreviewRef = useRef<(zoom: number) => boolean>(() => false)
   /** Wall-clock until which a zoom gesture counts as still moving. */
@@ -4758,9 +4767,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // The slice is re-planned around the now-visible sheet (a 100% full
   // overlay becomes a 500% slice) and painted by the same redraw.
   const settleZoomedInk = useCallback((repaint = false) => {
-    if (activeStrokeRef.current) return
-    // From here on the bitmap is the committed camera's.
+    // From here on the bitmap is the committed camera's, also for the redraw
+    // after a stroke that is still under the pen.
     previewRasterZoomRef.current = null
+    if (activeStrokeRef.current) return
     planInkWindowNow(true)
     canvasQualityKeyRef.current = ''
     // The redraw repaints when the bitmap size or its rows per sheet px
@@ -4787,21 +4797,27 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (!paper || !measured) return false
     inkVisibleRef.current = { top: measured.visible.top, bottom: measured.visible.bottom }
     const sheetHeight = paper.offsetHeight
-    if (inkWindowNeedsMove(planned, measured.visible, INK_WINDOW_GUARD_VIEWPORTS * measured.viewport.height, sheetHeight)) {
+    const needsMove = inkWindowNeedsMove(planned, measured.visible, INK_WINDOW_GUARD_VIEWPORTS * measured.viewport.height, sheetHeight)
+    const shown = committedShownRef.current
+    const outgrown = Boolean(shown && !inkRowsCoverVisible(shown, measured.visible, sheetHeight))
+    if (!needsMove && !outgrown) return false
+    if (!paper.closest('.paper-sheet-plane')?.classList.contains('is-zoom-gesture')) {
+      // Not a gesture: fold a burst of camera writes, the settle paints once.
+      const now = performance.now()
+      if (now - looseZoomCoverAtRef.current < ZOOM_COVER_FOLD_MS) return false
+      looseZoomCoverAtRef.current = now
+    }
+    if (needsMove) {
       // The visible sheet reached the edge of the slice: a new slice around
       // it, at the resolution of the zoom on screen.
       previewRasterZoomRef.current = zoom
       planInkWindowNow(true)
       canvasQualityKeyRef.current = ''
-      redraw(true)
-      return true
     }
-    const shown = committedShownRef.current
-    if (shown && !inkRowsCoverVisible(shown, measured.visible, sheetHeight)) {
-      // The new slice is still being painted and the view outgrew the old one.
-      redraw(true)
-    }
-    return false
+    // Otherwise the new slice is still being painted and the view outgrew
+    // the old one: the redraw paints it in this task.
+    redraw(true)
+    return needsMove
   }, [inline, planInkWindowNow, redraw, resolvePaperElement])
   coverZoomPreviewRef.current = coverZoomPreview
 
@@ -4847,7 +4863,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       previewRasterTimer = 0
       previewRasterFrame = 0
     }
-    let disposed = false
+    let zoomCoverFrame = 0
     const initial = paperView.getView()
     adopt(initial)
     setViewZoom(initial.zoom)
@@ -4865,14 +4881,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       adopt(view)
       if (zoomed) {
         zoomInFlightUntilRef.current = performance.now() + ZOOM_SETTLE_MS
-        // Once the caller has scrolled the sheet into place (still this
-        // task): a zoom out must not show rows the bitmap does not hold while
-        // the settle waits.
-        queueMicrotask(() => { if (!disposed) coverZoomPreview(view.zoom) })
+        // Before the frame that shows this camera is painted, and after the
+        // caller has scrolled the sheet into place: a zoom out must not show
+        // rows the bitmap does not hold while the settle waits.
+        if (!zoomCoverFrame) {
+          zoomCoverFrame = window.requestAnimationFrame(() => {
+            zoomCoverFrame = 0
+            coverZoomPreview(paperView.getView().zoom)
+          })
+        }
       }
       settleIn(ZOOM_SETTLE_MS)
     })
-    const unsubscribeLiveZoom = paperView.subscribeLiveZoom((zoom, preview) => {
+    const unsubscribeLiveZoom = paperView.subscribeLiveZoom((zoom, preview, settleMs) => {
       clearPreviewRasterTimer()
       if (!preview) {
         // The gesture is over, its camera committed and the sheet scrolled
@@ -4881,6 +4902,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         return
       }
       if (coverZoomPreview(zoom)) return
+      // A touch pinch commits when the fingers lift, not when they rest: no
+      // raster while the hand is still on the glass.
+      if (settleMs > PAPER_ZOOM_GESTURE_SETTLE_MS) return
       previewRasterTimer = window.setTimeout(() => {
         previewRasterTimer = 0
         // Two frames more, and past the second one's own preview step: on a
@@ -4899,10 +4923,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }, ZOOM_PREVIEW_RASTER_MS)
     })
     return () => {
-      disposed = true
       unsubscribe()
       unsubscribeLiveZoom()
       clearPreviewRasterTimer()
+      if (zoomCoverFrame) window.cancelAnimationFrame(zoomCoverFrame)
       if (zoomSettleTimerRef.current !== null) {
         window.clearTimeout(zoomSettleTimerRef.current)
         zoomSettleTimerRef.current = null
