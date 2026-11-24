@@ -171,13 +171,16 @@ test('an expired sign-in is announced once, not silently dropped', async () => {
     assert.deepEqual(sent, ['reauth'])
     const health = await runtime.health()
     assert.equal(health.gradeChecks.needsReauth, 1)
+    // With every connection signed out no grade is checked: that is a problem, not 'ok'.
+    assert.equal(health.status, 'degraded')
+    assert.equal(health.reason, 'signed-out')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
 
-test('two days before the sign-in ends the phone is reminded once, then told when it ends', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'schulnetz-reauth-soon-'))
+test('a web sign-in has no deadline of its own: a months-old sign-in is still read and nobody is told to sign in', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-no-deadline-'))
   let clock = Date.parse('2026-11-14T08:00:00Z')
   const sent = []
   const runtime = createSchulnetzRuntime({ root, key: randomBytes(32), autostart: false, spacingMs: 0, now: () => new Date(clock), fetch: async () => { throw Object.assign(new Error('offline'), { code: 'ECONNRESET' }) }, fcmSend: async (message) => { sent.push(message.message.data.event); return { status: 200 } } })
@@ -188,22 +191,13 @@ test('two days before the sign-in ends the phone is reminded once, then told whe
     const link = JSON.parse(await readFile(linkPath, 'utf8'))
     link.fcmTokens = [`${'e'.repeat(40)}:APA91b${'y'.repeat(120)}`]
     await (await import('node:fs/promises')).writeFile(linkPath, JSON.stringify(link))
-    const day = 24 * 60 * 60_000
-    clock += 11 * day
+    clock += 120 * 24 * 60 * 60_000
     await runtime.pollAccount(guest.accountId).catch(() => {})
-    assert.deepEqual(sent, [], 'no reminder with three days left')
-    clock += 1 * day + 60_000
-    await runtime.pollAccount(guest.accountId).catch(() => {})
-    await runtime.pollAccount(guest.accountId).catch(() => {})
-    assert.deepEqual(sent, ['reauth-soon'], 'one reminder two days before')
-    clock += 2 * day
-    await runtime.pollAccount(guest.accountId).catch(() => {})
-    assert.deepEqual(sent, ['reauth-soon', 'reauth'])
-    // A new sign-in starts over: the next reminder comes again two days before its end.
-    await runtime.linkAccount(guest.accountId, { mode: 'web', baseUrl: 'https://www.schulnetz-ag.ch/aksa', deviceId: '0123456789abcdef01234567', userAgent: 'KantiTest', ssoCookies: { 'login.microsoftonline.com': 'ESTSAUTHPERSISTENT=synthetic' } })
-    clock += 12 * day + 60_000
-    await runtime.pollAccount(guest.accountId).catch(() => {})
-    assert.deepEqual(sent, ['reauth-soon', 'reauth', 'reauth-soon'])
+    assert.deepEqual(sent, [], 'no reminder and no sign-in alert')
+    const after = JSON.parse(await readFile(linkPath, 'utf8'))
+    assert.equal(after.needsReauth, false)
+    assert.ok(after.sso, 'the Microsoft cookies are kept')
+    assert.equal((await runtime.publicStatusOf(guest.accountId)).signInExpiresAt, '')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -1447,14 +1441,14 @@ test('a link sign-in time that is not a time is left in place', async () => {
     await writeFile(linkFile, fresh, { mode: 0o600 })
     assert.equal(await call(), 200)
     assert.equal(await readFile(linkFile, 'utf8'), fresh)
-    const expired = { ...live, cookiesSavedAt: '2020-01-01T00:00:00.000Z' }
-    await writeFile(linkFile, JSON.stringify(expired), { mode: 0o600 })
-    await runtime.pollAccount(guest.accountId)
-    const cleared = JSON.parse(await readFile(linkFile, 'utf8'))
-    assert.equal(cleared.needsReauth, true)
-    assert.equal(cleared.sso, null)
-    assert.equal(cleared.serverSession, null)
-    assert.equal(cleared.cookiesSavedAt, '')
+    // An old sign-in time is not a reason to drop the sign-in: only Microsoft or Schulnetz end it.
+    const old = { ...live, cookiesSavedAt: '2020-01-01T00:00:00.000Z' }
+    await writeFile(linkFile, JSON.stringify(old), { mode: 0o600 })
+    await runtime.pollAccount(guest.accountId).catch(() => {})
+    const kept = JSON.parse(await readFile(linkFile, 'utf8'))
+    assert.equal(kept.needsReauth, false)
+    assert.ok(kept.sso)
+    assert.equal(kept.cookiesSavedAt, '2020-01-01T00:00:00.000Z')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

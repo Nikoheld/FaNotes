@@ -131,8 +131,8 @@ describe('/about/ landing page', () => {
     const privacy = readFileSync(new URL('../public/kantiplus/datenschutz/index.html', root), 'utf8')
     expect(privacy).toContain('Kanti+ sieht und speichert dein Passwort nicht')
     expect(about).toContain('Kanti+ sieht und speichert dein Passwort nicht')
-    expect(privacy).toContain('spätestens 14 Tage nach deiner letzten Anmeldung')
-    expect(about).toContain('spätestens 14 Tage nach deiner letzten Anmeldung')
+    expect(privacy).toContain('gelöscht, sobald du die Schule trennst, deine Daten in der App löschst oder dein FaNotes-Konto löschst')
+    expect(about).toContain('gelöscht, sobald du die Schule trennst, deine Daten in der App löschst oder dein FaNotes-Konto löschst')
   })
 })
 
