@@ -14,7 +14,7 @@ enum class Destination(val label: String, val legacy: String) {
     Today("Today", "Heute"), Planner("Planner", "Plan"), Notes("Notes", "Notizen"), School("School", "Mehr")
 }
 enum class Page(val title: String) {
-    Search("Search"), Editor("Note"), Grades("Grades"), Course("Subject"), Exams("Exams"),
+    Search("Search"), Editor("Note"), File("File"), Grades("Grades"), Course("Subject"), Exams("Exams"),
     Absences("Absences"), Updates("School updates"), Statement("School account"),
     Settings("Settings"), Connections("Account & sync"), Appearance("Appearance"), ArchivedSubjects("Archived subjects"),
     Navigation("Navigation bar"), Planning("Planning & grades"), Notifications("Notifications"),
@@ -59,6 +59,7 @@ fun Destination.uiLabel(): String = when (this) {
 fun Page.uiTitle(): String = when (this) {
     Page.Search -> t(R.string.search)
     Page.Editor -> t(R.string.note)
+    Page.File -> t(R.string.file_title)
     Page.Grades -> t(R.string.grades)
     Page.Course -> t(R.string.subject)
     Page.Exams -> t(R.string.exams)
@@ -150,7 +151,8 @@ fun companionRoute(route: NotifyRoute): CompanionRoute = when {
 
 fun flattenNotes(tree: List<VaultNode>): List<VaultNode> = tree.flatMap { node ->
     if (node.kind == NoteKind.FOLDER) flattenNotes(node.children) else listOf(node)
-}.filter { it.path !in setOf(HOMEWORK_NOTE_PATH, CALENDAR_NOTE_PATH) }
+    // Notes only: media files and story folders have no text or handwriting to list, count or search.
+}.filter { it.kind.isNote && it.path !in setOf(HOMEWORK_NOTE_PATH, CALENDAR_NOTE_PATH) }
 fun flattenFolders(tree: List<VaultNode>): List<VaultNode> = tree.filter { it.kind == NoteKind.FOLDER }.flatMap { listOf(it) + flattenFolders(it.children) }
 fun taskBucket(task: HomeworkTask, today: LocalDate): String = when (classifyHomeworkTask(task, today)) {
     "overdue" -> "Overdue"

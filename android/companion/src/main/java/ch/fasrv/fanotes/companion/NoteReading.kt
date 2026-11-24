@@ -10,6 +10,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,6 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
+import ch.fasrv.fanotes.vault.fileKindOf
 import ch.fasrv.fanotes.desk.DetailsReadingLine
 import ch.fasrv.fanotes.desk.aiPreviewReading
 import ch.fasrv.fanotes.famd.safeWorksheetSource
@@ -32,56 +40,94 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/** Uses the shared desktop reading parser rather than a second Markdown dialect. */
+/** The banner above a search hit: where in the note or PDF the hit sits. */
+@Composable
+private fun HitBanner(editor: NoteEditorController, target: DocTarget) {
+    val pdf = editor.note?.kind == ch.fasrv.fanotes.vault.NoteKind.PDF
+    StatusLine(if (target.label.isNotBlank()) t(R.string.doc_hit_banner_label, docHitPlace(DocHit(editor.path, "", if (pdf) DOC_KIND_PDF else DOC_KIND_NOTE, target.page, target.label, Snippet("", emptyList()), PageSource.Markdown, 1.0, 0.0)))
+        else if (pdf) t(R.string.doc_hit_banner, target.page) else t(R.string.doc_hit_banner_label, t(R.string.doc_note_text)), StateTone.Accent)
+}
+
+/** Uses the shared desktop reading parser rather than a second Markdown dialect. A PDF reads as a zoomable page column. */
 @Composable
 fun NoteReading(model: CompanionModel, editor: NoteEditorController, target: DocTarget? = null, onInk: () -> Unit) {
+    if (editor.note?.kind == ch.fasrv.fanotes.vault.NoteKind.PDF) {
+        Column(Modifier.fillMaxSize()) {
+            if (target != null) Box(Modifier.padding(horizontal = Space.page, vertical = 4.dp)) { HitBanner(editor, target) }
+            PdfReader(model.graph.root.resolve(editor.path), if (target?.label.isNullOrBlank()) target?.page ?: 0 else 0, target?.query.orEmpty(), editor.document, Modifier.weight(1f))
+        }
+        return
+    }
+    val context = LocalContext.current
+    var textZoom by remember { mutableFloatStateOf(readerTextZoom(context)) }
     val terms = remember(target?.query) { parseDocQuery(target?.query.orEmpty()).terms }
     val lines by produceState<List<DetailsReadingLine>>(emptyList(), editor.markdown) {
         value = withContext(Dispatchers.Default) { aiPreviewReading(editor.markdown) }
     }
-    SelectionContainer {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(Space.page), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (target != null) item(key = "hit") {
-            StatusLine(if (target.label.isNotBlank()) t(R.string.doc_hit_banner_label, docHitPlace(DocHit(editor.path, "", if (editor.note?.kind == ch.fasrv.fanotes.vault.NoteKind.PDF) DOC_KIND_PDF else DOC_KIND_NOTE, target.page, target.label, Snippet("", emptyList()), PageSource.Markdown, 1.0, 0.0)))
-                else if (editor.note?.kind == ch.fasrv.fanotes.vault.NoteKind.PDF) t(R.string.doc_hit_banner, target.page) else t(R.string.doc_hit_banner_label, t(R.string.doc_note_text)), StateTone.Accent)
-        }
-        if (editor.note?.kind == ch.fasrv.fanotes.vault.NoteKind.PDF) item { PdfReader(model.graph.root.resolve(editor.path), if (target?.label.isNullOrBlank()) target?.page ?: 0 else 0, target?.query.orEmpty()) }
-        if (plainPreview(editor.markdown).isBlank() && editor.document?.strokes?.isEmpty() == true && editor.note?.kind != ch.fasrv.fanotes.vault.NoteKind.PDF) item {
-            EmptyState(androidx.compose.material.icons.Icons.Outlined.EditNote, t(R.string.a_blank_page_a_fresh_thought), t(R.string.switch_to_text_to_write_or_ink_to_draw))
-        }
-        itemsIndexed(lines, key = { index, line -> "line:$index:${line.kind}:${line.text.take(48)}" }) { _, line ->
-            when (line.kind) {
-                "rule" -> FineDivider()
-                "image" -> {
-                    val file by produceState<File?>(null, editor.path, line.source) {
-                        value = withContext(Dispatchers.IO) { resolvePaperImagePaths(editor.path, line.source).map { model.graph.root.resolve(it) }.firstOrNull { it.isFile } }
+    val handwriting = editor.document?.takeIf { it.strokes.isNotEmpty() }
+    Box(Modifier.fillMaxSize().textPinchZoom({ textZoom }, { textZoom = it }) { saveReaderTextZoom(context, textZoom) }) {
+        SelectionContainer {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(Space.page), verticalArrangement = Arrangement.spacedBy(10.dp * textZoom)) {
+            if (target != null) item(key = "hit") { HitBanner(editor, target) }
+            if (plainPreview(editor.markdown).isBlank() && handwriting == null && editor.document?.strokes?.isEmpty() == true) item {
+                EmptyState(androidx.compose.material.icons.Icons.Outlined.EditNote, t(R.string.a_blank_page_a_fresh_thought), t(R.string.switch_to_text_to_write_or_ink_to_draw))
+            }
+            itemsIndexed(lines, key = { index, line -> "line:$index:${line.kind}:${line.text.take(48)}" }) { _, line ->
+                when (line.kind) {
+                    "rule" -> FineDivider()
+                    "image" -> {
+                        val relative by produceState<String?>(null, editor.path, line.source) {
+                            value = withContext(Dispatchers.IO) { resolvePaperImagePaths(editor.path, line.source).firstOrNull { model.graph.root.resolve(it).isFile } }
+                        }
+                        LocalNoteImage(relative?.let { model.graph.root.resolve(it) }, line.text.ifBlank { t(R.string.note_image) }, textZoom) { relative?.let(model::openFile) }
                     }
-                    LocalNoteImage(file, line.text.ifBlank { t(R.string.note_image) })
-                }
-                else -> ReadingLine(line, terms)
-            }
-        }
-        items(editor.note?.worksheets.orEmpty(), key = { "worksheet:$it" }) { id ->
-            val file by produceState<File?>(null, id) {
-                value = withContext(Dispatchers.IO) {
-                    val record = model.graph.vault.read(".fanotes/worksheets/$id.json")?.decodeToString()
-                    val data = record?.let { runCatching { parseJson(it) as? JsonValue.Obj }.getOrNull() }
-                    safeWorksheetSource(id, data?.string("sourceRelativePath"))?.let { model.graph.root.resolve(it) }
+                    else -> ReadingLine(line, terms, textZoom)
                 }
             }
-            LocalNoteImage(file, t(R.string.worksheet))
+            items(editor.note?.worksheets.orEmpty(), key = { "worksheet:$it" }) { id ->
+                val relative by produceState<String?>(null, id) {
+                    value = withContext(Dispatchers.IO) {
+                        val record = model.graph.vault.read(".fanotes/worksheets/$id.json")?.decodeToString()
+                        val data = record?.let { runCatching { parseJson(it) as? JsonValue.Obj }.getOrNull() }
+                        safeWorksheetSource(id, data?.string("sourceRelativePath"))
+                    }
+                }
+                LocalNoteImage(relative?.let { model.graph.root.resolve(it) }, t(R.string.worksheet), textZoom) { relative?.takeIf { fileKindOf(it) == ch.fasrv.fanotes.vault.NoteKind.IMAGE }?.let(model::openFile) }
+            }
+            handwriting?.let { ink -> item(key = "ink:${ink.updatedAt}") {
+                SectionLabel(t(R.string.handwriting_preview))
+                InkReadPreview(ink, if (editor.readOnly) null else onInk)
+                if (!editor.readOnly) androidx.compose.material3.TextButton(onClick = onInk) { Text(t(R.string.open_handwriting_canvas)) }
+            } }
         }
-        editor.document?.takeIf { it.strokes.isNotEmpty() }?.let { ink -> item(key = "ink:${ink.updatedAt}") {
-            SectionLabel(t(R.string.handwriting_preview))
-            InkPreview(ink, Modifier.fillMaxWidth().aspectRatio((ink.sourceWidth / ink.sourceHeight).toFloat().coerceAtLeast(0.1f)).background(LocalCompanionSemantics.current.paper))
-            androidx.compose.material3.TextButton(onClick = onInk) { Text(t(R.string.open_handwriting_canvas)) }
-        } }
-    }
+        }
+        ZoomControls(textZoom,
+            onMinus = { textZoom = ReaderZoomMath.step(textZoom, false, ReaderZoomMath.TEXT_MIN, ReaderZoomMath.TEXT_MAX).also { saveReaderTextZoom(context, it) } },
+            onPlus = { textZoom = ReaderZoomMath.step(textZoom, true, ReaderZoomMath.TEXT_MIN, ReaderZoomMath.TEXT_MAX).also { saveReaderTextZoom(context, it) } },
+            onReset = { textZoom = 1f; saveReaderTextZoom(context, 1f) },
+            Modifier.align(Alignment.BottomEnd).padding(12.dp), low = ReaderZoomMath.TEXT_MIN, high = ReaderZoomMath.TEXT_MAX)
     }
 }
 
+/** Pinching with two fingers changes the text size; one finger and a long press still scroll and select. */
+internal fun Modifier.textPinchZoom(current: () -> Float, set: (Float) -> Unit, onEnd: () -> Unit): Modifier = pointerInput(Unit) {
+    var start = 1f
+    detectReaderPinch(
+        onStart = { start = current() },
+        onUpdate = { scale, _ -> set(ReaderZoomMath.clampText(start * scale)) },
+        onEnd = onEnd,
+    )
+}
+
+/** A text style at [zoom] times its size, with the line height following. */
+internal fun androidx.compose.ui.text.TextStyle.zoomed(zoom: Float): androidx.compose.ui.text.TextStyle =
+    if (zoom == 1f) this else copy(
+        fontSize = if (fontSize.isSpecified) fontSize * zoom else fontSize,
+        lineHeight = if (lineHeight.isSpecified) lineHeight * zoom else lineHeight,
+    )
+
 @Composable
-private fun ReadingLine(line: DetailsReadingLine, terms: List<String> = emptyList()) {
+private fun ReadingLine(line: DetailsReadingLine, terms: List<String> = emptyList(), zoom: Float = 1f) {
     val colors = MaterialTheme.colorScheme
     val annotated = remember(line, colors, terms) {
         buildAnnotatedString {
@@ -115,16 +161,33 @@ private fun ReadingLine(line: DetailsReadingLine, terms: List<String> = emptyLis
         line.heading -> if (line.scale >= 1.4f) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge
         line.kind in listOf("code", "table", "math") -> MaterialTheme.typography.bodyMedium.copy(fontFamily = CompanionMono)
         else -> MaterialTheme.typography.bodyLarge
-    }, modifier = Modifier.fillMaxWidth().then(if (line.kind in listOf("code", "table")) Modifier.horizontalScroll(rememberScrollState()) else Modifier)
+    }.zoomed(zoom), modifier = Modifier.fillMaxWidth().then(if (line.kind in listOf("code", "table")) Modifier.horizontalScroll(rememberScrollState()) else Modifier)
         .then(if (line.kind == "code") Modifier.background(colors.surfaceVariant, MaterialTheme.shapes.small).padding(12.dp) else Modifier)
         .padding(top = if (line.heading) 12.dp else 0.dp))
 }
 
 @Composable
-private fun LocalNoteImage(file: File?, label: String) {
+private fun LocalNoteImage(file: File?, label: String, zoom: Float = 1f, onOpen: () -> Unit = {}) {
     val bitmap by produceState<Bitmap?>(null, file?.path, file?.lastModified()) {
         value = if (file == null) null else decodeNoteImage(file)
     }
-    if (bitmap != null) Image(bitmap!!.asImageBitmap(), label, Modifier.fillMaxWidth().heightIn(max = 500.dp))
-    else Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (bitmap != null) Image(bitmap!!.asImageBitmap(), label, Modifier.fillMaxWidth().heightIn(max = 500.dp).clickable(role = Role.Button, onClickLabel = t(R.string.open_image), onClick = onOpen))
+    else Text(label, style = MaterialTheme.typography.bodySmall.zoomed(zoom), color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/**
+ * The note's handwriting as one bounded bitmap at the page's true proportions. A live ink view the height of a long
+ * page needed a full-size bitmap and could run the phone out of memory. A tap opens the canvas, which zooms.
+ */
+@Composable
+private fun InkReadPreview(ink: ch.fasrv.fanotes.ink.InkDocument, onOpen: (() -> Unit)?) {
+    val ratio = (ink.sourceWidth / ink.sourceHeight.coerceAtLeast(1.0)).toFloat().coerceIn(0.0025f, 20f)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val widthPx = constraints.maxWidth.coerceIn(1, 2000)
+        val bitmap by produceState<Bitmap?>(null, ink.updatedAt, ink.strokes.size, widthPx) { value = rasterizeInkPage(ink, widthPx) }
+        Box(Modifier.fillMaxWidth().aspectRatio(ratio).background(LocalCompanionSemantics.current.paper)
+            .then(if (onOpen != null) Modifier.clickable(role = Role.Button, onClick = onOpen) else Modifier)) {
+            bitmap?.let { Image(it.asImageBitmap(), t(R.string.handwriting_preview), Modifier.fillMaxSize()) }
+        }
+    }
 }
