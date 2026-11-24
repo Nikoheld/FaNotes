@@ -19,6 +19,7 @@ import { handleAiProxyRequest } from './ai-proxy.mjs'
 import { createSchulnetzRuntime } from './schulnetz-api.mjs'
 import { createMensa } from './mensa.mjs'
 import { createClassTimetables } from './class-timetables.mjs'
+import { createWebPush } from './web-push.mjs'
 import { createKantiWebApi, createKantiWebAppRoutes, createKantiWebStore } from './kanti-web-api.mjs'
 import { languageForRequest, localizeExactText, localizeResponse } from './i18n.mjs'
 import { createAnalyticsService } from './analytics.mjs'
@@ -67,7 +68,9 @@ const analytics = await createAnalyticsService({ directory: ANALYTICS_DIR })
 const kantiWebStore = createKantiWebStore()
 // The school's timetable PDF (other classes and rooms) lives beside the Schulnetz accounts.
 const classTimetables = createClassTimetables({ root: process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz' })
-const schulnetz = createSchulnetzRuntime({ pruneOrphans: true, web: createKantiWebAppRoutes(kantiWebStore), timetables: classTimetables })
+// Web Push for the browser app; off until the VAPID key file exists (scripts/generate-vapid.mjs).
+const webPush = createWebPush({})
+const schulnetz = createSchulnetzRuntime({ pruneOrphans: true, web: createKantiWebAppRoutes(kantiWebStore), timetables: classTimetables, webPush })
 setAccountDeletedHook(async (accountId) => {
   await schulnetz.unlink(accountId)
   await kantiWebStore.forgetAccount(accountId)
@@ -76,6 +79,7 @@ const mensa = createMensa({})
 const KANTI_WEB_DIST = resolve(process.env.KANTI_WEB_DIST || join(ROOT, 'kanti-web', 'dist'))
 const kantiWeb = createKantiWebApi({
   store: kantiWebStore,
+  webPush,
   access: schulnetz.webAccess,
   timetables: classTimetables,
   readVersion: async () => {
