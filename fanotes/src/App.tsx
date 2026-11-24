@@ -2788,6 +2788,15 @@ export default function App({ startupBootstrap }: AppProps) {
     if (activePath) updateContentFor(activePath, content)
   }, [activePath, updateContentFor])
 
+  /**
+   * The note's text with everything typed so far. The editor hands its changes over in coalesced batches, so a marker
+   * added to the stale text would overwrite the last words (or be overwritten by them): flush first.
+   */
+  const noteContentFlushed = useCallback((path: string) => {
+    if (path === activePathRef.current) editorRef.current?.flushChanges()
+    return pendingWrites.current.get(path) ?? tabsRef.current.find((tab) => tab.path === path)?.content ?? ''
+  }, [])
+
   // The eraser in pen mode also takes PDF text highlights off, undoable with the ink.
   const updateContentForRef = useRef(updateContentFor)
   updateContentForRef.current = updateContentFor
@@ -5655,7 +5664,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (!targetPath) return
       if (activePathRef.current === targetPath) {
         const tab = tabsRef.current.find((item) => item.path === targetPath)
-        const currentContent = pendingWrites.current.get(targetPath) ?? tab?.content ?? ''
+        const currentContent = noteContentFlushed(targetPath)
         const nextContent = attachWorksheet(currentContent, document.id)
         updateContent(nextContent)
         setWorksheetSession((current) => current.documents.some((item) => item.id === document.id)
@@ -5671,7 +5680,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } finally {
       setWorksheetImportBusy(false)
     }
-  }, [activeTab, openNote, refreshTree, settings.defaultFolder, toast, updateContent, worksheetImportBusy])
+  }, [activeTab, noteContentFlushed, openNote, refreshTree, settings.defaultFolder, toast, updateContent, worksheetImportBusy])
 
   const attachImportedWorksheet = useCallback(async (document: WorksheetDocument) => {
     const targetPath = activePathRef.current
@@ -5680,14 +5689,14 @@ export default function App({ startupBootstrap }: AppProps) {
       return
     }
     const tab = tabsRef.current.find((item) => item.path === targetPath)
-    const currentContent = pendingWrites.current.get(targetPath) ?? tab?.content ?? ''
+    const currentContent = noteContentFlushed(targetPath)
     const nextContent = attachWorksheet(currentContent, document.id)
     updateContent(nextContent)
     setWorksheetSession((current) => current.documents.some((item) => item.id === document.id)
       ? current
       : { key: current.key + 1, documents: [...current.documents, document] })
     toast(/^(bild|image|eingefügt|pasted)(\s|\d|\.|$)/iu.test(document.title.trim()) ? 'Bild eingefügt.' : `„${document.title}“ eingefügt.`, 'success')
-  }, [toast, updateContent])
+  }, [noteContentFlushed, toast, updateContent])
 
   /**
    * Where a new picture lands on the sheet: centred on the drop point, or on the middle of what the reader sees.
@@ -5781,7 +5790,7 @@ export default function App({ startupBootstrap }: AppProps) {
         : created)
       markFreshSheetImage(saved.id)
       const tab = tabsRef.current.find((item) => item.path === notePath)
-      const currentContent = pendingWrites.current.get(notePath) ?? tab?.content ?? ''
+      const currentContent = noteContentFlushed(notePath)
       updateContent(retargetWorksheetMarkers(currentContent, new Map([[id, saved.id]])))
       worksheetDirtyIdsRef.current.delete(id)
       worksheetLayerRefs.current.delete(id)
@@ -6052,7 +6061,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const id = document.id
     await worksheetLayerRefs.current.get(id)?.flush().catch(() => undefined)
     const tab = tabsRef.current.find((item) => item.path === notePath)
-    const currentContent = pendingWrites.current.get(notePath) ?? tab?.content ?? ''
+    const currentContent = noteContentFlushed(notePath)
     const nextContent = detachWorksheet(currentContent, id)
     if (nextContent !== currentContent) updateContent(nextContent)
     worksheetDirtyIdsRef.current.delete(id)
@@ -6074,7 +6083,7 @@ export default function App({ startupBootstrap }: AppProps) {
             const restored = await window.fanotes.readWorksheet(id)
             if (activePathRef.current === notePath) {
               const latestTab = tabsRef.current.find((item) => item.path === notePath)
-              const latest = pendingWrites.current.get(notePath) ?? latestTab?.content ?? ''
+              const latest = noteContentFlushed(notePath)
               updateContent(attachWorksheet(latest, id))
               markFreshSheetImage(id)
               setWorksheetSession((current) => current.documents.some((item) => item.id === id)
@@ -6106,7 +6115,7 @@ export default function App({ startupBootstrap }: AppProps) {
     try {
       await window.fanotes.deleteWorksheet(id)
       const tab = tabsRef.current.find((item) => item.path === notePath)
-      const currentContent = pendingWrites.current.get(notePath) ?? tab?.content ?? ''
+      const currentContent = noteContentFlushed(notePath)
       const nextContent = detachWorksheet(currentContent, id)
       if (nextContent !== currentContent) updateContent(nextContent)
       worksheetDirtyIdsRef.current.delete(id)

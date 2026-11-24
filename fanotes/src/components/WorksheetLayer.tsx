@@ -542,7 +542,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
   useEffect(() => {
     const layer = layerRef.current
     const chrome = chromeRef.current
-    if (isImage || !layer || !chrome || (!chromeActive && !selected)) return
+    if (isImage || !layer || !chrome || (!chromeActive && !selected && !inputDisabled)) return
     const view = resolvePaperZoomScroller(layer)
     let frame = 0
     const place = () => {
@@ -563,7 +563,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
       window.removeEventListener('resize', schedule)
       if (frame) window.cancelAnimationFrame(frame)
     }
-  }, [chromeActive, isImage, selected, loading, pdf])
+  }, [chromeActive, inputDisabled, isImage, selected, loading, pdf])
 
   const selectObject = useCallback(() => {
     setSelected(true)
@@ -922,7 +922,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
     </div>
   ) : null
 
-  const documentChrome = !isImage && !error && !loading && !inputDisabled ? (
+  const documentChrome = !isImage && !error && !loading ? (
     <div className="sheet-doc-chrome" ref={chromeRef}>
       <span className="sheet-doc-chip" title={document.title}>
         <FileText size={13} aria-hidden="true" />

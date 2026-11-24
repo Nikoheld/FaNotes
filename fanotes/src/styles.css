@@ -2282,7 +2282,11 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .sheet-doc-chip svg { flex: none; color: var(--paper-accent-readable, var(--accent)); }
 .sheet-doc-bar { position: static; transform: none; pointer-events: auto; }
 .worksheet-layer.is-document .sheet-doc-bar { margin-left: auto; }
-.worksheet-layer.is-disabled .sheet-doc-chrome { display: none; }
+/* Pen mode: the layer is inert, but the remove button of a document stays clickable (Entfernen remains clickable);
+   only the buttons take pointer events, never the container, so the pen still writes across the page. */
+.worksheet-layer.is-disabled .sheet-doc-chrome { opacity: .72; }
+.worksheet-layer.is-disabled .sheet-doc-bar,
+.worksheet-layer.is-disabled .sheet-doc-bar button { pointer-events: auto; }
 @media (max-width: 760px) {
   .worksheet-layer.is-image:not(.is-floating) { width: min(calc(100% - 16px), 900px); margin: 0 8px 26px; }
 }

@@ -202,8 +202,33 @@ const session = async (theme, full) => {
     ok(`${label} scrolled to page 2: the chip and the remove button stay in view and inside the worksheet`, followed.chip && followed.remove && followed.layerTop < 0, JSON.stringify(followed))
     await page.screenshot({ path: path.join(shots, `pdf-worksheet-${theme}.png`) })
 
+    // Pen mode: the layer is inert, but the remove button of a document stays visible and clickable.
+    await page.keyboard.press('Control+d')
+    await sleep(700)
+    const penChrome = await page.evaluate(() => {
+      const chrome = document.querySelector('.sheet-doc-chrome')
+      const button = document.querySelector('.sheet-doc-bar button')
+      const box = button?.getBoundingClientRect()
+      return chrome && box ? {
+        container: getComputedStyle(chrome).pointerEvents,
+        button: getComputedStyle(button).pointerEvents,
+        hit: document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) === button || button.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)),
+        inView: box.top >= 0 && box.bottom <= innerHeight,
+      } : null
+    })
+    ok(`${label} pen mode: the remove button of the PDF worksheet is visible and takes the click, its container does not`, penChrome?.hit && penChrome.inView && penChrome.button === 'auto' && penChrome.container === 'none', JSON.stringify(penChrome))
+    await page.locator('.sheet-doc-bar button').click()
+    const confirmShown = await page.locator('[role="dialog"], [role="alertdialog"]', { hasText: 'Aufgaben' }).first().waitFor({ timeout: 5000 }).then(() => true, () => false)
+    ok(`${label} pen mode: clicking remove on the PDF worksheet asks for confirmation`, confirmShown)
+    await page.keyboard.press('Escape')
+    await sleep(300)
+    await page.locator('[role="dialog"] button, [role="alertdialog"] button').filter({ hasText: /Abbrechen|Nein/u }).first().click({ timeout: 1500 }).catch(() => {})
+    await page.keyboard.press('Control+d')
+    await sleep(500)
+
     // --- Paste: a floating, selected object ------------------------------------------------------------------------
-    await page.locator('button[aria-label="Neue Notiz"], button[aria-label="New note"]').first().click()
+    // The tab bar's plus: the sidebar button starts an inline rename of the file, which races with typing.
+    await page.locator('button.tabs-menu[aria-label="Neue Notiz"], button.tabs-menu[aria-label="New note"]').first().click()
     await until(() => page.locator('.cm-content').count().then((n) => n > 0), 'new note')
     await page.locator('.cm-content').first().click()
     // Text on the sheet, caret back on the first line: the picture must still land below all of it.
@@ -268,12 +293,20 @@ const session = async (theme, full) => {
       ok(`${label} the worksheet JSON keeps the dragged and resized placement and the aspect`, stored.placement && Math.abs(stored.placement.x / stored.placement.width - resizedOnSheet.left / resizedOnSheet.width) < 0.01 && Math.abs(stored.placement.width * (resizedOnSheet.width / stored.placement.width) - resizedOnSheet.width) < 1 && Math.abs(stored.aspect - 0.75) < 0.01, JSON.stringify({ placement: stored.placement, aspect: stored.aspect }))
       // Reopen the note: same place.
       await page.waitForTimeout?.(900)
-      const title = fs.readdirSync(profile.vault).find((name) => name.endsWith('.md') && !['Altes Bild.md', 'Aufgaben.md'].includes(name))
-      await sleep(4500) // a picture pasted a moment ago still counts as fresh (and selected) when its layer remounts
       await openFile(page, 'Altes Bild')
+      // Leaving the note flushed its marker: the file on disk points at the picture.
+      const noteFile = await until(() => fs.readdirSync(profile.vault).find((name) => name.endsWith('.md') && fs.readFileSync(path.join(profile.vault, name), 'utf8').includes(`fanotes-worksheet:${id}`)), 'marker written to the note file', 8000).catch(() => null)
+      ok(`${label} the note file carries the worksheet marker right after switching away`, Boolean(noteFile))
+      const title = noteFile ?? 'Unbenannte Notiz.md'
       await until(() => page.locator('.sheet-image:not(.is-floating)').count().then((n) => n === 1), 'other note shown')
+      await sleep(4500) // a picture pasted a moment ago still counts as fresh (and selected) when its layer remounts
       await openFile(page, title.replace(/\.md$/u, ''))
-      await until(() => page.locator('.sheet-image.is-floating img').first().evaluate((img) => img.complete && img.naturalWidth > 0).catch(() => false), 'image back after reopening')
+      await until(() => page.locator('.sheet-image.is-floating img').first().evaluate((img) => img.complete && img.naturalWidth > 0).catch(() => false), 'image back after reopening', 15_000).catch(async (error) => {
+        const files = fs.readdirSync(profile.vault).filter((name) => name.endsWith('.md'))
+        console.log('DEBUG files', JSON.stringify(files.map((name) => [name, fs.readFileSync(path.join(profile.vault, name), 'utf8').slice(-200)])))
+        console.log('DEBUG rows', JSON.stringify(await page.locator('.file-tree__row').allInnerTexts()), 'tabs', JSON.stringify(await page.locator('[role=tab]').allInnerTexts()), 'title', title)
+        throw error
+      })
       const back = await sheetRectOf(page, '.sheet-image')
       ok(`${label} the image is at the same place and size after reopening`, Math.abs(back.left - resizedOnSheet.left) < 3 && Math.abs(back.top - resizedOnSheet.top) < 3 && Math.abs(back.width - resizedOnSheet.width) < 3, JSON.stringify({ resizedOnSheet, back }))
       ok(`${label} reopened image is not selected; clicking outside deselects`, await page.locator('.sheet-image.is-selected').count() === 0)
@@ -307,6 +340,7 @@ const session = async (theme, full) => {
         await page.mouse.up()
         const dragged = await rectOf(page, '.sheet-image')
         ok(`${label} zoom ${Math.round(zoom * 100)}%: dragging follows the pointer`, Math.abs(dragged.left - at.left - 30) < 4 && Math.abs(dragged.top - at.top - 20) < 4, JSON.stringify({ at, dragged }))
+        const draggedSheet = await sheetRectOf(page, '.sheet-image')
         const handle = await rectOf(page, '.sheet-image-handle.is-se')
         await page.mouse.move(handle.left + handle.width / 2, handle.top + handle.height / 2)
         await page.mouse.down()
@@ -314,7 +348,8 @@ const session = async (theme, full) => {
         await page.mouse.move(handle.left - 40, handle.top - 30, { steps: 5 })
         await page.mouse.up()
         const shrunk = await rectOf(page, '.sheet-image')
-        ok(`${label} zoom ${Math.round(zoom * 100)}%: resizing keeps the aspect and the top-left corner`, Math.abs(shrunk.width / shrunk.height - dragged.width / dragged.height) < 0.02 && shrunk.width < dragged.width - 20 && Math.abs(shrunk.left - dragged.left) < 2 && Math.abs(shrunk.top - dragged.top) < 2, JSON.stringify({ dragged, shrunk }))
+        const shrunkSheet = await sheetRectOf(page, '.sheet-image')
+        ok(`${label} zoom ${Math.round(zoom * 100)}%: resizing keeps the aspect and the top-left corner`, Math.abs(shrunk.width / shrunk.height - dragged.width / dragged.height) < 0.02 && shrunk.width < dragged.width - 20 && Math.abs(shrunkSheet.left - draggedSheet.left) < 2 && Math.abs(shrunkSheet.top - draggedSheet.top) < 2, JSON.stringify({ draggedSheet, shrunkSheet, dragged, shrunk }))
         const onSheet = await sheetRectOf(page, '.sheet-image')
         const ok1 = await until(() => {
           const placement = worksheetJson(profile, id).placement
