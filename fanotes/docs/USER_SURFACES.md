@@ -2,7 +2,7 @@
 
 Inventory walked from the shipped UI entry points. Each row names a user-visible surface and the source that implements it. The check `scripts/check-user-surfaces.cjs` re-reads those files and fails if a listed needle disappears.
 
-Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `quick-open`, `nav-back`, `nav-forward`, `reopen-tab`, `split`, `split-swap`, `split-orientation`, `focus`, `sidebar`, `inspector`, `settings`, `sync-now`, `sync-settings`, `addon-store`, `reveal`, `bug-report`, `new-story`, `import-story`, `text-field`, `daily-previous`, `daily-next`, `export-latex`, `work-requests`, `pdf-side-pages`, `quit`. Commands contributed by add-ons appear under `Add-on: <name>` and are prefixed `addon:` internally.
+Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-note`, `history`, `quick-open`, `nav-back`, `nav-forward`, `reopen-tab`, `split`, `split-swap`, `split-orientation`, `focus`, `sidebar`, `inspector`, `settings`, `sync-now`, `sync-settings`, `addon-store`, `reveal`, `bug-report`, `new-story`, `import-story`, `text-field`, `daily-previous`, `daily-next`, `work-requests`, `pdf-side-pages`, `quit`. Commands contributed by add-ons appear under `Add-on: <name>` and are prefixed `addon:` internally.
 
 ## Notes / vault
 

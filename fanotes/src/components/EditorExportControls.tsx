@@ -1,25 +1,16 @@
-import { FileCode, FileDown } from 'lucide-react'
+import { FileDown } from 'lucide-react'
 
 type EditorExportControlsProps = {
   disabled?: boolean
-  /** A PDF note has no text to turn into LaTeX code. */
-  latexDisabled?: boolean
-  onExportPdf: () => void
-  onExportLatex: () => void
+  onExport: () => void
 }
 
-/** PDF and LaTeX-code actions for the text editor's note menu. */
-export function EditorExportControls({ disabled = false, latexDisabled = false, onExportPdf, onExportLatex }: EditorExportControlsProps) {
+/** The note menu's export entry: it opens the export dialog (PDF, Word, LaTeX, Markdown). */
+export function EditorExportControls({ disabled = false, onExport }: EditorExportControlsProps) {
   return (
-    <>
-      <button type="button" role="menuitem" aria-label="Als PDF exportieren" disabled={disabled} onClick={onExportPdf}>
-        <span><FileDown aria-hidden="true" size={15} /></span>
-        <span><strong>Als PDF exportieren</strong><small>Text und Formeln der Notiz</small></span>
-      </button>
-      <button type="button" role="menuitem" aria-label="Als LaTeX-Code exportieren" disabled={disabled || latexDisabled} onClick={onExportLatex}>
-        <span><FileCode aria-hidden="true" size={15} /></span>
-        <span><strong>Als LaTeX-Code exportieren</strong><small>LaTeX-Code der Notiz</small></span>
-      </button>
-    </>
+    <button type="button" role="menuitem" aria-label="Exportieren …" disabled={disabled} onClick={onExport}>
+      <span><FileDown aria-hidden="true" size={15} /></span>
+      <span><strong>Exportieren …</strong><small>PDF, Word, LaTeX oder Markdown</small></span>
+    </button>
   )
 }

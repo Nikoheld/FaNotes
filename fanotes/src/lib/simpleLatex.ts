@@ -230,8 +230,8 @@ const encodePdf = (text: string) => {
   const bytes = new Uint8Array(text.length)
   for (let index = 0; index < text.length; index += 1) {
     const code = text.charCodeAt(index)
-    if (code > 255) throw new Error('PDF-Export hat ein Zeichen außerhalb von Latin-1 erzeugt.')
-    bytes[index] = code
+    // Characters outside Latin-1 cannot be drawn with the built-in font: show a "?" instead of failing.
+    bytes[index] = code > 255 ? 0x3f : code
   }
   return bytes
 }
