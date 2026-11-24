@@ -161,7 +161,7 @@ try {
     assert.match(appSource, /exportNonTextNote\(/)
     assert.match(appSource, /import\('\.\/lib\/noteExport'\)/)
     assert.match(appSource, /noteInkId\(current\.note\)/)
-    assert.match(appSource, /exportOpenCanvas\(/)
+    assert.match(appSource, /exportNonTextNoteBytes\(/)
     assert.match(appSource, /finishCanvasExport\(/)
     assert.equal(drawingSource.includes('simple-latex-tools'), false)
     assert.equal(drawingSource.includes('EditorExportControls'), false)
