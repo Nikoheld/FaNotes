@@ -151,8 +151,13 @@ const session = async (theme, full) => {
     await sleep(400)
     const chip = await page.locator('.sheet-doc-chip').first().innerText().catch(() => '')
     ok(`${label} PDF worksheet has no bar, only a chip with the page count`, await page.locator('.worksheet-toolbar').count() === 0 && /2 Seiten/u.test(chip), chip)
-    const chrome = await rectOf(page, '.sheet-doc-chrome')
-    ok(`${label} PDF chip and remove button stay inside the window`, await insideWindow(chrome, page), JSON.stringify(chrome))
+    // The chip sits inside the first page's corner (the page may be scrolled partly out of view while it paints).
+    const chrome = await page.evaluate(() => {
+      const bar = document.querySelector('.sheet-doc-chrome')?.getBoundingClientRect()
+      const layer = document.querySelector('.worksheet-layer.is-document')?.getBoundingClientRect()
+      return bar && layer ? { insideLayer: bar.left >= layer.left && bar.right <= layer.right && bar.top >= layer.top && bar.bottom <= layer.bottom, insideWidth: bar.left >= 0 && bar.right <= innerWidth } : null
+    })
+    ok(`${label} PDF chip and remove button stay inside the page and the window width`, chrome?.insideLayer && chrome?.insideWidth, JSON.stringify(chrome))
     await page.screenshot({ path: path.join(shots, `pdf-worksheet-${theme}.png`) })
 
     // --- Paste: a floating, selected object ------------------------------------------------------------------------
