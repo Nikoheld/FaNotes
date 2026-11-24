@@ -82,15 +82,28 @@ fun updateChannelId(raw: String?): String = when (raw) {
 const val CHANNEL_AUTO_STABLE_KEY = "update-channel-auto-stable"
 
 /**
- * One-time migration: a device on Beta that first runs a Stable version moves to Stable,
+ * The owner moves every Beta device to Stable again from this stable on: a marker older than
+ * this version counts as not done, so the migration runs once more on the first stable at or
+ * above it (2026.11.4 or a later one). Same value as desktop `AUTO_STABLE_ROUND`.
+ */
+const val CHANNEL_AUTO_STABLE_ROUND = "2026.11.4"
+
+/**
+ * Migration once per round: a device on Beta that first runs a Stable version moves to Stable,
  * silently. The marker is written even when nothing changes, so a later manual switch back
- * to Beta sticks, also across later stables. Nightly is not beta-like (it only prefers newer
- * stables) and stays unchanged. Returns null when [settings] need no write. The switch never
- * downgrades: updates are only offered when newer than the installed version.
+ * to Beta sticks within the round, also across later stables. Nightly is not beta-like (it
+ * only prefers newer stables) and stays unchanged. Returns null when [settings] need no write.
+ * The switch never downgrades: updates are only offered when newer than the installed version.
  */
 fun migrateBetaToStable(settings: Map<String, String>, installed: String): Map<String, String>? {
-    if (!settings[CHANNEL_AUTO_STABLE_KEY].isNullOrEmpty()) return null
     if (releaseVersionChannel(installed) != "stable") return null
+    val marker = settings[CHANNEL_AUTO_STABLE_KEY].orEmpty()
+    if (marker.isNotEmpty()) {
+        val earlierRound = parseReleaseVersion(marker) != null &&
+            compareReleaseVersions(installed, CHANNEL_AUTO_STABLE_ROUND) >= 0 &&
+            compareReleaseVersions(marker, CHANNEL_AUTO_STABLE_ROUND) < 0
+        if (!earlierRound) return null
+    }
     val next = settings + (CHANNEL_AUTO_STABLE_KEY to installed)
     return if (settings["update-channel"] == "beta") next + ("update-channel" to "stable") else next
 }

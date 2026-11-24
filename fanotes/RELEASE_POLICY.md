@@ -17,7 +17,7 @@ Stable receives only stable releases. Beta receives stable releases plus newer p
 
 Switching from Beta to Stable never installs an older build. A user who is ahead of Stable remains on the installed beta until a newer stable release exists.
 
-Once per device, the first time a Beta-channel install runs a stable version (desktop and Android tablet), its channel is switched to Stable silently and a persisted marker (`channelAutoStableDoneAt` on desktop, `update-channel-auto-stable` on Android) is set so the migration never repeats; a later manual choice of Beta sticks, and Nightly users are left unchanged.
+Once per device and round, the first time a Beta-channel install runs a stable version (desktop and Android tablet), its channel is switched to Stable silently and a persisted marker (`channelAutoStableDoneAt` on desktop, `update-channel-auto-stable` on Android) is set so the migration does not repeat; a later manual choice of Beta sticks, and Nightly users are left unchanged. A new round starts only when the maintainer raises the round version (`AUTO_STABLE_ROUND` in `electron/channel-migration.cjs`, `CHANNEL_AUTO_STABLE_ROUND` in `AndroidUpdate.kt`, always both): a marker older than it counts as not done, so Beta devices move to Stable again on their first stable at or above it. Round 1 was 2026.11.3; round 2 is 2026.11.4.
 
 ## Stable cadence
 

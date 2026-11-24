@@ -17,11 +17,24 @@ class AndroidUpdateTest {
         // Manual beta afterwards sticks on restart and on a later stable.
         val manual = moved + ("update-channel" to "beta")
         assertNull(migrateBetaToStable(manual, "2026.11.3"))
-        assertNull(migrateBetaToStable(manual, "2026.11.4"))
+        // Second round (owner, 2026-11-24): a marker from before the round moves beta to stable once more,
+        // on 2026.11.4 or on the first later stable.
+        assertEquals("2026.11.4", CHANNEL_AUTO_STABLE_ROUND)
+        val again = migrateBetaToStable(manual, "2026.11.4")!!
+        assertEquals("stable", again["update-channel"])
+        assertEquals("2026.11.4", again[key])
+        assertEquals("stable", migrateBetaToStable(manual, "2026.12.1")!!["update-channel"])
+        assertNull(migrateBetaToStable(manual, "2026.11.5-beta.1"))
+        // Within the round a manual beta sticks again, also across later stables.
+        val manualAgain = again + ("update-channel" to "beta")
+        assertNull(migrateBetaToStable(manualAgain, "2026.11.4"))
+        assertNull(migrateBetaToStable(manualAgain, "2026.12.1"))
+        // A broken marker is left alone.
+        assertNull(migrateBetaToStable(mapOf("update-channel" to "beta", key to "garbage"), "2026.11.4"))
         // Stable users keep stable; the marker is still set so a later manual beta sticks.
-        val stable = migrateBetaToStable(mapOf("update-channel" to "stable"), "2026.11.3")!!
+        val stable = migrateBetaToStable(mapOf("update-channel" to "stable"), "2026.11.4")!!
         assertEquals("stable", stable["update-channel"])
-        assertNull(migrateBetaToStable(stable + ("update-channel" to "beta"), "2026.11.4"))
+        assertNull(migrateBetaToStable(stable + ("update-channel" to "beta"), "2026.12.1"))
         // Nightly is not beta-like and stays unchanged.
         assertEquals("nightly", migrateBetaToStable(mapOf("update-channel" to "nightly"), "2026.11.3")!!["update-channel"])
         // Running a beta or nightly version changes nothing; the first stable afterwards migrates.
