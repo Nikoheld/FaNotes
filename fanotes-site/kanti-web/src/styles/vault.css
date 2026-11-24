@@ -32,3 +32,55 @@ span.task-main { cursor: default; }
 .entry-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-top: var(--s4); padding-top: var(--s3); border-top: 1px solid var(--hairline); }
 .entry-actions p { flex-basis: 100%; margin: 0; }
 @media (max-width: 640px) { .form-row { grid-template-columns: minmax(0, 1fr); } }
+
+/* Notes */
+.columns-notes { display: grid; grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.6fr); gap: var(--s5); align-items: start; }
+.notes-library { padding: var(--s3); position: sticky; top: calc(var(--topbar) + var(--s2)); max-height: calc(100vh - var(--topbar) - var(--s6)); overflow: auto; }
+.notes-search { display: flex; flex-direction: column; gap: var(--s2); margin-bottom: var(--s3); }
+.note-list { display: flex; flex-direction: column; gap: 2px; }
+.crumbs { display: flex; flex-wrap: wrap; gap: 2px var(--s1); margin-bottom: var(--s2); }
+.crumbs button { background: transparent; border: none; padding: 2px 4px; color: var(--muted); font-weight: 600; cursor: pointer; border-radius: 6px; }
+.crumbs button:hover { background: var(--tint); color: var(--text); }
+.note-row { display: flex; align-items: center; gap: var(--s3); width: 100%; padding: 9px 10px; border: none; border-radius: var(--radius-m); background: transparent; text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.note-row:hover { background: var(--tint); }
+.note-row.selected { background: var(--accent-soft); }
+.note-row .icon { flex: none; color: var(--muted); }
+.note-row-main { display: flex; flex-direction: column; min-width: 0; }
+.note-row-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-excerpt { margin: 0 10px 6px 38px; color: var(--muted); font-size: var(--text-s); }
+.trash-row { margin-top: var(--s3); border-top: 1px solid var(--hairline); border-radius: 0 0 var(--radius-m) var(--radius-m); }
+.trash-list { padding: 0 var(--s2); }
+.note-reader { padding: var(--s5) var(--s6); min-height: 320px; min-width: 0; }
+.note-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s3); margin-bottom: var(--s4); }
+.note-head h2 { font-size: 24px; letter-spacing: -0.02em; }
+.note-head p { margin: 2px 0 0; }
+.note-tools { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s3); }
+.note-editor { width: 100%; min-height: 55vh; font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+.md { line-height: 1.65; overflow-wrap: anywhere; }
+.md h1, .md h2, .md h3, .md h4 { margin: 1.2em 0 0.4em; letter-spacing: -0.01em; }
+.md h1 { font-size: 26px; } .md h2 { font-size: 21px; } .md h3 { font-size: 18px; }
+.md p, .md ul, .md ol, .md blockquote, .md pre { margin: 0 0 0.9em; }
+.md blockquote { padding: 2px 14px; border-left: 3px solid var(--accent); color: var(--muted); }
+.md pre { padding: 12px 14px; border-radius: var(--radius-m); background: var(--sunken); overflow: auto; }
+.md code { padding: 1px 5px; border-radius: 5px; background: var(--sunken); font-size: 0.92em; }
+.md pre code { padding: 0; background: transparent; }
+.md a { color: var(--accent); }
+.md a.missing { color: var(--muted); text-decoration: underline dotted; }
+.md .md-table { overflow-x: auto; margin-bottom: 0.9em; }
+.md table { border-collapse: collapse; } .md th, .md td { padding: 6px 12px; border: 1px solid var(--hairline); text-align: left; }
+.md li.md-task { list-style: none; margin-left: -1.2em; } .md li.md-task input { margin-right: 8px; }
+.md-image { max-width: 100%; height: auto; border-radius: var(--radius-m); }
+.note-media { width: 100%; max-height: 70vh; }
+.ink-pages { display: flex; flex-direction: column; gap: var(--s4); }
+.ink-pages figure { margin: 0; } .ink-pages canvas { max-width: 100%; border-radius: var(--radius-m); box-shadow: var(--shadow-1); }
+.ink-pages figcaption { color: var(--muted); font-size: var(--text-s); margin-bottom: 4px; }
+.story .story-quote { font-style: italic; }
+.pdf-viewer { display: flex; flex-direction: column; gap: var(--s3); }
+.pdf-tools { display: flex; align-items: center; gap: var(--s2); }
+.pdf-pages { display: flex; flex-direction: column; align-items: center; gap: var(--s3); overflow: auto; max-height: 75vh; padding: 4px; background: var(--sunken); border-radius: var(--radius-m); }
+.pdf-page canvas { display: block; background: #fff; box-shadow: var(--shadow-1); }
+@media (max-width: 1000px) {
+  .columns-notes { grid-template-columns: minmax(0, 1fr); }
+  .notes-library { position: static; max-height: none; }
+  .note-reader { padding: var(--s4); }
+}

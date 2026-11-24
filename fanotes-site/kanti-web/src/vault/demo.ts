@@ -14,6 +14,7 @@ export const demoVaultFiles = (today = zurichToday()): Record<string, string> =>
       { id: 'demo-task-2', title: 'Vokabeln lernen', notes: '', subject: 'Französisch', dueDate: addDays(today, 3), dueTime: '08:00', done: false, kind: 'homework', priority: 'high', createdAt: '', updatedAt: '' },
     ],
   }),
+  'Mathematik/Ableitungen.md': '# Ableitungen\n\nDie **Ableitung** von $x^2$ ist `2x`.\n\n- Potenzregel\n- Produktregel\n\n> Üben, üben, üben.\n',
   [CALENDAR_NOTE_PATH]: serializeCalendar({
     ...emptyCalendar(),
     events: [{ id: 'demo-event-1', calendarId: 'personal', title: 'Training', start: `${addDays(today, 2)}T18:00`, end: `${addDays(today, 2)}T19:30`, allDay: false, location: '', notes: '', notePath: '', recurrence: 'weekly', recurrenceUntil: null, exceptionDates: [] }],

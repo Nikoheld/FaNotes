@@ -37,6 +37,12 @@ export default defineConfig({
     assetsInlineLimit: 0,
     target: 'es2022',
     chunkSizeWarningLimit: 800,
+    rollupOptions: {
+      output: {
+        // The pdf.js worker is an .mjs file; serve it as .js so every static server sends a JavaScript MIME type.
+        assetFileNames: (asset) => (asset.names?.some((name) => name.endsWith('.mjs')) ? 'assets/[name]-[hash].js' : 'assets/[name]-[hash][extname]'),
+      },
+    },
   },
   test: {
     environment: 'node',

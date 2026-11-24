@@ -21,6 +21,7 @@ const Absences = lazy(() => import('./views/Absences').then((module) => ({ defau
 const Agenda = lazy(() => import('./views/Agenda').then((module) => ({ default: module.Agenda })))
 const Mensa = lazy(() => import('./views/Mensa').then((module) => ({ default: module.Mensa })))
 const Grades = lazy(() => import('./views/Grades').then((module) => ({ default: module.Grades })))
+const Notes = lazy(() => import('./views/Notes').then((module) => ({ default: module.Notes })))
 const Settings = lazy(() => import('./views/Settings').then((module) => ({ default: module.Settings })))
 const Timetable = lazy(() => import('./views/Timetable').then((module) => ({ default: module.Timetable })))
 const Updates = lazy(() => import('./views/Updates').then((module) => ({ default: module.Updates })))
@@ -30,7 +31,7 @@ const ViewLoading = () => <div className="loading"><span className="spinner" /><
 /** Where a new group starts in the sidebar: school, on the way, then the settings at the bottom. */
 const NAV_CLASS: Partial<Record<View, string>> = { timetable: 'nav-group', commute: 'nav-group', settings: 'nav-end' }
 
-const ICONS: Record<View, IconName> = { today: 'today', timetable: 'timetable', grades: 'grades', agenda: 'agenda', absences: 'absences', updates: 'updates', mensa: 'restaurant', commute: 'train', settings: 'settings' }
+const ICONS: Record<View, IconName> = { today: 'today', timetable: 'timetable', grades: 'grades', agenda: 'agenda', absences: 'absences', updates: 'updates', mensa: 'restaurant', commute: 'train', notes: 'note', settings: 'settings' }
 
 /** The theme as CSS variables on the root, following the system light/dark switch for "system". */
 const useTheme = () => {
@@ -257,7 +258,7 @@ export const App = () => {
     )
   }
 
-  const views: Record<View, ComponentType> = { today: Today, timetable: Timetable, grades: Grades, agenda: Agenda, absences: Absences, updates: Updates, mensa: Mensa, commute: Commute, settings: Settings }
+  const views: Record<View, ComponentType> = { today: Today, timetable: Timetable, grades: Grades, agenda: Agenda, absences: Absences, updates: Updates, mensa: Mensa, commute: Commute, notes: Notes, settings: Settings }
   const Current = views[route.view]
   const status = data.status
   return (

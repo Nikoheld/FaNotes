@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { EVENT_TITLE, OWN_MARK_TITLE, PASSWORD, TASK_TITLE, appIdentity, vaultAccount } from './seed'
+import { EVENT_TITLE, OWN_MARK_TITLE, PASSWORD, STORY_TEXT, TASK_TITLE, appIdentity, noteFiles, vaultAccount } from './seed'
 
 const base = () => `http://127.0.0.1:${Number(process.env.E2E_PORT || 4783)}`
 
@@ -180,5 +180,101 @@ test('own data: marks, tasks, events, hidden lessons and planned absences are ed
   expect(book).toContain('"archived":["fremd"]')
   expect(book).toContain('E2E Note Xi')
   expect(book).toContain('E2E Note Lambda')
+  expect(problems).toEqual([])
+})
+
+test('notes: library, sanitised markdown, handwriting, PDF, image, audio, story, search and a safe text edit', async ({ page }) => {
+  const problems = watch(page)
+  const { email, client } = await vaultAccount(base(), noteFiles())
+  await signIn(page, email)
+  await page.goto('/notizen')
+  // The library lists the folders; the app's own files and the internal folder never show.
+  await expect(page.getByRole('button', { name: /E2E Fach/ })).toBeVisible()
+  await expect(page.getByText('Hausaufgaben')).toHaveCount(0)
+  await expect(page.getByText('grade-book')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /E2E Geschichte/ })).toBeVisible()
+  await page.getByRole('button', { name: /E2E Fach/ }).click()
+
+  // Markdown: rendered, and a script in the text stays text.
+  await page.getByRole('button', { name: /E2E Notiz Iota/ }).click()
+  await expect(page.locator('.md h1')).toHaveText('E2E Überschrift Kappa')
+  await expect(page.locator('.md strong')).toHaveText('fetter')
+  await expect(page.locator('.md a[href="https://example.test"]')).toHaveAttribute('rel', /noopener/)
+  await expect(page.locator('.md')).toContainText('<script>alert(1)</script>')
+  await expect(page.locator('.md script')).toHaveCount(0)
+
+  // An image in a note comes from the vault; a wiki link opens the other note.
+  await page.getByRole('button', { name: /E2E Bildnotiz/ }).click()
+  const embedded = page.locator('.md img.md-image')
+  await expect(embedded).toBeVisible()
+  expect(await embedded.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth)).toBe(2)
+  await page.locator('.md a.wikilink').click()
+  await expect(page.locator('.md h1')).toHaveText('E2E Überschrift Kappa')
+
+  // Handwriting: the strokes are drawn on a canvas.
+  await page.getByRole('button', { name: /E2E Handschrift/ }).click()
+  const ink = page.locator('.ink-pages canvas')
+  await expect(ink).toBeVisible()
+  const red = await ink.evaluate((canvas: HTMLCanvasElement) => {
+    const data = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data
+    let count = 0
+    for (let i = 0; i < data.length; i += 4) if (data[i] > 180 && data[i + 1] < 60 && data[i + 2] < 60) count += 1
+    return count
+  })
+  expect(red).toBeGreaterThan(50)
+
+  // PDF: pdf.js draws it from the same origin (CSP script-src and worker-src 'self'), with zoom.
+  await page.getByRole('button', { name: /E2E Skript/ }).click()
+  const pdfCanvas = page.locator('.pdf-page canvas').first()
+  await expect(pdfCanvas).toBeVisible({ timeout: 15_000 })
+  await expect.poll(() => pdfCanvas.evaluate((canvas: HTMLCanvasElement) => {
+    const data = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data
+    let dark = 0
+    for (let i = 0; i < data.length; i += 4) if (data[i] < 100 && data[i + 1] < 100 && data[i + 2] < 100) dark += 1
+    return dark
+  }), { timeout: 15_000 }).toBeGreaterThan(30)
+  const before = await pdfCanvas.evaluate((canvas: HTMLCanvasElement) => canvas.clientWidth)
+  await page.getByRole('button', { name: 'Vergrössern' }).click()
+  await expect.poll(() => pdfCanvas.evaluate((canvas: HTMLCanvasElement) => canvas.clientWidth)).toBeGreaterThan(before)
+
+  // Image and audio.
+  await page.getByRole('button', { name: /E2E Bild\b/ }).first().click()
+  await expect(page.locator('img.note-image')).toBeVisible()
+  await page.getByRole('button', { name: /E2E Ton/ }).click()
+  await expect(page.locator('audio.note-media')).toBeVisible()
+  await expect.poll(() => page.locator('audio.note-media').evaluate((audio: HTMLAudioElement) => audio.readyState)).toBeGreaterThan(0)
+
+  // A story, read only.
+  await page.goto('/notizen')
+  await page.getByRole('button', { name: /E2E Geschichte/ }).click()
+  await expect(page.locator('.story')).toContainText(STORY_TEXT)
+  await expect(page.locator('.story')).toContainText('Szene Pi')
+
+  // Search by title and by text.
+  await page.getByRole('searchbox', { name: 'Alle Notizen durchsuchen' }).fill('Skript')
+  await expect(page.getByRole('button', { name: /E2E Skript/ })).toBeVisible()
+  await page.getByRole('searchbox', { name: 'Alle Notizen durchsuchen' }).fill('fetter')
+  await expect(page.getByRole('button', { name: /E2E Notiz Iota/ })).toBeVisible()
+  await page.getByRole('searchbox', { name: 'Alle Notizen durchsuchen' }).fill('')
+
+  // Editing the text: saved with the revision that was read.
+  await page.goto('/notizen?ordner=E2E%20Fach&notiz=E2E%20Fach%2FE2E%20Notiz%20Iota.md')
+  await page.getByRole('button', { name: 'Bearbeiten' }).click()
+  await page.getByRole('textbox', { name: 'Bearbeiten' }).fill('# Neu geschrieben\n')
+  await page.getByRole('button', { name: 'Notiz speichern' }).click()
+  await expect(page.locator('.md h1')).toHaveText('Neu geschrieben')
+  await client.sync()
+  expect(new TextDecoder().decode((await client.read('E2E Fach/E2E Notiz Iota.md')).bytes!)).toBe('# Neu geschrieben\n')
+
+  // Edit while another device changes the note: nothing is overwritten.
+  await page.getByRole('button', { name: 'Bearbeiten' }).click()
+  await page.getByRole('textbox', { name: 'Bearbeiten' }).fill('# Meine Fassung\n')
+  await client.update('E2E Fach/E2E Notiz Iota.md', () => new TextEncoder().encode('# Fassung vom Handy\n'))
+  await page.getByRole('button', { name: 'Notiz speichern' }).click()
+  await expect(page.getByText('woanders geändert')).toBeVisible()
+  await client.sync()
+  expect(new TextDecoder().decode((await client.read('E2E Fach/E2E Notiz Iota.md')).bytes!)).toBe('# Fassung vom Handy\n')
+  await page.getByRole('button', { name: 'Neu laden', exact: true }).click()
+  await expect(page.locator('.md h1')).toHaveText('Fassung vom Handy')
   expect(problems).toEqual([])
 })

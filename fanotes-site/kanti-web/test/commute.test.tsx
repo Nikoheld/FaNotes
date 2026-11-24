@@ -217,8 +217,10 @@ describe('demo connection links', () => {
 describe('navigation', () => {
   it('puts Pendeln before Settings with its own shortcuts', () => {
     expect(VIEWS.slice(-2)).toEqual(['commute', 'settings'])
-    expect(shortcutFor({ key: '7' })).toEqual({ type: 'view', view: 'commute' })
-    expect(shortcutFor({ key: '8' })).toEqual({ type: 'view', view: 'settings' })
+    // Notizen sits before Pendeln, so the number keys follow the menu order: 7 Notizen, 8 Pendeln, 9 Einstellungen.
+    expect(shortcutFor({ key: '7' })).toEqual({ type: 'view', view: 'notes' })
+    expect(shortcutFor({ key: '8' })).toEqual({ type: 'view', view: 'commute' })
+    expect(shortcutFor({ key: '9' })).toEqual({ type: 'view', view: 'settings' })
     expect(shortcutFor({ key: 'w' }, true)).toEqual({ type: 'view', view: 'commute' })
   })
 })

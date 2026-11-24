@@ -47,6 +47,12 @@ exactly like the apps do it. A browser paired by code has no password, so it sho
   cannot know it, so Settings lets the user pick the slot for each further connection.
 - nginx must proxy `/api/v1/sync/` (only the routes the page uses) to the same Node service; the CSP stays
   `connect-src 'self'`. Local development: `vite.config.ts` proxies `/api` to `KANTI_WEB_DEV_API`.
+- Notizen (`/notizen`): the library tree, recently edited first, search over titles and text, and readers for
+  markdown (own sanitising renderer: raw HTML stays text, only http(s)/mailto links), handwriting (`.famd`, ported
+  from `public/viewer`), PDFs (pdf.js, its worker is a file of the site, so `script-src`/`worker-src 'self'` hold),
+  images (data: URLs), audio and video (blob: URLs, needs `media-src 'self' blob:`) and stories (read only). Markdown
+  text can be edited; the save only goes through when the file is still what the edit started from (otherwise
+  nothing is written). Ink editing is not available in the browser.
 - The build imports `fanotes/src/lib/sync/{crypto,api}.ts`: a deploy that stages only `fanotes-site` must stage
   that directory too.
 
