@@ -3,6 +3,7 @@ package ch.fasrv.fanotes.schulnetz
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.escapeJson
 import ch.fasrv.fanotes.json.parseJson
+import ch.fasrv.fanotes.json.stringify
 
 private val LIST_KEYS = setOf(
     "data", "items", "results", "grades", "events", "exams", "absences", "homework",
@@ -193,7 +194,7 @@ fun parseWeight(raw: String): Double {
     return value
 }
 
-fun SchulnetzSnapshot.toNormalizedJson(): String = buildString {
+fun SchulnetzSnapshot.toNormalizedJson(withHistory: Boolean = true): String = buildString {
     append("{\"revision\":").append(revision)
     append(",\"fetchedAt\":").append(escapeJson(fetchedAt))
     append(",\"profile\":")
@@ -229,6 +230,7 @@ fun SchulnetzSnapshot.toNormalizedJson(): String = buildString {
     }
     append("]")
     teacherAbsences?.let { append(",\"teacherAbsences\":").appendTeacherAbsences(it) }
+    if (withHistory && gradeHistory.isNotEmpty()) append(",\"gradeHistory\":").append(gradeTracksToJson(gradeHistory).stringify())
     append(",\"readErrors\":[")
     readErrors.forEachIndexed { index, line ->
         if (index > 0) append(',')
@@ -286,6 +288,7 @@ fun parseNormalizedSnapshot(json: String): SchulnetzSnapshot? {
         kontoSaldo = obj.flexString("kontoSaldo"),
         startMessages = obj.array("startMessages")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value },
         teacherAbsences = obj.obj("teacherAbsences")?.toTeacherAbsences(),
+        gradeHistory = parseGradeTracks(obj.fields["gradeHistory"]),
         readErrors = obj.array("readErrors")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value },
         weekFetched = obj.obj("weekFetched")?.fields.orEmpty().mapNotNull { (key, value) ->
             val stamp = (value as? JsonValue.Str)?.value ?: return@mapNotNull null

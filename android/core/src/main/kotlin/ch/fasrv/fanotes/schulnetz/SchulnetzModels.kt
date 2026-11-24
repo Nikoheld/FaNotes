@@ -260,6 +260,11 @@ data class SchulnetzSnapshot(
     val absenceRemaining: Double? = null,
     /** [ABSENCE_PARSER_VERSION] of the page read that produced [absences]; 0 for REST and older reads. */
     val absenceParser: Int = 0,
+    /**
+     * Version history of every grade: from the server (a server-linked connection, which asks for it) or
+     * kept on the device by [updateGradeHistory] (TAM and a connection without a server link). Never uploaded.
+     */
+    val gradeHistory: List<GradeTrack> = emptyList(),
 )
 
 /** 2: marks with an info tooltip and rows still waiting for a mark are read. */

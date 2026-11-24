@@ -2017,13 +2017,31 @@ class CompanionGraph(private val context: Context, val client: SchulnetzClient =
                 icalFetchedAt = previous.icalFetchedAt,
             )
             publishSnapshot(previous, next, notifySettings())
-            vault.write(sp(SNAPSHOT_VAULT_PATH), next.toNormalizedJson().encodeToByteArray())
+            vault.write(sp(SNAPSHOT_VAULT_PATH), next.toNormalizedJson(withHistory = false).encodeToByteArray())
             engine.notifyLocalChange()
+        }
+
+        /**
+         * The grade history of the snapshot being published. A server-linked connection takes the server's
+         * (or keeps what it had); any other connection (TAM, no server link) keeps its own history on the
+         * device with the server's rules. A kept (untrusted or partial) grade list removes nothing.
+         */
+        private fun gradeHistoryFor(previous: SchulnetzSnapshot?, incoming: SchulnetzSnapshot, kept: List<ch.fasrv.fanotes.schulnetz.SchoolGrade>): List<ch.fasrv.fanotes.schulnetz.GradeTrack> {
+            if (schoolLinked()) return incoming.gradeHistory.ifEmpty { previous?.gradeHistory.orEmpty() }
+            val took = kept === incoming.grades
+            return ch.fasrv.fanotes.schulnetz.updateGradeHistory(
+                history = previous?.gradeHistory.orEmpty(),
+                previousGrades = ch.fasrv.fanotes.schulnetz.gradeHistoryBase(previous, incoming.copy(grades = kept)),
+                nextGrades = kept,
+                at = isoNow(),
+                trusted = took && incoming.trustedGradeRead(),
+            )
         }
 
         private fun publishSnapshot(previous: SchulnetzSnapshot?, incoming: SchulnetzSnapshot, settings: NotifySettings) {
             if (demoActive() || incoming.isDemo()) return
-            val next = incoming.copy(grades = ch.fasrv.fanotes.schulnetz.keepGradeRead(previous?.grades.orEmpty(), incoming.grades, incoming.trustedGradeRead()))
+            val keptGrades = ch.fasrv.fanotes.schulnetz.keepGradeRead(previous?.grades.orEmpty(), incoming.grades, incoming.trustedGradeRead())
+            val next = incoming.copy(grades = keptGrades, gradeHistory = gradeHistoryFor(previous, incoming, keptGrades))
             val hidden = hiddenLessons()
             val local = notifySettings()
             val effective = settings.copy(guessGrades = local.guessGrades)

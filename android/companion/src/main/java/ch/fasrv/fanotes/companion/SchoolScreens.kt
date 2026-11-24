@@ -208,6 +208,9 @@ fun CourseScreen(model: CompanionModel) {
     var adjusting by remember { mutableStateOf<WeightedMark?>(null) }
     var customize by remember { mutableStateOf(false) }
     var confirmArchive by remember { mutableStateOf(false) }
+    var versions by remember { mutableStateOf<GradeTrack?>(null) }
+    val gradeHistory = model.snapshot.gradeHistory
+    val removedTracks = remember(gradeHistory, course.courseId) { removedGradeTracks(gradeHistory, course.courseId) }
     var menu by remember { mutableStateOf(false) }
     var target by rememberSaveable { mutableStateOf("5.0") }
     var weight by rememberSaveable { mutableStateOf("1") }
@@ -255,8 +258,13 @@ fun CourseScreen(model: CompanionModel) {
                     onReveal = { model.openReveal(listOf(mark.targetId)) },
                     onAdjust = { adjusting = mark },
                     onRestore = { model.restoreGradeAdjustment(mark.targetId) },
+                    onHistory = gradeTrackFor(gradeHistory, mark.targetId)?.let { track -> { versions = track } },
                 )
             }
+        }
+        if (removedTracks.isNotEmpty()) item(key = "removed") {
+            Spacer(Modifier.height(12.dp))
+            RemovedGradesBlock(removedTracks, decimals, model.hiddenGradeIds(), onOpen = { versions = it })
         }
         item(key = "own-head") { SectionLabel(t(R.string.your_marks), t(R.string.add)) { editingOwn = null; addingOwn = true } }
         item(key = "own-help") { Text(t(R.string.your_own_grades_count_in_this_average_promotion), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp)) }
@@ -311,6 +319,7 @@ fun CourseScreen(model: CompanionModel) {
             }
         }
     }
+    versions?.let { track -> GradeVersionSheet(track, decimals, track.targetIds().any { model.isUnrevealed(it) }) { versions = null } }
     if (addingOwn) OwnGradeDialog(course.courseId, editingOwn, { addingOwn = false; editingOwn = null }) { grade -> model.saveOwnGrade(grade); addingOwn = false; editingOwn = null }
     if (addingCollective) CollectiveGradeDialog(course.courseId, editingCollective, { addingCollective = false; editingCollective = null }) { grade -> model.saveCollectiveGrade(grade); addingCollective = false; editingCollective = null }
     adjusting?.let { mark ->

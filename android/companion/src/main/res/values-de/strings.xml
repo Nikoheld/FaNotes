@@ -1545,4 +1545,13 @@
     <string name="show_more">Mehr zeigen</string>
     <string name="appointments">Termine</string>
     <string name="trend_needs_marks">Das Diagramm erscheint, sobald Noten da sind.</string>
+    <string name="grade_version_history">Versionsverlauf</string>
+    <string name="grade_history_of">Versionsverlauf von %1$s</string>
+    <string name="grade_current">aktuell</string>
+    <string name="grade_seen_on">Gesehen am %1$s</string>
+    <string name="grade_version_detail">Gewicht %1$s · %2$s</string>
+    <string name="grade_version_hidden">Verdeckt, bis du sie aufdeckst</string>
+    <string name="removed_grades">Entfernte Noten</string>
+    <string name="removed_grades_help">Schulnetz führt diese Noten nicht mehr. Sie zählen in keinem Schnitt.</string>
+    <string name="grade_removed_on">Entfernt am %1$s</string>
 </resources>

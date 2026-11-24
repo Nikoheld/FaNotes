@@ -105,9 +105,18 @@ fun settleGradeNotifications(
     return GradeSettlement(fresh, known, migrated = false)
 }
 
-internal fun matchGradeChanges(previous: List<SchoolGrade>, next: List<SchoolGrade>): List<SchulnetzChange> {
+/** Result of [matchGradeLists]: per grade of `next` the index into `previous` (or null), and the loose key counts of `next`. */
+internal class GradeMatches(val matches: List<Int?>, val nextLoose: Map<String, Int>)
+
+/**
+ * The one matcher of old grade rows to new ones, shared by the notification diff and the grade history
+ * (same as matchGradeLists in schulnetz-logic.mjs): row id, then identical content, then the loose key
+ * when that mark is unique on both sides. Each old row is used at most once.
+ */
+internal fun matchGradeLists(previous: List<SchoolGrade>, next: List<SchoolGrade>): GradeMatches {
     val consumed = mutableSetOf<Int>()
-    val prevById = previous.mapIndexed { index, grade -> grade.id to index }.toMap()
+    val prevById = mutableMapOf<String, Int>()
+    previous.forEachIndexed { index, grade -> prevById[grade.id] = index }
     val prevByContent = mutableMapOf<String, MutableList<Int>>()
     val looseBuckets = mutableMapOf<String, MutableList<Int>>()
     previous.forEachIndexed { index, grade ->
@@ -115,8 +124,7 @@ internal fun matchGradeChanges(previous: List<SchoolGrade>, next: List<SchoolGra
         looseBuckets.getOrPut(partKey(gradeLooseParts(grade))) { mutableListOf() }.add(index)
     }
     val nextLoose = looseCounts(next)
-    val changes = mutableListOf<SchulnetzChange>()
-    for (grade in next) {
+    val matches = next.map { grade ->
         val content = partKey(gradeContentParts(grade))
         val loose = partKey(gradeLooseParts(grade))
         var matchedIndex: Int? = prevById[grade.id]?.takeIf { it !in consumed }
@@ -127,16 +135,28 @@ internal fun matchGradeChanges(previous: List<SchoolGrade>, next: List<SchoolGra
             val bucket = looseBuckets[loose].orEmpty()
             if (bucket.size == 1 && bucket[0] !in consumed) matchedIndex = bucket[0]
         }
-        val matched = matchedIndex?.let { previous[it] }
         if (matchedIndex != null) consumed += matchedIndex
-        if (matched != null) {
-            val same = partKey(gradeContentParts(matched)) == content ||
-                partKey(gradeLooseParts(matched)) == loose ||
-                gradeKey(matched) == gradeKey(grade)
-            if (same) continue
-        }
+        matchedIndex
+    }
+    return GradeMatches(matches, nextLoose)
+}
+
+/** True when a matched old and new row carry the same grade (the notification diff's "not news"). */
+internal fun sameGradeContent(matched: SchoolGrade, grade: SchoolGrade): Boolean =
+    partKey(gradeContentParts(matched)) == partKey(gradeContentParts(grade)) ||
+        partKey(gradeLooseParts(matched)) == partKey(gradeLooseParts(grade)) ||
+        gradeKey(matched) == gradeKey(grade)
+
+internal fun matchGradeChanges(previous: List<SchoolGrade>, next: List<SchoolGrade>): List<SchulnetzChange> {
+    val found = matchGradeLists(previous, next)
+    val nextLoose = found.nextLoose
+    val changes = mutableListOf<SchulnetzChange>()
+    next.forEachIndexed { position, grade ->
+        val loose = partKey(gradeLooseParts(grade))
+        val matched = found.matches[position]?.let { previous[it] }
+        if (matched != null && sameGradeContent(matched, grade)) return@forEachIndexed
         // A row still waiting for its mark is not news. Its mark arriving is a new grade.
-        if (grade.mark == null) continue
+        if (grade.mark == null) return@forEachIndexed
         val key = gradeKey(grade)
         val course = grade.courseLabel.ifBlank { "Kurs" }
         val name = grade.title.ifBlank { "Note" }
