@@ -233,6 +233,8 @@ export type WorksheetCloneSource = {
   highlights?: unknown
   pageWidth?: number
   pageHeight?: number
+  placement?: unknown
+  aspect?: number
 }
 
 const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -249,4 +251,5 @@ export const clonedWorksheetDocument = <T extends WorksheetCloneSource & { id: s
   ...(Number.isFinite(original.pageWidth) && Number.isFinite(original.pageHeight)
     ? { pageWidth: original.pageWidth, pageHeight: original.pageHeight }
     : {}),
+  ...(original.placement ? { placement: cloneJson(original.placement), aspect: original.aspect } : {}),
 }) as T

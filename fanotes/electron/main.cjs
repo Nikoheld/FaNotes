@@ -3260,6 +3260,8 @@ function validateWorksheetBytes(buffer, extension) {
   if (!valid) throw new Error('Die ausgewählte Datei stimmt nicht mit ihrem Bild- oder PDF-Format überein.')
 }
 
+// Lowest top edge of a floating picture, in paper widths (a very long note stays reachable).
+const SHEET_IMAGE_MAX_Y = 2000
 function validateWorksheetDocument(candidate, expectedId) {
   if (!isPlainObject(candidate)) throw new Error('Die Arbeitsblattdaten sind ungültig.')
   const id = assertWorksheetId(expectedId ?? candidate.id)
@@ -3325,6 +3327,18 @@ function validateWorksheetDocument(candidate, expectedId) {
     const color = typeof mark.color === 'string' && /^#[0-9a-f]{6}$/iu.test(mark.color) ? mark.color.toLowerCase() : '#ffe566'
     return { id: mark.id, page: mark.page, x: mark.x, y: mark.y, width: mark.width, height: mark.height, color }
   })
+  // Additive layout of a floating picture; a worksheet without it stays a full-width block (older builds, Android).
+  const rawPlacement = candidate.kind === 'image' && isPlainObject(candidate.placement) ? candidate.placement : null
+  const placement = rawPlacement && [rawPlacement.x, rawPlacement.y, rawPlacement.width].every((value) => typeof value === 'number' && Number.isFinite(value))
+    ? {
+        width: Math.min(1, Math.max(0.08, rawPlacement.width)),
+        x: Math.min(1 - Math.min(1, Math.max(0.08, rawPlacement.width)), Math.max(0, rawPlacement.x)),
+        y: Math.min(SHEET_IMAGE_MAX_Y, Math.max(0, rawPlacement.y)),
+      }
+    : null
+  const aspect = placement && typeof candidate.aspect === 'number' && Number.isFinite(candidate.aspect)
+    ? Math.min(50, Math.max(0.02, candidate.aspect))
+    : null
   return {
     schemaVersion: 1,
     id,
@@ -3339,6 +3353,8 @@ function validateWorksheetDocument(candidate, expectedId) {
     ...(candidate.kind === 'html' && /^[a-f0-9]{64}$/u.test(candidate.htmlSha256 ?? '') ? { htmlSha256: candidate.htmlSha256 } : {}),
     textBoxes,
     highlights,
+    ...(placement ? { placement } : {}),
+    ...(aspect !== null ? { aspect } : {}),
   }
 }
 
