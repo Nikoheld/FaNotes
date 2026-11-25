@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.11.6-beta.1
+
+- Kanti+: fix out-of-memory crashes on large handwriting notes (#1479)
+- nginx (fanotes.fasrv.ch): repo matches the deployed config again (#1478)
+
 ## 2026.11.5
 
 - Windows: Updates werden wieder zuverlässig installiert. FaNotes schliesst sich nicht mehr kurz nach dem Start, wenn der Update-Helfer nicht startet; ein fehlgeschlagenes Update wird nicht endlos wiederholt.
