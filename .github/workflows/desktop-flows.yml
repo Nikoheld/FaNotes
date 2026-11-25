@@ -16,6 +16,7 @@ on:
       - 'fanotes/scripts/check-note-export*.mjs'
       - 'fanotes/scripts/check-ink-*export.mjs'
       - 'fanotes/scripts/check-sheet-images.mjs'
+      - 'fanotes/scripts/check-tth-flow.mjs'
       - 'fanotes/scripts/electron-test-stub.cjs'
       - 'fanotes/scripts/lib/desktop-flow.mjs'
       - '.github/workflows/desktop-flows.yml'
@@ -65,3 +66,5 @@ jobs:
         run: npm run check:ink-vector-export && (npm run check:ink-export || { echo "::warning::ink export check failed once; retrying"; npm run check:ink-export; })
       - name: Pictures and documents on the sheet (no worksheet bar)
         run: npm run check:sheet-images || { echo "::warning::sheet images check failed once; retrying"; npm run check:sheet-images; }
+      - name: Text in deine Handschrift (dialog, empty state, insert, undo)
+        run: npm run check:tth-flow || { echo "::warning::tth flow check failed once; retrying"; npm run check:tth-flow; }
