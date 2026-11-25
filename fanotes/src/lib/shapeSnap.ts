@@ -31,10 +31,15 @@ export const SHAPE_SNAP_LABEL: Record<ShapeSnapKind, string> = {
   rectangle: 'Rechteck',
 }
 
-/** Art strokes (marker, highlighter, …) are drawings. A pause while turning must not replace them with a snapped figure. */
-export const inkStrokeAllowsShapeSnap = <T extends { purpose?: string; symbolId?: string }>(
+/**
+ * Handwriting, the marker and the highlighter get shape correction. Other art
+ * brushes (pencil, paintbrush, …) are drawings and must not be replaced by a
+ * snapped figure when the user pauses while turning.
+ */
+export const inkStrokeAllowsShapeSnap = <T extends { purpose?: string; symbolId?: string; brush?: string }>(
   stroke: T | null | undefined,
-): stroke is T => stroke != null && stroke.purpose !== 'art' && !stroke.symbolId
+): stroke is T => stroke != null && !stroke.symbolId
+  && (stroke.purpose !== 'art' || stroke.brush === 'marker' || stroke.brush === 'highlighter')
 
 /**
  * After a hold replaces the live stroke with a clean figure, the pen is still

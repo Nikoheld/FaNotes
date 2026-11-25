@@ -41,10 +41,11 @@ const covered = (image, x, y) => alphaAt(image, x, y) >= 24
 const clear = (image, x, y) => alphaAt(image, x, y) < 24
 
 const runOnce = () => {
-  assert.equal(inkStrokeAllowsShapeSnap({ purpose: 'art', brush: 'marker' }), false)
-  assert.equal(inkStrokeAllowsShapeSnap({ purpose: 'art', brush: 'highlighter' }), false)
+  assert.equal(inkStrokeAllowsShapeSnap({ purpose: 'art', brush: 'marker' }), true)
+  assert.equal(inkStrokeAllowsShapeSnap({ purpose: 'art', brush: 'highlighter' }), true)
   assert.equal(inkStrokeAllowsShapeSnap({ purpose: 'handwriting', brush: 'fineliner' }), true)
   assert.equal(inkStrokeAllowsShapeSnap({ purpose: 'art', symbolId: 'star' }), false)
+  assert.equal(inkStrokeAllowsShapeSnap({ purpose: 'art', brush: 'pencil' }), false)
   assert.equal(inkStrokeAllowsShapeSnap(null), false)
 
   // 90° turn. The old last segment extrapolated past the corner (~x=216).
