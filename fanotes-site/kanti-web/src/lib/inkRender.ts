@@ -313,3 +313,38 @@ export const renderPage = (canvas: HTMLCanvasElement, doc: InkDoc, options: { cs
   }
   return { strokes: count, width: W0, height: H0 }
 }
+
+/** A PDF page's box in the ink document's paper px (see `desktopPdfInkPages`). */
+export interface InkPageBox { left: number; top: number; width: number; height: number }
+
+/**
+ * Paints only the strokes of `doc` (no paper, transparent) onto a canvas that already has the PDF page's size.
+ * Paper px map to canvas px through s = canvas.width / page.width, with the page's top-left at the canvas origin.
+ */
+export const renderPdfInkPage = (canvas: HTMLCanvasElement, doc: InkDoc, page: InkPageBox) => {
+  const ctx = canvas.getContext('2d') as Ctx | null
+  if (!ctx || !(page.width > 0) || !(canvas.width > 0)) return { strokes: 0 }
+  const W = Number(doc.sourceWidth) > 0 ? Number(doc.sourceWidth) : 900
+  const H = Number(doc.sourceHeight) > 0 ? Number(doc.sourceHeight) : 1273
+  const s = canvas.width / page.width
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  ctx.setTransform(s, 0, 0, s, -page.left * s, -page.top * s)
+  let scratch: HTMLCanvasElement | null = null
+  const factory: Scratch = (w, h) => { scratch ||= document.createElement('canvas'); scratch.width = w; scratch.height = h; return scratch }
+  let count = 0
+  for (const raw of Array.isArray(doc.strokes) ? doc.strokes : []) {
+    try {
+      const stroke = normalizeStroke(raw)
+      if (!stroke) continue
+      let minY = Infinity; let maxY = -Infinity
+      for (const p of stroke.points) { minY = Math.min(minY, p.y * H); maxY = Math.max(maxY, p.y * H) }
+      const pad = stroke.baseWidth * 2
+      if (maxY + pad < page.top || minY - pad > page.top + page.height) continue
+      count += 1
+      drawStroke(ctx, stroke, W, H, 1, factory)
+    } catch { /* one bad stroke must not stop the page */ }
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  return { strokes: count }
+}

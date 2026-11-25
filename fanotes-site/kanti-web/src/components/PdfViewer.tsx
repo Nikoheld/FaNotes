@@ -1,16 +1,20 @@
 // A PDF of the vault, drawn page by page with pdf.js. The worker is a file of this site (same origin), so the
 // strict CSP (script-src and worker-src 'self') holds; the PDF's bytes never leave the page.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
+import { renderPdfInkPage } from '../lib/inkRender'
+import type { InkDoc } from '../lib/famd'
+import { desktopPdfInkPages, type PdfInkPage } from '../lib/pdfInk'
 import { useKanti } from '../state'
 import { IconButton } from './ui'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
-const PageCanvas = ({ document, number, zoom, width }: { document: PDFDocumentProxy; number: number; zoom: number; width: number }) => {
+const PageCanvas = ({ document, number, zoom, width, ink, box }: { document: PDFDocumentProxy; number: number; zoom: number; width: number; ink?: InkDoc | null; box?: PdfInkPage | null }) => {
   const canvas = useRef<HTMLCanvasElement>(null)
+  const overlay = useRef<HTMLCanvasElement>(null)
   const holder = useRef<HTMLDivElement>(null)
   const [near, setNear] = useState(number <= 2)
   const [size, setSize] = useState<{ width: number; height: number } | null>(null)
@@ -41,19 +45,33 @@ const PageCanvas = ({ document, number, zoom, width }: { document: PDFDocumentPr
       const context = target.getContext('2d')
       if (!context) return
       task = page.render({ canvas: target, canvasContext: context, viewport, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] })
-      try { await task.promise } catch { /* cancelled by a zoom change */ }
+      try { await task.promise } catch { return /* cancelled by a zoom change */ }
+      // The handwriting goes over the page canvas, at the same size and pixel ratio.
+      const top = overlay.current
+      if (cancelled || !top || !ink || !box) return
+      top.width = target.width
+      top.height = target.height
+      top.style.width = target.style.width
+      top.style.height = target.style.height
+      renderPdfInkPage(top, ink, box)
     })()
     return () => { cancelled = true; task?.cancel() }
-  }, [document, number, zoom, width, near])
-  return <div ref={holder} className="pdf-page" style={size ? { width: size.width, height: size.height } : { minHeight: 200 }}><canvas ref={canvas} role="img" aria-label={`${number}`} /></div>
+  }, [document, number, zoom, width, near, ink, box])
+  return (
+    <div ref={holder} className="pdf-page" style={size ? { width: size.width, height: size.height, position: 'relative' } : { minHeight: 200, position: 'relative' }}>
+      <canvas ref={canvas} role="img" aria-label={`${number}`} />
+      {ink && box ? <canvas ref={overlay} aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }} /> : null}
+    </div>
+  )
 }
 
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3]
 
-export const PdfViewer = ({ bytes }: { bytes: Uint8Array }) => {
+export const PdfViewer = ({ bytes, ink }: { bytes: Uint8Array; ink?: InkDoc | null }) => {
   const { t } = useKanti()
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null)
   const [error, setError] = useState(false)
+  const [aspects, setAspects] = useState<number[] | null>(null)
   const [zoom, setZoom] = useState(1)
   const [width, setWidth] = useState(0)
   const area = useRef<HTMLDivElement>(null)
@@ -64,6 +82,22 @@ export const PdfViewer = ({ bytes }: { bytes: Uint8Array }) => {
     task.promise.then((loaded) => { if (live) setDocument(loaded) }, () => { if (live) setError(true) })
     return () => { live = false; void task.destroy() }
   }, [bytes])
+  useEffect(() => {
+    // Every page's height/width, needed to place the desktop ink; only read when there is ink.
+    setAspects(null)
+    if (!document || !ink) return undefined
+    let live = true
+    void (async () => {
+      const out: number[] = []
+      for (let number = 1; number <= document.numPages; number += 1) {
+        const view = (await document.getPage(number)).getViewport({ scale: 1 })
+        out.push(view.width > 0 ? view.height / view.width : 1.414)
+      }
+      if (live) setAspects(out)
+    })().catch(() => { /* the PDF shows without ink */ })
+    return () => { live = false }
+  }, [document, ink])
+  const boxes = useMemo(() => (ink && aspects ? desktopPdfInkPages(Number(ink.sourceWidth), Number(ink.sourceHeight), aspects) : []), [ink, aspects])
   useEffect(() => {
     const node = area.current
     if (!node) return undefined
@@ -83,7 +117,7 @@ export const PdfViewer = ({ bytes }: { bytes: Uint8Array }) => {
         {document ? <span className="muted small">{t.pageCount(document.numPages)}</span> : null}
       </div>
       <div className="pdf-pages" ref={area}>
-        {error ? <p className="field-error">{t.pdfFailed}</p> : !document ? <span className="spinner" aria-hidden="true" /> : Array.from({ length: document.numPages }, (_, index) => <PageCanvas key={index} document={document} number={index + 1} zoom={zoom} width={width} />)}
+        {error ? <p className="field-error">{t.pdfFailed}</p> : !document ? <span className="spinner" aria-hidden="true" /> : Array.from({ length: document.numPages }, (_, index) => <PageCanvas key={index} document={document} number={index + 1} zoom={zoom} width={width} ink={ink} box={boxes[index] ?? null} />)}
       </div>
     </div>
   )

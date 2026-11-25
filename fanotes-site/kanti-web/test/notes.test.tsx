@@ -107,6 +107,14 @@ describe('handwriting notes (.famd)', () => {
 
 const entry = (path: string, mtimeMs = 1, size = 10): VaultEntry => ({ id: path, path, revision: 1, size, mtimeMs })
 
+describe('the library hides a .famd companion', () => {
+  it('hides A.famd next to A.pdf or A.md, keeps a lone B.famd and the pdf itself', () => {
+    const paths = (list: string[]) => libraryNotes(list.map((path) => entry(path))).map((note) => note.path).sort()
+    expect(paths(['A.pdf', 'A.famd', 'B.famd'])).toEqual(['A.pdf', 'B.famd'])
+    expect(paths(['A.md', 'A.famd', 'B.famd'])).toEqual(['A.md', 'B.famd'])
+  })
+})
+
 describe('note library', () => {
   const entries = [
     entry('Mathematik/Ableitungen.md', 30), entry('Mathematik/Skript.pdf', 20), entry('Physik/Mechanik/Kraft.md', 50), entry('Idee.md', 10), entry('Foto.png', 5),
