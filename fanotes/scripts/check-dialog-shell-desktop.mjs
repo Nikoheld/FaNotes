@@ -54,7 +54,7 @@ const probe = (page, selector = DIALOG) => page.evaluate((sel) => {
     header: Boolean(header),
     iconSize: icon ? `${Math.round(icon.width)}x${Math.round(icon.height)}` : null,
     eyebrow: Boolean(header?.querySelector('.eyebrow')),
-    title: Boolean(header?.querySelector('h3')) && dialog.getAttribute('aria-labelledby') === header.querySelector('h3')?.id,
+    title: Boolean(header?.querySelector('h2')) && dialog.getAttribute('aria-labelledby') === header.querySelector('h2')?.id,
     closeLabel: close?.getAttribute('aria-label') ?? null,
     focusInside: dialog.contains(document.activeElement),
   }

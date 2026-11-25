@@ -64,7 +64,7 @@ export function DialogFrame({
           <span className="confirm-dialog-icon" aria-hidden="true">{icon}</span>
           <div>
             {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-            <h3 id={titleId} data-i18n-ignore={dynamicTitle ? '' : undefined}>{title}</h3>
+            <h2 id={titleId} data-i18n-ignore={dynamicTitle ? "" : undefined}>{title}</h2>
           </div>
           <button type="button" className="icon-button dialog-frame__close" aria-label={closeLabel} disabled={locked} onClick={onClose}><X size={16} /></button>
         </header>

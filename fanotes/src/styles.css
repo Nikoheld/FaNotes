@@ -2930,7 +2930,7 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .confirm-dialog-icon { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border: 1px solid rgba(var(--accent-rgb), .2); border-radius: 11px; color: var(--accent-readable); background: rgba(var(--accent-rgb), .1); }
 .confirm-dialog.is-danger .confirm-dialog-icon { border-color: color-mix(in srgb, var(--danger) 36%, transparent); color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .confirm-dialog.is-danger .eyebrow { color: var(--danger); }
-.confirm-dialog h3 { margin: 0; font-size: 16px; line-height: 1.25; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.confirm-dialog h3, .dialog-frame h2 { margin: 0; font-size: 16px; line-height: 1.25; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .confirm-dialog-body { padding: 0 0 2px 48px; }
 .confirm-dialog-body p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text-soft); overflow-wrap: anywhere; }
 .confirm-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
