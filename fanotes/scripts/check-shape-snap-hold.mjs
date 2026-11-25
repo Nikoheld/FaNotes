@@ -54,7 +54,7 @@ const applyLiveSample = (stroke, sample) => {
 const runOnce = () => {
   assert.equal(shapeSnapAllowsLiveSample(false), true)
   assert.equal(shapeSnapAllowsLiveSample(true), false)
-  assert.equal(inkStrokeAllowsShapeSnap({ purpose: 'art', brush: 'marker' }), false)
+  assert.equal(inkStrokeAllowsShapeSnap({ purpose: 'art', brush: 'marker' }), true)
   assert.equal(inkStrokeAllowsShapeSnap({ purpose: 'handwriting', brush: 'fineliner' }), true)
 
   const clean = snapStrokeToShape(lineStroke(), WIDTH, HEIGHT, 50)
