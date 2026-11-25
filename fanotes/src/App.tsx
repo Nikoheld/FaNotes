@@ -95,6 +95,7 @@ import { syncEngine } from './lib/sync/engine'
 import { userShares } from './lib/sync/userShares'
 import { SHARED_INBOX_FOLDER } from './lib/sync/sharedInbox'
 import { SharedWithMePanel } from './components/SharedWithMePanel'
+import { DialogFrame } from './components/DialogFrame'
 import { ShareWithUserDialog, type ShareWithUserTarget } from './components/ShareWithUserDialog'
 import { LivePeople } from './components/LivePeople'
 import { useLiveNote } from './components/useLiveNote'
@@ -309,6 +310,7 @@ import { useSettledValue, LARGE_NOTE_CHARS, LARGE_NOTE_SETTLE_MS } from './lib/u
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
 import { useModalFocus } from './lib/useModalFocus'
+import { useMenuKeyboard } from './lib/useMenuKeyboard'
 import { getUiLanguage, getUiLocale, setUiLanguage, translateUiText, uiText } from './i18n'
 import { bestContrastText, ensureReadableColor } from './lib/colorContrast'
 import { snowLayerActive } from './lib/snowTheme'
@@ -506,11 +508,11 @@ type TabContextMenuProps = {
 
 function TabContextMenu({ menu, title, pinned, inSplit, isWeb, canCloseOthers, canCloseRight, onClose, onOpenInSplit, onTogglePin, onCloseTab, onCloseOthers, onCloseRight, onCopyPath, onCopyWikiLink, onDuplicate, onReveal }: TabContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
+  const onMenuKeyDown = useMenuKeyboard(menuRef, true, onClose)
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
     document.addEventListener('pointerdown', onClose)
     document.addEventListener('keydown', closeOnEscape)
-    menuRef.current?.querySelector('button')?.focus()
     return () => {
       document.removeEventListener('pointerdown', onClose)
       document.removeEventListener('keydown', closeOnEscape)
@@ -522,6 +524,7 @@ function TabContextMenu({ menu, title, pinned, inSplit, isWeb, canCloseOthers, c
       ref={menuRef}
       className="file-tree__context-menu tab-context-menu"
       role="menu"
+      onKeyDown={onMenuKeyDown}
       aria-label={`${uiText('Aktionen für', 'Actions for')} ${title}`}
       onPointerDown={(event) => event.stopPropagation()}
       style={{ left: Math.min(Math.max(8, menu.x), window.innerWidth - 240), top: Math.min(Math.max(8, menu.y), window.innerHeight - 420) }}
@@ -944,6 +947,12 @@ export default function App({ startupBootstrap }: AppProps) {
   const [noteHistory, setNoteHistory] = useState<NoteHistory>(EMPTY_NOTE_HISTORY)
   const [noteBackups, setNoteBackups] = useState<NoteBackupSnapshot[]>([])
   const [backupMenuOpen, setBackupMenuOpen] = useState(false)
+  const editorMenuRef = useRef<HTMLDivElement>(null)
+  const backupMenuRef = useRef<HTMLDivElement>(null)
+  const closeEditorMenu = useCallback(() => setEditorMenuOpen(false), [])
+  const closeBackupMenu = useCallback(() => setBackupMenuOpen(false), [])
+  const onEditorMenuKeyDown = useMenuKeyboard(editorMenuRef, editorMenuOpen, closeEditorMenu)
+  const onBackupMenuKeyDown = useMenuKeyboard(backupMenuRef, backupMenuOpen, closeBackupMenu)
   const [subjectBooks, setSubjectBooks] = useState<SubjectBookRecord[]>([])
   const [subjectBooksDisk, setSubjectBooksDisk] = useState<SubjectBookRecord[]>([])
   const [subjectBooksReady, setSubjectBooksReady] = useState(false)
@@ -969,11 +978,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const [tabDrag, setTabDrag] = useState<{ path: string; over: string | null; side: 'before' | 'after' } | null>(null)
   const [paletteMode, setPaletteMode] = useState<'commands' | 'notes'>('commands')
   const [historyOpen, setHistoryOpen] = useState(false)
-  const historyDialogRef = useRef<HTMLElement>(null)
   const worksheetDialogRef = useRef<HTMLElement>(null)
   const shareJoinDialogRef = useRef<HTMLElement>(null)
   const shareLinkDialogRef = useRef<HTMLElement>(null)
-  useModalFocus(historyDialogRef, { active: historyOpen, onEscape: () => setHistoryOpen(false) })
   useModalFocus(worksheetDialogRef, { active: worksheetImportOpen })
   useModalFocus(shareJoinDialogRef, { active: Boolean(shareJoin), onEscape: () => setShareJoin(null) })
   useModalFocus(shareLinkDialogRef, { active: Boolean(shareLinkDialog) })
@@ -7244,7 +7251,7 @@ export default function App({ startupBootstrap }: AppProps) {
                     <Archive size={14} /><span>Backup</span>
                   </button>
                   {backupPolicy.restore && backupMenuOpen && (
-                    <div className="note-backup-menu" role="menu" aria-label="Backup" onPointerDown={(event) => event.stopPropagation()}>
+                    <div ref={backupMenuRef} className="note-backup-menu" role="menu" aria-label="Backup" onKeyDown={onBackupMenuKeyDown} onPointerDown={(event) => event.stopPropagation()}>
                       <button type="button" role="menuitem" onClick={() => { setBackupMenuOpen(false); void snapshotCurrentNote() }}>
                         <strong>Weiteres Backup</strong>
                         <small>Aktuelle Notiz so sichern, wie sie ist</small>
@@ -7326,7 +7333,7 @@ export default function App({ startupBootstrap }: AppProps) {
               )}
               <div className="editor-more">
                 <button type="button" className={`toolbar-button menu-trigger ${editorMenuOpen ? 'active' : ''}`} title="Weitere Notizaktionen" aria-label="Weitere Notizaktionen" aria-haspopup="menu" aria-expanded={editorMenuOpen} onClick={(event) => { event.stopPropagation(); setEditorMenuOpen((open) => !open) }}><MoreHorizontal size={16} /></button>
-                {editorMenuOpen && <div className="editor-more-menu" role="menu" aria-label="Weitere Notizaktionen" onPointerDown={(event) => event.stopPropagation()}>
+                {editorMenuOpen && <div ref={editorMenuRef} className="editor-more-menu" role="menu" aria-label="Weitere Notizaktionen" onKeyDown={onEditorMenuKeyDown} onPointerDown={(event) => event.stopPropagation()}>
                   <span className="editor-menu-label">Ansicht</span>
                   <button type="button" role="menuitemcheckbox" aria-checked={focusMode} onClick={() => { setEditorMenuOpen(false); toggleFocusMode() }}><span><Maximize2 size={15} /></span><span><strong>{focusMode ? 'Fokusmodus verlassen' : 'Fokusmodus'}</strong><small>Seitenleisten ausblenden</small></span><kbd>⌃⇧E</kbd></button>
                   <button type="button" role="menuitemcheckbox" aria-checked={inspectorVisible} onClick={() => { setEditorMenuOpen(false); setInspectorVisible((value) => !value) }}><span>{inspectorVisible ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</span><span><strong>{inspectorVisible ? 'Gliederung ausblenden' : 'Gliederung anzeigen'}</strong><small>Überschriften und Dokumentinfo</small></span><i className={inspectorVisible ? 'is-on' : ''} /></button>
@@ -7735,27 +7742,21 @@ export default function App({ startupBootstrap }: AppProps) {
       )}
       {cardsOpen && activeTab && <Suspense fallback={null}><FlashcardReview markdown={activeTab.content} title={activeTab.title} onSave={(markdown) => updateContentFor(activeTab.path, markdown)} onClose={() => setCardsOpen(false)} /></Suspense>}
       {historyOpen && (
-        <div className="modal-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false) }}>
-          <section ref={historyDialogRef} className="history-dialog" role="dialog" aria-modal="true" aria-labelledby="history-title">
-            <header>
-              <div><History size={18} /><div><small>Lokaler Verlauf</small><h2 id="history-title">Frühere Versionen</h2></div></div>
-              <button type="button" aria-label="Schließen" onClick={() => setHistoryOpen(false)}><X size={17} /></button>
-            </header>
-            {historyBusy && <p className="history-empty"><LoaderCircle className="spin" size={16} /> Verlauf wird geladen …</p>}
-            {!historyBusy && historySnapshots.length === 0 && <p className="history-empty">Noch keine älteren Stände. Nach dem nächsten Speichern erscheint hier die vorherige Version.</p>}
-            <ul>
-              {historySnapshots.map((snapshot) => (
-                <li key={snapshot.id}>
-                  <div>
-                    <strong>{new Date(snapshot.createdAt).toLocaleString()}</strong>
-                    <small>{Math.max(1, Math.round(snapshot.bytes / 1024))} KB</small>
-                  </div>
-                  <button type="button" className="secondary-button" onClick={() => void restoreHistory(snapshot.id)}>Wiederherstellen</button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </div>
+        <DialogFrame icon={<History size={18} />} eyebrow="Lokaler Verlauf" title="Frühere Versionen" titleId="history-title" onClose={() => setHistoryOpen(false)} size="md" className="history-dialog">
+          {historyBusy && <p className="history-empty"><LoaderCircle className="spin" size={16} /> Verlauf wird geladen …</p>}
+          {!historyBusy && historySnapshots.length === 0 && <p className="history-empty">Noch keine älteren Stände. Nach dem nächsten Speichern erscheint hier die vorherige Version.</p>}
+          <ul>
+            {historySnapshots.map((snapshot) => (
+              <li key={snapshot.id}>
+                <div>
+                  <strong>{new Date(snapshot.createdAt).toLocaleString()}</strong>
+                  <small>{Math.max(1, Math.round(snapshot.bytes / 1024))} KB</small>
+                </div>
+                <button type="button" className="secondary-button" onClick={() => void restoreHistory(snapshot.id)}>Wiederherstellen</button>
+              </li>
+            ))}
+          </ul>
+        </DialogFrame>
       )}
       {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} mode={paletteMode} rankNotes={rankNotesForPalette} activePath={activePath} onOpenNote={(path) => void openNote(path)} onOpenNoteInSplit={(path) => void openInSplit(path)} onClose={closePalette} /></SafeBoundary></Suspense>}
       <ProfileOverviewPublisher settings={settings} />

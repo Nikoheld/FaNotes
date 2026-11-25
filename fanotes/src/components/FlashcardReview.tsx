@@ -1,6 +1,6 @@
-import { useModalFocus } from '../lib/useModalFocus'
-import { X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Layers } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type HTMLAttributes } from 'react'
+import { DialogFrame } from './DialogFrame'
 import { bindHandGestures } from '../../../src/lib/handGestures'
 import { getUiLanguage } from '../i18n'
 import { VaultImg } from './study/VaultImg'
@@ -57,7 +57,6 @@ export function FlashcardReview({
   const [revealed, setRevealed] = useState(false)
   const [later, setLater] = useState<string[]>([])
   const dialogRef = useRef<HTMLElement>(null)
-  useModalFocus(dialogRef)
   const cards = useMemo(() => cardsFromMarkdown(source), [source])
   const due = useMemo(() => dueCards(cards), [cards])
   const queue = useMemo(() => reviewQueue(due, later), [due, later])
@@ -83,10 +82,6 @@ export function FlashcardReview({
   gradeRef.current = grade
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
-
-  useEffect(() => {
-    dialogRef.current?.focus()
-  }, [])
 
   useEffect(() => {
     const root = dialogRef.current
@@ -135,30 +130,36 @@ export function FlashcardReview({
   }, [])
 
   return (
-    <div className="modal-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section ref={dialogRef} className="history-dialog" role="dialog" aria-modal="true" aria-labelledby="cards-title" tabIndex={-1} data-hand-gesture-root="" onPointerDown={(event) => event.stopPropagation()}>
-        <header>
-          <div><div><small>{copy.kicker}</small><h2 id="cards-title">{title}</h2></div></div>
-          <button type="button" aria-label={copy.close} onClick={onClose}><X size={17} /></button>
-        </header>
-        {!card && <p className="history-empty">{cards.length ? copy.noneDue : copy.none}</p>}
-        {card && (
-          <div style={{ display: 'grid', gap: 12, padding: '4px 4px 12px' }}>
-            <strong>{card.front}</strong>
-            {card.frontImage && <VaultImg className="lw-card-image" src={card.frontImage} draggable={false} />}
-            {revealed ? <p style={{ whiteSpace: 'pre-line' }}>{card.back || copy.noAnswer}</p> : <button type="button" className="secondary-button" title={copy.showHint} onClick={() => setRevealed(true)}>{copy.show}</button>}
-            {revealed && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                <button type="button" className="secondary-button" title="1" onClick={() => grade('again')}>{copy.again}</button>
-                <button type="button" className="secondary-button" title="2" onClick={() => grade('hard')}>{copy.hard}</button>
-                <button type="button" className="primary-button" title="3" onClick={() => grade('good')}>{copy.good}</button>
-                <button type="button" className="primary-button" title="4" onClick={() => grade('easy')}>{copy.easy}</button>
-              </div>
-            )}
-            <small>{copy.status(due.length, cards.length)}</small>
-          </div>
-        )}
-      </section>
-    </div>
+    <DialogFrame
+      icon={<Layers size={18} />}
+      eyebrow={copy.kicker}
+      title={title}
+      dynamicTitle
+      titleId="cards-title"
+      onClose={onClose}
+      closeLabel={copy.close}
+      size="md"
+      className="history-dialog flashcard-dialog"
+      dialogRef={dialogRef}
+      dialogProps={{ 'data-hand-gesture-root': '' } as HTMLAttributes<HTMLElement>}
+    >
+      {!card && <p className="history-empty">{cards.length ? copy.noneDue : copy.none}</p>}
+      {card && (
+        <div className="flashcard-dialog__card">
+          <strong className="flashcard-dialog__front">{card.front}</strong>
+          {card.frontImage && <VaultImg className="lw-card-image" src={card.frontImage} draggable={false} />}
+          {revealed ? <p className="flashcard-dialog__back">{card.back || copy.noAnswer}</p> : <button type="button" className="secondary-button" data-autofocus="" title={copy.showHint} onClick={() => setRevealed(true)}>{copy.show}</button>}
+          {revealed && (
+            <div className="flashcard-dialog__grades">
+              <button type="button" className="secondary-button" title="1" onClick={() => grade('again')}>{copy.again}</button>
+              <button type="button" className="secondary-button" title="2" onClick={() => grade('hard')}>{copy.hard}</button>
+              <button type="button" className="primary-button" title="3" onClick={() => grade('good')}>{copy.good}</button>
+              <button type="button" className="primary-button" title="4" onClick={() => grade('easy')}>{copy.easy}</button>
+            </div>
+          )}
+          <small>{copy.status(due.length, cards.length)}</small>
+        </div>
+      )}
+    </DialogFrame>
   )
 }

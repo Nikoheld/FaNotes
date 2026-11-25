@@ -1,5 +1,6 @@
-import { useModalFocus } from '../../lib/useModalFocus'
+import { Puzzle } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { DialogFrame } from '../DialogFrame'
 
 export type AddonPromptRequest = {
   title: string
@@ -14,8 +15,6 @@ export type AddonPromptRequest = {
 export function AddonPromptDialog({ request }: { request: AddonPromptRequest | null }) {
   const [value, setValue] = useState(request?.value ?? '')
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null)
-  const dialogRef = useRef<HTMLElement>(null)
-  useModalFocus(dialogRef, { active: Boolean(request) })
 
   useEffect(() => {
     setValue(request?.value ?? '')
@@ -27,30 +26,37 @@ export function AddonPromptDialog({ request }: { request: AddonPromptRequest | n
   const submit = () => request.resolve(value)
   const cancel = () => request.resolve(null)
   return (
-    <div className="modal-backdrop addon-prompt-backdrop" role="presentation" onPointerDown={cancel}>
-      <section ref={dialogRef} className="addon-prompt" role="dialog" aria-modal="true" aria-label={request.title} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); cancel() } }}>
-        <header>
-          <h3 data-i18n-ignore>{request.title}</h3>
-          <p data-i18n-ignore>{request.message}</p>
-        </header>
-        {request.multiline ? (
-          <textarea ref={inputRef as React.RefObject<HTMLTextAreaElement>} data-i18n-ignore rows={6} value={value} placeholder={request.placeholder} onChange={(event) => setValue(event.target.value)} />
-        ) : (
-          <input
-            ref={inputRef as React.RefObject<HTMLInputElement>}
-            data-i18n-ignore
-            type="text"
-            value={value}
-            placeholder={request.placeholder}
-            onChange={(event) => setValue(event.target.value)}
-            onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submit() } }}
-          />
-        )}
-        <footer>
-          <button type="button" className="addon-btn" onClick={cancel}>Abbrechen</button>
-          <button type="button" className="addon-btn addon-btn--primary" onClick={submit}>OK</button>
-        </footer>
-      </section>
-    </div>
+    <DialogFrame
+      icon={<Puzzle size={18} />}
+      eyebrow="Add-on"
+      title={request.title}
+      dynamicTitle
+      titleId="addon-prompt-title"
+      onClose={cancel}
+      size="sm"
+      className="addon-prompt"
+      footer={(
+        <>
+          <button type="button" className="secondary-button" onClick={cancel}>Abbrechen</button>
+          <button type="button" className="primary-button" onClick={submit}>OK</button>
+        </>
+      )}
+    >
+      <p className="dialog-frame__lede addon-prompt__message" data-i18n-ignore>{request.message}</p>
+      {request.multiline ? (
+        <textarea ref={inputRef as React.RefObject<HTMLTextAreaElement>} data-autofocus="" data-i18n-ignore rows={6} value={value} placeholder={request.placeholder} onChange={(event) => setValue(event.target.value)} />
+      ) : (
+        <input
+          ref={inputRef as React.RefObject<HTMLInputElement>}
+          data-autofocus=""
+          data-i18n-ignore
+          type="text"
+          value={value}
+          placeholder={request.placeholder}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submit() } }}
+        />
+      )}
+    </DialogFrame>
   )
 }
