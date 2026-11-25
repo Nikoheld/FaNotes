@@ -2522,7 +2522,7 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cpath d='M4 0V20M8 0V20M12 0V20M16 0V20M0 4H20M0 8H20M0 12H20M0 16H20' stroke='rgba(92,118,168,0.08)' stroke-width='1'/%3E%3Cpath d='M20 0H0V20' fill='none' stroke='rgba(72,98,148,0.18)' stroke-width='1'/%3E%3C/svg%3E");
   background-size: var(--side-step) var(--side-step);
 }
-.pdf-anchored-mark{background:rgba(255,214,90,.55);box-shadow:inset 0 -1px 0 #c48a12}
+.pdf-anchored-mark:not(.pdf-anchored-mark-partial),.pdf-anchored-mark-part{background:rgba(255,214,90,.55);box-shadow:inset 0 -1px 0 #c48a12}
 .pdf-note-text-layer {
   /* pdf.js TextLayer contract: scale from the painted CSS box, not the canvas bitmap. */
   --scale-factor: 1;

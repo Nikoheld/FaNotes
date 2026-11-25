@@ -44,8 +44,8 @@ import {
   pdfStartPageForLoad,
 } from '../lib/pdfDocument'
 import { createPdfPagePainter, type PdfBasePaintInfo, type PdfPagePainter } from '../lib/pdfPagePainter'
-import { spanIndexesForQuotes, type PdfQuoteRef } from '../lib/pdfTextMarks'
-import { markedSpansInSelection, PDF_MARK_SPAN_CLASS, pdfTextLeafSpans, type ErasedPdfMarkSpans } from '../lib/pdfMarkErase'
+import { spanRangesForQuotes, type PdfQuoteRef } from '../lib/pdfTextMarks'
+import { markedSpansInSelection, markSpanRange, pdfTextLeafSpans, type ErasedPdfMarkSpans } from '../lib/pdfMarkErase'
 import { bindPdfTextSelection, releasePdfTextSelection } from '../lib/pdfTextSelection'
 import {
   PDF_FIT_GUTTER,
@@ -238,8 +238,11 @@ function PdfPageCanvas({
       if (textLayerRef.current !== layer) return
       // Marked-content wrappers are spans too. Only the leaf runs carry the glyphs.
       const spans = pdfTextLeafSpans(textHost)
-      const marked = new Set(spanIndexesForQuotes(spans.map((span) => span.textContent ?? ''), quotesRef.current))
-      spans.forEach((span, index) => { if (marked.has(index)) span.classList.add(PDF_MARK_SPAN_CLASS) })
+      const marked = spanRangesForQuotes(spans.map((span) => span.textContent ?? ''), quotesRef.current)
+      spans.forEach((span, index) => {
+        const range = marked.get(index)
+        if (range) markSpanRange(span, range.from, range.to)
+      })
       releaseTextSelectionRef.current = bindPdfTextSelection(textHost)
     } catch (error: unknown) {
       if (!(error instanceof Error) || !/cancel/iu.test(error.name)) {
