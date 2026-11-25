@@ -5,6 +5,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -12,6 +13,7 @@ import {
   useState,
 } from 'react'
 import { colorSwatchName } from '../lib/colorNames'
+import { useMenuKeyboard } from '../lib/useMenuKeyboard'
 import {
   BookOpen,
   Check,
@@ -266,6 +268,8 @@ export const FileTree = memo(function FileTree({
   const [expanded, setExpanded] = useState<Set<string>>(() => readExpandedFolders(expansionStorageKey))
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
+  const closeContextMenu = useCallback(() => setContextMenu(null), [])
+  const onContextMenuKeyDown = useMenuKeyboard(contextMenuRef, contextMenu !== null, closeContextMenu)
   const [menuPlacement, setMenuPlacement] = useState<{ menu: ContextMenuState; left: number; top: number; maxHeight: number } | null>(null)
   const [renaming, setRenaming] = useState<RenameState | null>(null)
   const [renameBusy, setRenameBusy] = useState(false)
@@ -1001,6 +1005,7 @@ export const FileTree = memo(function FileTree({
         <div
           aria-label={`Aktionen für ${displayName(contextMenu.entry)}`}
           className="file-tree__context-menu"
+          onKeyDown={onContextMenuKeyDown}
           onPointerDown={(event) => event.stopPropagation()}
           ref={contextMenuRef}
           role="menu"

@@ -1684,16 +1684,6 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .tag-filter { display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 10px 0; }
 .tag-filter > button { height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .tag-filter > button.is-active { color: var(--text); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 14%, transparent); }
-.history-dialog { width: min(520px, 92vw); max-height: min(70vh, 640px); overflow: auto; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--panel); box-shadow: var(--shadow); }
-.history-dialog header { display: flex; align-items: flex-start; justify-content: space-between; padding: 16px 16px 10px; }
-.history-dialog header > div { display: flex; gap: 10px; }
-.history-dialog h2 { margin: 0; font-size: 16px; }
-.history-dialog small { color: var(--text-muted); }
-.history-empty { padding: 8px 16px 18px; color: var(--text-muted); font-size: 12px; }
-.history-dialog ul { margin: 0; padding: 0 16px 16px; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.history-dialog li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; }
-.history-dialog li strong { display: block; font-size: 12px; }
-.history-dialog li small { color: var(--text-muted); font-size: 12px; }
 @media print {
   html.is-printing .ribbon,
   html.is-printing .sidebar,
@@ -2940,7 +2930,7 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .confirm-dialog-icon { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border: 1px solid rgba(var(--accent-rgb), .2); border-radius: 11px; color: var(--accent-readable); background: rgba(var(--accent-rgb), .1); }
 .confirm-dialog.is-danger .confirm-dialog-icon { border-color: color-mix(in srgb, var(--danger) 36%, transparent); color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .confirm-dialog.is-danger .eyebrow { color: var(--danger); }
-.confirm-dialog h3 { margin: 0; font-size: 16px; line-height: 1.25; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.confirm-dialog h3, .dialog-frame h2 { margin: 0; font-size: 16px; line-height: 1.25; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .confirm-dialog-body { padding: 0 0 2px 48px; }
 .confirm-dialog-body p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text-soft); overflow-wrap: anywhere; }
 .confirm-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
@@ -2961,7 +2951,7 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .folder-path-dialog__row-actions button, .folder-path-dialog__add button { min-height: 30px; }
 .folder-path-dialog__row-actions button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 8px; color: inherit; background: transparent; }
 .folder-path-dialog__add { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
-.folder-path-dialog__add input, .folder-path-dialog__add select { min-width: 0; min-height: 34px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 10px; color: inherit; background: var(--bg); }
+.folder-path-dialog__add input, .folder-path-dialog__add select { min-width: 0; min-height: 34px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 0 10px; color: inherit; background: var(--bg); font-size: 13px; }
 .folder-path-dialog__move { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.4; }
 .folder-path-dialog__error { color: var(--danger); }
 .folder-path-dialog__conflicts ul { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
@@ -3092,16 +3082,6 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .lm-studio-footer .primary-button, .lm-studio-footer .secondary-button { min-height: 34px; white-space: nowrap; }
 .lm-run { min-width: 145px; }
 .settings-modal { width: min(1080px, 95vw); height: min(760px, calc(100vh - 48px)); border: 1px solid var(--border-strong); border-radius: 20px; background: var(--panel); box-shadow: var(--shadow); overflow: hidden; display: grid; grid-template-columns: 216px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); animation: modal-in var(--motion-med) var(--ease-out) both; }
-.bug-report-modal { width: min(520px, 94vw); height: auto; max-height: min(640px, 90vh); grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
-.bug-report-modal > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 18px 14px; border-bottom: 1px solid var(--border); }
-.bug-report-modal .settings-heading { align-items: flex-start; }
-.bug-report-modal .settings-heading > svg { flex: none; margin-top: 2px; color: var(--text); }
-.bug-report-modal .settings-heading strong { display: block; font-size: 16px; font-weight: 650; letter-spacing: -.02em; }
-.bug-report-modal .settings-heading small { display: block; margin-top: 4px; color: var(--text-muted); font-size: 12px; font-weight: 500; line-height: 1.45; }
-.bug-report-body { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px 22px; }
-.bug-report-label { font: 700 12px/1.3 var(--ui-font, system-ui); }
-.bug-report-body textarea { width: 100%; min-height: 140px; resize: vertical; border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; background: var(--bg); color: var(--text); font: 500 13px/1.45 var(--ui-font, system-ui); }
-.bug-report-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .settings-nav { min-width: 0; min-height: 0; overflow: hidden; padding: 12px 8px 8px; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--bg-elevated) 94%, transparent); display: flex; flex-direction: column; }
 .settings-brand { display: flex; align-items: center; gap: 8px; padding: 0 6px 8px; }
 .brand-glyph { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; color: var(--on-accent); background: var(--accent); }
@@ -3937,10 +3917,6 @@ button.addon-status-item { cursor: pointer; }
 button.addon-status-item:hover { background: var(--panel-hover); color: var(--text); }
 .addon-status-item--dock { color: var(--accent-readable); }
 
-.addon-prompt { width: min(480px, 94vw); border: 1px solid var(--border-strong); border-radius: 16px; background: var(--panel); box-shadow: var(--shadow); padding: 18px; display: grid; gap: 12px; animation: modal-in var(--motion-med) var(--ease-out) both; }
-.addon-prompt h3 { margin: 0; font-size: 14px; } .addon-prompt p { margin: 4px 0 0; color: var(--text-soft); font-size: 12px; white-space: pre-wrap; }
-.addon-prompt input, .addon-prompt textarea { width: 100%; border-radius: 9px; border: 1px solid var(--border-strong); background: var(--bg-elevated); color: var(--text); padding: 8px 10px; font-size: 12px; font-family: inherit; }
-.addon-prompt footer { display: flex; justify-content: flex-end; gap: 6px; }
 
 @media (max-width: 900px) {
   .addon-store__header { grid-template-columns: 1fr; }
@@ -4147,10 +4123,8 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 /* One dialog, button and type system across the desktop shell. */
 .confirm-dialog,
 .worksheet-import-dialog,
-.history-dialog,
 .lm-studio-panel,
 .addon-store,
-.addon-prompt,
 .fatal-card,
 .cal-editor,
 .first-run-picker,
@@ -4750,9 +4724,7 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 .lw-fieldset:disabled { opacity: .55; }
 
 /* Work requests panel ("Fehler & Wünsche") */
-.work-requests-modal.bug-report-modal { width: min(560px, 94vw); max-height: min(720px, 92vh); grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); }
 .work-requests-modal .wr-timeline time { white-space: nowrap; }
-.work-requests-modal .bug-report-body { overflow: auto; }
 .wr-tabs { display: flex; gap: 4px; padding: 0 18px; border-bottom: 1px solid var(--border); }
 .wr-tabs button { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); padding: 10px 12px; font: 650 13px/1 var(--ui-font, system-ui); cursor: pointer; touch-action: manipulation; }
 .wr-tabs button.is-active { color: var(--text); border-bottom-color: var(--accent); }
@@ -5483,12 +5455,11 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 /* One corner radius for every dialog shell (settings 20, add-on store 20, confirm 18, OneNote 17 before). */
 .settings-modal, .addon-store, .onenote-dialog, .confirm-dialog { border-radius: var(--radius-dialog); }
 /* Form fields inside dialogs share the 8px field radius (OneNote and the bug report used 10px). */
-.onenote-dialog-destination select, .onenote-dialog-destination input[type="text"], .bug-report-body textarea { border-radius: var(--radius-md); }
+.onenote-dialog-destination select, .onenote-dialog-destination input[type="text"] { border-radius: var(--radius-md); }
 /* Dialog header, body and footer use the same 18px horizontal gutter and hairline dividers. */
 .onenote-dialog > header { padding: 0 14px 0 18px; }
 .onenote-dialog-body { padding: 14px 18px; }
 .onenote-dialog > footer { padding: 8px 18px; }
-.bug-report-actions { margin-top: 2px; padding-top: 12px; border-top: 1px solid var(--border); }
 /* Context menu: share rows keep a fixed icon size (the icon shrank next to wrapped text) and a readable caption. */
 .file-tree__context-menu button > svg { flex: none; }
 .file-tree__share-choice small { font-size: 12px; }
@@ -5645,3 +5616,33 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
     calc(var(--paper-width) * var(--sheet-image-extent, 0))
   );
 }
+
+/* Shared dialog frame (DialogFrame.tsx): the confirm-dialog shell with a scrolling body, used by every
+   dialog that is more than a question. Sizes: sm 440, md 520, lg 600. */
+.dialog-frame { max-height: min(calc(100dvh - 48px), 760px); grid-template-rows: auto minmax(0, 1fr); overflow: hidden; border-radius: var(--radius-dialog); }
+.dialog-frame--sm { width: min(440px, 100%); max-width: 440px; }
+.dialog-frame--md { width: min(520px, 100%); max-width: 520px; }
+.dialog-frame--lg { width: min(600px, 100%); max-width: 600px; }
+.dialog-frame__close { margin-left: auto; flex: none; }
+.dialog-frame__body { min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 2px; margin: -2px; overflow: auto; overscroll-behavior: contain; }
+.dialog-frame__lede { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text-soft); overflow-wrap: anywhere; }
+.dialog-frame__error { padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--danger) 36%, var(--border)); border-radius: var(--radius-md); font-size: 12.5px; line-height: 1.45; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); overflow-wrap: anywhere; }
+.dialog-frame input[type="text"], .dialog-frame textarea, .dialog-frame select, .dialog-frame .wr-input { width: 100%; min-height: 34px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 8px 10px; color: var(--text); background: var(--bg); font: 500 13px/1.45 var(--ui-font); }
+.dialog-frame textarea { min-height: 120px; resize: vertical; }
+.dialog-frame input:focus-visible, .dialog-frame textarea:focus-visible, .dialog-frame select:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+.bug-report-label { font: 700 12px/1.3 var(--ui-font); color: var(--text); }
+.history-empty { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+.history-dialog ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.history-dialog li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 8px 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--panel) 82%, var(--bg)); }
+.history-dialog li strong { display: block; font-size: 12.5px; }
+.history-dialog li small { color: var(--text-muted); font-size: 12px; }
+.flashcard-dialog__card { display: grid; gap: 12px; }
+.flashcard-dialog__front { font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+.flashcard-dialog__back { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--text-soft); white-space: pre-line; overflow-wrap: anywhere; }
+.flashcard-dialog__grades { display: flex; flex-wrap: wrap; gap: 8px; }
+.flashcard-dialog__card > small { color: var(--text-muted); font-size: 12px; }
+.addon-prompt__message { white-space: pre-wrap; }
+.work-requests-dialog .wr-tabs { margin: -2px 0 0; padding: 0; }
+.work-requests-dialog .wr-timeline time { white-space: nowrap; }
+.work-requests-dialog .wr-row .wr-input { width: auto; }
+@media (pointer: coarse) { .dialog-frame input[type="text"], .dialog-frame textarea, .dialog-frame select { min-height: 42px; } }

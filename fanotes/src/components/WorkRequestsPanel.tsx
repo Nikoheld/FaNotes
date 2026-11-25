@@ -1,6 +1,6 @@
-import { useModalFocus } from '../lib/useModalFocus'
-import { Bug, Camera, Check, ExternalLink, Lightbulb, LoaderCircle, MessageSquare, Send, X } from 'lucide-react'
+import { Bug, Camera, Check, ExternalLink, Lightbulb, LoaderCircle, MessageSquare, Send } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { DialogFrame } from './DialogFrame'
 import { diagnosticLog } from '../lib/bugReport'
 import {
   WORK_REQUEST_DESCRIPTION_MAX, WORK_REQUEST_MESSAGE_MAX, WORK_REQUEST_TITLE_MAX, WorkRequestError, canApprove, canCancel, canMessage,
@@ -25,8 +25,6 @@ function StatusChip({ request }: { request: WorkRequest }) {
 }
 
 export function WorkRequestsPanel({ client, version, platform, onClose, onSent }: Props) {
-  const dialogRef = useRef<HTMLElement>(null)
-  useModalFocus(dialogRef)
   const [tab, setTab] = useState<'new' | 'mine'>('new')
   const [hidden, setHidden] = useState(false)
   const [kind, setKind] = useState<WorkRequestKind>('bug')
@@ -76,74 +74,75 @@ export function WorkRequestsPanel({ client, version, platform, onClose, onSent }
     } catch (err) { setError(errorText(err)) } finally { setBusy(false) }
   }
 
+  const footer = tab === 'new' ? (
+    <>
+      <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Schließen</button>
+      <button type="button" className="primary-button" disabled={busy || !title.trim() || !description.trim()} onClick={() => void send()}>
+        {busy ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}{busy ? 'Wird gesendet …' : 'Anfrage senden'}
+      </button>
+    </>
+  ) : undefined
   return (
-    <div className="modal-backdrop" onPointerDown={onClose} style={hidden ? { visibility: 'hidden' } : undefined}>
-      <section ref={dialogRef} className="settings-modal bug-report-modal work-requests-modal" role="dialog" aria-modal="true" aria-label="Fehler & Wünsche" onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}>
-        <header className="settings-header">
-          <div className="settings-heading">
-            <Bug size={18} />
-            <div>
-              <strong>Fehler &amp; Wünsche</strong>
-              <small>Beschreibe einen Fehler oder eine Funktion. Claude arbeitet daran und zeigt dir hier den Fortschritt.</small>
-            </div>
-          </div>
-          <button type="button" className="icon-button" aria-label="Schließen" onClick={onClose}><X size={16} /></button>
-        </header>
+    <DialogFrame
+      icon={<Bug size={18} />}
+      eyebrow="Rückmeldung"
+      title="Fehler & Wünsche"
+      titleId="work-requests-title"
+      onClose={onClose}
+      size="lg"
+      className="work-requests-dialog"
+      backdropStyle={hidden ? { visibility: 'hidden' } : undefined}
+      footer={footer}
+      subheader={(
         <div className="wr-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={tab === 'new'} className={tab === 'new' ? 'is-active' : ''} onClick={() => { setTab('new'); setError(null) }}>Neu</button>
           <button type="button" role="tab" aria-selected={tab === 'mine'} className={tab === 'mine' ? 'is-active' : ''} onClick={() => { setTab('mine'); setSelected(null); setError(null) }}>Meine Anfragen</button>
         </div>
-        <div className="settings-body bug-report-body">
-          {tab === 'new' ? (
-            <>
-              <div className="wr-kind" role="radiogroup" aria-label="Art der Anfrage">
-                <button type="button" role="radio" aria-checked={kind === 'bug'} className={kind === 'bug' ? 'is-active' : ''} onClick={() => setKind('bug')}><Bug size={14} />Fehler</button>
-                <button type="button" role="radio" aria-checked={kind === 'feature'} className={kind === 'feature' ? 'is-active' : ''} onClick={() => setKind('feature')}><Lightbulb size={14} />Funktion</button>
-              </div>
-              <label className="bug-report-label" htmlFor="wr-title">Titel</label>
-              <input id="wr-title" className="wr-input" value={title} maxLength={WORK_REQUEST_TITLE_MAX} onChange={(event) => setTitle(event.target.value)} placeholder="Kurz in einem Satz" />
-              <label className="bug-report-label" htmlFor="wr-description">{kind === 'bug' ? 'Was ist passiert?' : 'Was soll FaNotes können?'}</label>
-              <textarea id="wr-description" value={description} rows={5} maxLength={WORK_REQUEST_DESCRIPTION_MAX} onChange={(event) => setDescription(event.target.value)} placeholder="So genau wie möglich: wo, wann, was du erwartet hast." />
-              <div className="wr-row">
-                <label className="bug-report-label" htmlFor="wr-priority">Priorität</label>
-                <select id="wr-priority" className="wr-input" value={priority} onChange={(event) => setPriority(event.target.value as WorkRequestPriority)}>
-                  <option value="low">Niedrig</option><option value="normal">Normal</option><option value="high">Hoch</option>
-                </select>
-              </div>
-              <div className="wr-attach">
-                {canCapture && (screenshot
-                  ? <span className="wr-attached"><img src={screenshot} alt="Screenshot-Vorschau" /><button type="button" className="secondary-button" onClick={() => setScreenshot(null)}>Screenshot entfernen</button></span>
-                  : <button type="button" className="secondary-button" onClick={() => void capture()}><Camera size={14} />Screenshot anhängen</button>)}
-                <label className="wr-check"><input type="checkbox" checked={withLogs} onChange={(event) => setWithLogs(event.target.checked)} />Protokoll der letzten fünf Minuten anhängen</label>
-              </div>
-              {error && <div className="settings-inline-error" role="alert">{error}</div>}
-              <div className="bug-report-actions">
-                <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Schließen</button>
-                <button type="button" className="primary-button" disabled={busy || !title.trim() || !description.trim()} onClick={() => void send()}>
-                  {busy ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}{busy ? 'Wird gesendet …' : 'Anfrage senden'}
-                </button>
-              </div>
-            </>
-          ) : selected ? (
-            <RequestDetail client={client} id={selected} onBack={() => { setSelected(null); void loadList() }} />
-          ) : (
-            <>
-              {error && <div className="settings-inline-error" role="alert">{error}</div>}
-              {requests === null ? <div className="wr-empty"><LoaderCircle className="spin" size={16} /> Wird geladen …</div>
-                : requests.length === 0 ? <div className="wr-empty">Noch keine Anfragen.</div>
-                : <ul className="wr-list">{requests.map((item) => (
-                  <li key={item.id}>
-                    <button type="button" className="wr-item" onClick={() => setSelected(item.id)}>
-                      {item.kind === 'feature' ? <Lightbulb size={15} /> : <Bug size={15} />}
-                      <span className="wr-item-title">{item.title}</span>
-                      <StatusChip request={item} />
-                    </button>
-                  </li>))}</ul>}
-            </>
-          )}
+      )}
+    >
+      <p className="dialog-frame__lede">Beschreibe einen Fehler oder eine Funktion. Claude arbeitet daran und zeigt dir hier den Fortschritt.</p>
+    {tab === 'new' ? (
+      <>
+        <div className="wr-kind" role="radiogroup" aria-label="Art der Anfrage">
+          <button type="button" role="radio" aria-checked={kind === 'bug'} className={kind === 'bug' ? 'is-active' : ''} onClick={() => setKind('bug')}><Bug size={14} />Fehler</button>
+          <button type="button" role="radio" aria-checked={kind === 'feature'} className={kind === 'feature' ? 'is-active' : ''} onClick={() => setKind('feature')}><Lightbulb size={14} />Funktion</button>
         </div>
-      </section>
-    </div>
+        <label className="bug-report-label" htmlFor="wr-title">Titel</label>
+        <input id="wr-title" className="wr-input" value={title} maxLength={WORK_REQUEST_TITLE_MAX} onChange={(event) => setTitle(event.target.value)} placeholder="Kurz in einem Satz" />
+        <label className="bug-report-label" htmlFor="wr-description">{kind === 'bug' ? 'Was ist passiert?' : 'Was soll FaNotes können?'}</label>
+        <textarea id="wr-description" value={description} rows={5} maxLength={WORK_REQUEST_DESCRIPTION_MAX} onChange={(event) => setDescription(event.target.value)} placeholder="So genau wie möglich: wo, wann, was du erwartet hast." />
+        <div className="wr-row">
+          <label className="bug-report-label" htmlFor="wr-priority">Priorität</label>
+          <select id="wr-priority" className="wr-input" value={priority} onChange={(event) => setPriority(event.target.value as WorkRequestPriority)}>
+            <option value="low">Niedrig</option><option value="normal">Normal</option><option value="high">Hoch</option>
+          </select>
+        </div>
+        <div className="wr-attach">
+          {canCapture && (screenshot
+            ? <span className="wr-attached"><img src={screenshot} alt="Screenshot-Vorschau" /><button type="button" className="secondary-button" onClick={() => setScreenshot(null)}>Screenshot entfernen</button></span>
+            : <button type="button" className="secondary-button" onClick={() => void capture()}><Camera size={14} />Screenshot anhängen</button>)}
+          <label className="wr-check"><input type="checkbox" checked={withLogs} onChange={(event) => setWithLogs(event.target.checked)} />Protokoll der letzten fünf Minuten anhängen</label>
+        </div>
+        {error && <div className="dialog-frame__error" role="alert">{error}</div>}
+      </>
+    ) : selected ? (
+      <RequestDetail client={client} id={selected} onBack={() => { setSelected(null); void loadList() }} />
+    ) : (
+      <>
+        {error && <div className="dialog-frame__error" role="alert">{error}</div>}
+        {requests === null ? <div className="wr-empty"><LoaderCircle className="spin" size={16} /> Wird geladen …</div>
+          : requests.length === 0 ? <div className="wr-empty">Noch keine Anfragen.</div>
+          : <ul className="wr-list">{requests.map((item) => (
+            <li key={item.id}>
+              <button type="button" className="wr-item" onClick={() => setSelected(item.id)}>
+                {item.kind === 'feature' ? <Lightbulb size={15} /> : <Bug size={15} />}
+                <span className="wr-item-title">{item.title}</span>
+                <StatusChip request={item} />
+              </button>
+            </li>))}</ul>}
+      </>
+    )}
+    </DialogFrame>
   )
 }
 
@@ -189,7 +188,7 @@ function RequestDetail({ client, id, onBack }: { client: WorkRequestsClient; id:
         ))}
         <li ref={endRef} aria-hidden="true" className="wr-end" />
       </ol>
-      {error && <div className="settings-inline-error" role="alert">{error}</div>}
+      {error && <div className="dialog-frame__error" role="alert">{error}</div>}
       {messageOpen && canMessage(request.status) && (
         <div className="wr-message">
           <textarea value={note} rows={3} maxLength={WORK_REQUEST_MESSAGE_MAX} aria-label="Nachricht an Claude" placeholder="Zusätzlicher Hinweis für Claude" onChange={(event) => setNote(event.target.value)} />
