@@ -1,12 +1,13 @@
 import { useModalFocus } from '../lib/useModalFocus'
-import { CircleAlert, Link2, PenLine, RefreshCw, Sparkles, Type, Unlink2, X } from 'lucide-react'
+import { CircleAlert, CircleCheck, Link2, PenLine, RefreshCw, Sparkles, Type, Unlink2, X, Maximize2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { Sample } from '../../../src/types'
 import type { PaperStyle } from '../types'
 import { drawPaperBackground } from '../lib/paperStyles'
-import { getUiLocale } from '../i18n'
+import { getUiLocale, uiText } from '../i18n'
 import { fingerprint, type PersonalModel, type TrajectoryUnit } from '../lib/personalHandwriting.mjs'
-import { learningStatus, type LearningState } from '../lib/personalHandwritingClient'
+import type { LearningState } from '../lib/personalHandwritingClient'
 import * as legacyEngine from '../lib/textToHandwritingLegacy'
 import { loadToolMemory, saveToolMemory } from '../lib/toolMemory'
 import {
@@ -34,6 +35,9 @@ type TextToHandwritingDialogProps = {
 
 type Placement = 'free-line' | 'page-start'
 
+const MAX_TEXT = 8_000
+const MAX_PREVIEW_ASPECT = 1.5
+
 const previewPressureWidth = (stroke: SynthesizedInkStroke, pressure: number) => stroke.pressureEnabled
   ? stroke.baseWidth * (0.4 + Math.max(0.08, pressure) * 1.12)
   : stroke.baseWidth
@@ -46,6 +50,18 @@ const drawPreviewPaper = (
   squareMm = 0,
 ) => {
   drawPaperBackground(context, width, height, paperStyle, squareMm)
+}
+
+/** The part of the page worth showing: the text with a little air, or the top of the sheet while nothing is typed. */
+const previewWindow = (result: HandwritingSynthesisResult, pageWidth: number, pageHeight: number) => {
+  const bounds = result.bounds
+  if (!bounds) return { top: 0, height: Math.min(pageHeight, Math.round(pageWidth * 0.55)) }
+  const margin = Math.max(24, result.fontSizeUsed)
+  const top = Math.max(0, Math.floor(bounds[1] - margin))
+  const bottom = Math.min(pageHeight, Math.ceil(bounds[3] + margin))
+  const minimum = Math.min(pageHeight - top, Math.round(pageWidth * 0.4))
+  // A canvas as tall as a 13'000 px page would cost tens of MB; the preview shows its first stretch.
+  return { top, height: Math.min(Math.max(minimum, bottom - top), Math.round(pageWidth * MAX_PREVIEW_ASPECT)) }
 }
 
 const HandwritingPreview = ({
@@ -62,15 +78,18 @@ const HandwritingPreview = ({
   squareMm?: number
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const window_ = useMemo(() => previewWindow(result, pageWidth, pageHeight), [result, pageWidth, pageHeight])
 
   useEffect(() => {
     const canvas = canvasRef.current
     const context = canvas?.getContext('2d')
     if (!canvas || !context) return
     canvas.width = pageWidth
-    canvas.height = pageHeight
-    context.clearRect(0, 0, pageWidth, pageHeight)
-    drawPreviewPaper(context, pageWidth, pageHeight, paperStyle, squareMm)
+    canvas.height = window_.height
+    context.setTransform(1, 0, 0, 1, 0, 0)
+    context.clearRect(0, 0, pageWidth, window_.height)
+    context.translate(0, -window_.top)
+    drawPreviewPaper(context, pageWidth, window_.top + window_.height, paperStyle, squareMm)
     context.lineCap = 'round'
     context.lineJoin = 'round'
     for (const stroke of result.strokes) {
@@ -80,13 +99,7 @@ const HandwritingPreview = ({
       if (stroke.points.length === 1) {
         const point = stroke.points[0]
         context.beginPath()
-        context.arc(
-          point.x * pageWidth,
-          point.y * pageHeight,
-          previewPressureWidth(stroke, point.pressure) / 2,
-          0,
-          Math.PI * 2,
-        )
+        context.arc(point.x * pageWidth, point.y * pageHeight, previewPressureWidth(stroke, point.pressure) / 2, 0, Math.PI * 2)
         context.fill()
         continue
       }
@@ -100,10 +113,34 @@ const HandwritingPreview = ({
         context.stroke()
       }
     }
-  }, [pageHeight, pageWidth, paperStyle, result, squareMm])
+  }, [pageHeight, pageWidth, paperStyle, result, squareMm, window_])
 
-  return <canvas ref={canvasRef} className="lw-tth-preview-canvas" aria-label="Vorschau der erzeugten Handschrift" />
+  return <canvas
+    ref={canvasRef}
+    className="tth-preview-canvas lw-tth-preview-canvas"
+    style={{ aspectRatio: `${pageWidth} / ${window_.height}` }}
+    role="img"
+    aria-label="Vorschau der erzeugten Handschrift"
+  />
 }
+
+const KNOWN_ALIASES: Record<string, string[]> = { '-': ['−', 'operator_minus'], "'": ['’', '‘', 'apostrophe'], '"': ['“', '”', '„', 'quote'] }
+const UMLAUT_BASE: Record<string, string> = { ä: 'a', ö: 'o', ü: 'u', Ä: 'A', Ö: 'O', Ü: 'U' }
+
+/** Which of the typed characters come from the trained letters, which fall back to the school script. */
+const letterCoverage = (text: string, trained: Set<string>, missing: string[]) => {
+  const personal: string[] = []
+  const fallback: string[] = []
+  const skipped = new Set(missing)
+  for (const char of new Set([...text.normalize('NFC')])) {
+    if (/\s/u.test(char) || skipped.has(char)) continue
+    const known = trained.has(char) || (KNOWN_ALIASES[char] ?? []).some((alias) => trained.has(alias)) || (UMLAUT_BASE[char] !== undefined && trained.has(UMLAUT_BASE[char]))
+    ;(known ? personal : fallback).push(char)
+  }
+  return { personal, fallback }
+}
+
+const formatList = (chars: string[], limit = 14) => chars.slice(0, limit)
 
 export function TextToHandwritingDialog({
   open,
@@ -155,7 +192,7 @@ export function TextToHandwritingDialog({
     let cancelled = false
     setLookupPending(true)
     const timer = window.setTimeout(() => {
-      const lookup = window.fanotes.handwritingLearning?.('retrieve', { text: text.slice(0, 8000) }) ?? Promise.resolve(null)
+      const lookup = window.fanotes.handwritingLearning?.('retrieve', { text: text.slice(0, MAX_TEXT) }) ?? Promise.resolve(null)
       void lookup.then(result => {
         if (!cancelled) { setRequestedUnits(result?.requestedUnits ?? []); setLookupPending(false) }
       }).catch(() => { if (!cancelled) { setRequestedUnits([]); setLookupPending(false) } })
@@ -173,7 +210,7 @@ export function TextToHandwritingDialog({
           if (!model) return old
           return old && old.vaultId === next.vaultId && old.model.revision === model.revision && old.busy === next.busy && old.enabled === next.enabled && old.error === next.error ? old : { ...next, model }
         }) }
-      } catch { if (!cancelled) setLearningError('Automatic learning is temporarily unavailable. Existing samples remain usable.') }
+      } catch { if (!cancelled) setLearningError('Das automatische Lernen ist gerade nicht verfügbar. Deine Buchstaben bleiben nutzbar.') }
     }
     void refresh()
     const timer = window.setInterval(refresh, 3000)
@@ -196,52 +233,19 @@ export function TextToHandwritingDialog({
   const [seed, setSeed] = useState(createHandwritingSeed)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
-  useModalFocus(dialogRef)
-
-  useEffect(() => {
-    if (!open) return
-    const timeout = window.setTimeout(() => textRef.current?.focus(), 40)
-    return () => {
-      window.clearTimeout(timeout)
-    }
-  }, [open])
+  // Focus goes into the dialog when it opens and back to the toolbar button when it closes. The hook has to
+  // follow `open`: the dialog element only exists while it is open.
+  useModalFocus(dialogRef, { active: open, onEscape: onClose })
 
   const insertClipboardText = (incoming: string, field: HTMLTextAreaElement) => {
     const start = field.selectionStart ?? text.length
     const end = field.selectionEnd ?? text.length
-    const next = `${text.slice(0, start)}${incoming}${text.slice(end)}`.slice(0, 8_000)
+    const next = `${text.slice(0, start)}${incoming}${text.slice(end)}`.slice(0, MAX_TEXT)
     setText(next)
-    const cursor = Math.min(8_000, start + incoming.length)
+    const cursor = Math.min(MAX_TEXT, start + incoming.length)
     requestAnimationFrame(() => {
       try { field.setSelectionRange(cursor, cursor) } catch { /* ignore */ }
     })
-  }
-
-  const handleDialogPointer = (event: { stopPropagation: () => void }) => {
-    event.stopPropagation()
-  }
-
-  const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
-    event.stopPropagation()
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      onClose()
-      return
-    }
-    if (event.key !== 'Tab') return
-    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
-      'button:not(:disabled), textarea:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
-    ) ?? [])].filter((element) => !element.hidden && element.getClientRects().length > 0)
-    if (!focusable.length) return
-    const first = focusable[0]
-    const last = focusable[focusable.length - 1]
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault()
-      last.focus()
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault()
-      first.focus()
-    }
   }
 
   const options = useMemo(() => ({
@@ -260,9 +264,9 @@ export function TextToHandwritingDialog({
 
   const generationInput = useMemo(() => ({ text, requestedUnits, samples: isDesktop ? trajectorySamples : samples, options, fit: fitToPage, page: { width: pageWidth, height: pageHeight } }), [text, requestedUnits, isDesktop, trajectorySamples, samples, options, fitToPage, pageWidth, pageHeight])
   const legacyResult = useMemo(() => {
-    if (isDesktop) return null
+    if (isDesktop || !open) return null
     return (fitToPage ? legacyEngine.synthesizeHandwritingToFit : legacyEngine.synthesizeHandwriting)(text, samples, options, { width: pageWidth, height: pageHeight })
-  }, [isDesktop, fitToPage, options, pageHeight, pageWidth, samples, text])
+  }, [isDesktop, open, fitToPage, options, pageHeight, pageWidth, samples, text])
   useEffect(() => {
     const worker = workerRef.current
     if (!isDesktop || !open || !worker || lookupPending) return
@@ -273,9 +277,9 @@ export function TextToHandwritingDialog({
         if (data.id !== requestRef.current) return
         setGenerating(false)
         if (data.result) { setPreview(data.result); setCompletedInput(generationInput); setPreviewError('') }
-        else setPreviewError(data.error)
+        else setPreviewError('Die Vorschau konnte nicht erstellt werden.')
       }
-      worker.onerror = () => { setGenerating(false); setPreviewError('The handwriting preview could not be generated.') }
+      worker.onerror = () => { setGenerating(false); setPreviewError('Die Vorschau konnte nicht erstellt werden.') }
       const { model, ...lightOptions } = generationInput.options
       const cached = cachedWorkerData.current
       if (!cached || cached.model !== model || cached.samples !== generationInput.samples || cached.units !== requestedUnits) {
@@ -288,55 +292,111 @@ export function TextToHandwritingDialog({
   }, [isDesktop, open, lookupPending, generationInput])
   const empty = useMemo(() => synthesizeHandwriting('', [], { ...options, model: undefined }, { width: pageWidth, height: pageHeight }), [options, pageWidth, pageHeight])
   const result = isDesktop ? preview ?? empty : legacyResult ?? empty
+  const trained = useMemo(() => new Set(samples.map((sample) => sample.label)), [samples])
+  const trainedLetters = useMemo(() => [...trained].filter((label) => /\p{L}/u.test(label)).length, [trained])
+  const coverage = useMemo(() => letterCoverage(text, trained, result.missingCharacters), [result.missingCharacters, text, trained])
 
   if (!open) return null
 
-  const unavailable = result.missingCharacters.length > 0
-  const canInsert = result.strokes.length > 0 && !unavailable && !result.overflow && !generating && !lookupPending && !previewError && (!isDesktop || completedInput === generationInput)
+  const hasText = text.trim().length > 0
+  const skipped = result.missingCharacters
+  const busy = hasText && (generating || lookupPending)
+  const ready = !isDesktop || completedInput === generationInput
+  const canInsert = hasText && result.strokes.length > 0 && !result.overflow && !busy && !previewError && ready
   const previewWidth = result.pageWidth || pageWidth
   const previewHeight = result.pageHeight || pageHeight
+  const lines = hasText ? result.lineCount : 0
+  const insert = () => {
+    if (!canInsert) return
+    onInsert(result.strokes, result)
+    // The text is spent: reopening the dialog starts empty instead of inviting a second, identical insert.
+    setText('')
+    setSeed(createHandwritingSeed())
+  }
+  // Keys typed in the dialog stay in the dialog: the app closes the whole handwriting page on Escape and the
+  // board has single-letter tool shortcuts. The portal sits under <body>, so stopping the event here also keeps
+  // it from the window-level handlers.
+  const onDialogKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    event.stopPropagation()
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      onClose()
+      return
+    }
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault()
+      insert()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), textarea:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    ) ?? [])].filter((element) => element.getClientRects().length > 0)
+    if (!focusable.length) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+  const status = !hasText
+    ? uiText('Schreibe oder füge einen Text ein.', 'Type or paste some text.')
+    : busy
+      ? uiText('Vorschau wird erstellt …', 'Preparing the preview …')
+      : previewError
+        ? previewError
+        : result.overflow
+          ? uiText('Der Text passt nicht auf diese Seite.', 'The text does not fit on this page.')
+          : !result.strokes.length
+            ? uiText('Kein Zeichen davon lässt sich schreiben.', 'None of these characters can be written.')
+            : ''
 
-  return <div
-    className="lw-tth-backdrop"
+  return createPortal(<div
+    className="modal-backdrop confirm-backdrop tth-backdrop lw-tth-backdrop"
     role="presentation"
     data-fanotes-drawing-chrome="text-to-handwriting"
     onPointerDown={(event) => {
       event.stopPropagation()
       if (event.target === event.currentTarget) onClose()
     }}
-    onPointerMove={handleDialogPointer}
-    onPointerUp={handleDialogPointer}
+    onPointerMove={(event) => event.stopPropagation()}
+    onPointerUp={(event) => event.stopPropagation()}
     onPaste={(event) => event.stopPropagation()}
   >
-    <style>{textToHandwritingStyles}</style>
     <section
       ref={dialogRef}
-      className="lw-tth-dialog"
+      className="confirm-dialog tth-dialog lw-tth-dialog"
       role="dialog"
       aria-modal="true"
       aria-labelledby="lw-tth-title"
-      onKeyDown={handleDialogKeyDown}
-      onPointerDown={handleDialogPointer}
+      aria-busy={busy}
+      onKeyDown={onDialogKeyDown}
+      onPointerDown={(event) => event.stopPropagation()}
     >
-      <header className="lw-tth-head">
-        <span className="lw-tth-symbol"><Type size={20} /></span>
+      <header className="confirm-dialog-header">
+        <span className="confirm-dialog-icon" aria-hidden="true"><Type size={18} /></span>
         <div>
-          <h2 id="lw-tth-title">Text in deine Handschrift</h2>
-          <p>{isDesktop ? 'Local learning from your everyday notes. Known words keep their original pen movements.' : 'FaNotes setzt jedes Zeichen neu aus deinen eigenen GlyphenWerk-Strichen zusammen.'}</p>
+          <p className="eyebrow">Handschrift</p>
+          <h3 id="lw-tth-title">Text in deine Handschrift</h3>
         </div>
-        <button type="button" className="lw-tth-icon" aria-label="Dialog schließen" onClick={onClose}><X size={19} /></button>
+        <button type="button" className="icon-button tth-dialog__close" aria-label="Dialog schließen" onClick={onClose}><X size={16} /></button>
       </header>
 
-      <div className="lw-tth-body">
-        <div className="lw-tth-controls">
-          <label className="lw-tth-text-field">
-            <span>Text</span>
+      <div className="tth-dialog__body">
+        <div className="tth-dialog__controls">
+          <label className="tth-field">
+            <span className="tth-field__label">Text</span>
             <textarea
               ref={textRef}
               data-tth-control="text"
+              data-autofocus
               value={text}
-              rows={8}
-              maxLength={8_000}
+              rows={6}
+              maxLength={MAX_TEXT}
               spellCheck
               placeholder="Schreibe oder füge hier deinen Text ein …"
               onChange={(event) => setText(event.target.value)}
@@ -348,94 +408,55 @@ export function TextToHandwritingDialog({
                 insertClipboardText(incoming, event.currentTarget)
               }}
             />
-            <small>{text.length.toLocaleString(getUiLocale())} / 8'000 Zeichen</small>
+            <small className="tth-field__count" data-i18n-ignore>
+              {uiText(`${text.length.toLocaleString(getUiLocale())} von ${MAX_TEXT.toLocaleString(getUiLocale())} Zeichen`, `${text.length.toLocaleString(getUiLocale())} of ${MAX_TEXT.toLocaleString(getUiLocale())} characters`)}
+            </small>
           </label>
 
-          <div className="lw-tth-option-grid">
-            <label>
-              <span>Schriftgröße <output data-tth-output="font-size">{fontSize} px</output></span>
-              <input
-                type="range"
-                data-tth-control="font-size"
-                min="20"
-                max="72"
-                step="1"
-                value={fontSize}
-                onInput={(event) => setFontSize(Number(event.currentTarget.value))}
-                onChange={(event) => setFontSize(Number(event.currentTarget.value))}
-              />
+          <fieldset className="tth-group">
+            <legend>Schrift</legend>
+            <label className="tth-slider">
+              <span>Schriftgröße</span>
+              <output data-tth-output="font-size">{fontSize} px</output>
+              <input type="range" data-tth-control="font-size" min="20" max="72" step="1" value={fontSize} onChange={(event) => setFontSize(Number(event.currentTarget.value))} />
             </label>
-            <label>
-              <span>Zeilenabstand <output data-tth-output="line-spacing">{lineSpacing.toFixed(2)}×</output></span>
-              <input
-                type="range"
-                data-tth-control="line-spacing"
-                min="1.05"
-                max="2"
-                step="0.01"
-                value={lineSpacing}
-                onInput={(event) => setLineSpacing(Number(event.currentTarget.value))}
-                onChange={(event) => setLineSpacing(Number(event.currentTarget.value))}
-              />
+            <label className="tth-slider">
+              <span>Zeilenabstand</span>
+              <output data-tth-output="line-spacing">{lineSpacing.toFixed(2)}×</output>
+              <input type="range" data-tth-control="line-spacing" min="1.05" max="2" step="0.01" value={lineSpacing} onChange={(event) => setLineSpacing(Number(event.currentTarget.value))} />
             </label>
-            <label>
-              <span>Natürliche Variation <output data-tth-output="variation">{Math.round(variation * 100)}%</output></span>
-              <input
-                type="range"
-                data-tth-control="variation"
-                min="0"
-                max="1"
-                step="0.01"
-                value={variation}
-                onInput={(event) => setVariation(Number(event.currentTarget.value))}
-                onChange={(event) => setVariation(Number(event.currentTarget.value))}
-              />
+            <label className="tth-slider">
+              <span>Natürliche Variation</span>
+              <output data-tth-output="variation">{Math.round(variation * 100)}%</output>
+              <input type="range" data-tth-control="variation" min="0" max="1" step="0.01" value={variation} onChange={(event) => setVariation(Number(event.currentTarget.value))} />
             </label>
-          </div>
+          </fieldset>
 
-          <div className="lw-tth-choice-row">
-            <button type="button" className={connectLetters ? 'is-active' : ''} aria-pressed={connectLetters} onClick={() => setConnectLetters((current) => !current)}>
-              {connectLetters ? <Link2 size={16} /> : <Unlink2 size={16} />}
-              Buchstaben verbinden
-            </button>
-            <button type="button" className={fitToPage ? 'is-active' : ''} aria-pressed={fitToPage} onClick={() => setFitToPage((current) => !current)}>
-              <Sparkles size={16} /> An Seite anpassen
-            </button>
-          </div>
+          <fieldset className="tth-group">
+            <legend>Stil</legend>
+            <div className="tth-choices">
+              <button type="button" className={connectLetters ? 'is-active' : ''} aria-pressed={connectLetters} onClick={() => setConnectLetters((current) => !current)}>
+                {connectLetters ? <Link2 size={15} /> : <Unlink2 size={15} />}
+                Buchstaben verbinden
+              </button>
+              <button type="button" className={fitToPage ? 'is-active' : ''} aria-pressed={fitToPage} onClick={() => setFitToPage((current) => !current)}>
+                <Maximize2 size={15} /> An Seite anpassen
+              </button>
+            </div>
+          </fieldset>
 
-          <label className="lw-tth-select">
-            <span>Einfügeposition</span>
-            <select value={placement} onChange={(event) => setPlacement(event.target.value as Placement)}>
-              <option value="free-line">Nach der letzten Handschrift</option>
-              <option value="page-start">Am Seitenanfang</option>
-            </select>
-          </label>
-
-          {isDesktop && <div className="lw-tth-message" role="status"><div>
-            <strong>{generating || lookupPending ? 'Preparing preview…' : learning ? learningStatus(learning) : 'Loading local handwriting model…'}</strong>
-            {learning && <label><input type="checkbox" checked={learning.enabled} onChange={event => {
-              void window.fanotes.handwritingLearning?.('enabled', event.target.checked).then(next => { if (next?.model) setLearning({ ...next, model: next.model }) }).catch(() => setPreviewError('The learning preference could not be saved.'))
-            }} /> Learn automatically from notes</label>}
-            {(previewError || learningError) && <span>{previewError || learningError}</span>}
-          </div></div>}
-          {!isDesktop && !samples.length && <div className="lw-tth-message is-warning">
-            <CircleAlert size={18} />
-            <div><strong>Deine Schrift fehlt noch</strong><span>Importiere dein GlyphenWerk-Training. Nur so entsteht wirklich deine persönliche Handschrift.</span></div>
-            <button type="button" onClick={onRequestTraining}>GlyphenWerk öffnen</button>
-          </div>}
-          {unavailable && <div className="lw-tth-message is-warning">
-            <CircleAlert size={18} />
-            <div><strong>Noch nicht trainierte Zeichen</strong><span>{result.missingCharacters.map((char) => char === ' ' ? 'Leerzeichen' : char).join(' · ')}</span></div>
-          </div>}
-          {result.overflow && <div className="lw-tth-message is-error">
-            <CircleAlert size={18} />
-            <div><strong>Der Text passt nicht auf diese Seite</strong><span>{result.overflowCharacters} Zeichen haben keinen Platz. Wähle den Seitenanfang, verkleinere die Schrift oder kürze den Text.</span></div>
-          </div>}
+          <fieldset className="tth-group">
+            <legend>Einfügen</legend>
+            <div className="tth-choices" role="radiogroup" aria-label="Einfügeposition">
+              <button type="button" role="radio" aria-checked={placement === 'free-line'} className={placement === 'free-line' ? 'is-active' : ''} onClick={() => setPlacement('free-line')}>Nach der letzten Handschrift</button>
+              <button type="button" role="radio" aria-checked={placement === 'page-start'} className={placement === 'page-start' ? 'is-active' : ''} onClick={() => setPlacement('page-start')}>Am Seitenanfang</button>
+            </div>
+          </fieldset>
         </div>
 
-        <aside className="lw-tth-preview">
+        <aside className="tth-dialog__preview" aria-label="Vorschau">
           <div
-            className="lw-tth-preview-head"
+            className="tth-preview-head"
             data-tth-preview-options={JSON.stringify({
               fontSize,
               lineSpacing,
@@ -445,38 +466,91 @@ export function TextToHandwritingDialog({
               pageHeight: result.pageHeight,
             })}
           >
-            <div><strong>Live-Vorschau</strong><small>{`${result.glyphCount} Zeichen · ${result.lineCount} Zeilen · ${result.connectionCount} Verbindungen`}</small></div>
-            <button type="button" onClick={() => setSeed(createHandwritingSeed())} disabled={!text.trim()} title={isDesktop ? "Use another observed trajectory or style variant, when available" : "Alle Zeichen mit neuen natürlichen Abweichungen erzeugen"}>
-              <RefreshCw size={15} /> Neu variieren
+            <div>
+              <strong>Live-Vorschau</strong>
+              <small data-i18n-ignore>{uiText(
+                `${result.glyphCount} Zeichen · ${lines} ${lines === 1 ? 'Zeile' : 'Zeilen'}`,
+                `${result.glyphCount} characters · ${lines} ${lines === 1 ? 'line' : 'lines'}`,
+              )}</small>
+            </div>
+            <button type="button" className="secondary-button" onClick={() => setSeed(createHandwritingSeed())} disabled={!hasText} title="Alle Zeichen mit neuen natürlichen Abweichungen erzeugen">
+              <RefreshCw size={14} /> Neu variieren
             </button>
           </div>
-          <div className="lw-tth-paper-wrap">
+          <div className={`tth-paper${busy ? ' is-busy' : ''}`}>
             <HandwritingPreview result={result} pageWidth={previewWidth} pageHeight={previewHeight} paperStyle={paperStyle} squareMm={squareMm} />
-            {!text.trim() && <div className="lw-tth-preview-empty"><PenLine size={27} /><span>Deine Vorschau erscheint hier</span></div>}
+            {!hasText && <div className="tth-paper__empty"><PenLine size={24} /><span>Deine Vorschau erscheint hier</span></div>}
           </div>
-          {fitToPage && result.fontSizeUsed < fontSize && <p className="lw-tth-fit-note">Für den verfügbaren Platz automatisch auf {result.fontSizeUsed} px angepasst.</p>}
+          {fitToPage && hasText && result.fontSizeUsed < fontSize && <p className="tth-note" data-i18n-ignore>{uiText(`Für den verfügbaren Platz automatisch auf ${result.fontSizeUsed} px angepasst.`, `Automatically reduced to ${result.fontSizeUsed} px to fit the available space.`)}</p>}
+
+          <div className="tth-letters" role="status" data-tth-letters={trainedLetters ? 'trained' : 'none'}>
+            {!trainedLetters ? (
+              <div className="tth-card is-empty">
+                <CircleAlert size={16} aria-hidden="true" />
+                <div>
+                  <strong>Noch keine Buchstaben trainiert</strong>
+                  <span data-i18n-ignore>{isDesktop
+                    ? uiText('Bis dahin schreibt FaNotes in Schulschrift und mit dem, was es aus deinen Notizen lernt. Trainiere deine Buchstaben im GlyphenWerk, damit es wie deine Handschrift aussieht.', 'Until then FaNotes writes in school script and with what it learns from your notes. Train your letters in GlyphenWerk to make it look like your handwriting.')
+                    : uiText('Bis dahin schreibt FaNotes in Schulschrift. Trainiere deine Buchstaben im GlyphenWerk, damit es wie deine Handschrift aussieht.', 'Until then FaNotes writes in school script. Train your letters in GlyphenWerk to make it look like your handwriting.')}</span>
+                </div>
+                <button type="button" className="secondary-button" onClick={onRequestTraining}>Buchstaben trainieren</button>
+              </div>
+            ) : hasText && coverage.fallback.length > 0 ? (
+              <div className="tth-card is-warning">
+                <CircleAlert size={16} aria-hidden="true" />
+                <div>
+                  <strong data-i18n-ignore>{uiText(`${coverage.personal.length} von ${coverage.personal.length + coverage.fallback.length} Zeichen aus deiner Schrift`, `${coverage.personal.length} of ${coverage.personal.length + coverage.fallback.length} characters from your handwriting`)}</strong>
+                  <span>Diese Zeichen fehlen im Training und erscheinen in Schulschrift:</span>
+                  <span className="tth-chips" data-tth-fallback>{formatList(coverage.fallback).map((char) => <kbd key={char}>{char}</kbd>)}{coverage.fallback.length > 14 && <kbd>…</kbd>}</span>
+                </div>
+                <button type="button" className="secondary-button" onClick={onRequestTraining}>Buchstaben trainieren</button>
+              </div>
+            ) : (
+              <div className="tth-card is-ok">
+                <CircleCheck size={16} aria-hidden="true" />
+                <div>
+                  <strong>{hasText ? 'Alle Zeichen stammen aus deiner Schrift' : 'Deine Buchstaben sind bereit'}</strong>
+                  <span data-i18n-ignore>{uiText(`${trainedLetters} trainierte Buchstaben`, `${trainedLetters} trained letters`)}</span>
+                </div>
+                <button type="button" className="secondary-button" onClick={onRequestTraining}>Training öffnen</button>
+              </div>
+            )}
+            {skipped.length > 0 && hasText && <div className="tth-card is-warning" data-tth-skipped>
+              <CircleAlert size={16} aria-hidden="true" />
+              <div>
+                <strong>Nicht schreibbare Zeichen</strong>
+                <span>Diese Zeichen gibt es in keiner Schrift und bleiben als Lücke stehen:</span>
+                <span className="tth-chips">{skipped.slice(0, 14).map((char) => <kbd key={char}>{char === ' ' ? '␣' : char}</kbd>)}</span>
+              </div>
+            </div>}
+            {result.overflow && hasText && <div className="tth-card is-error" role="alert">
+              <CircleAlert size={16} aria-hidden="true" />
+              <div>
+                <strong>Der Text passt nicht auf diese Seite</strong>
+                <span data-i18n-ignore>{uiText(`${result.overflowCharacters} Zeichen haben keinen Platz. Wähle den Seitenanfang, verkleinere die Schrift oder kürze den Text.`, `${result.overflowCharacters} characters do not fit. Choose the top of the page, make the writing smaller or shorten the text.`)}</span>
+              </div>
+            </div>}
+            {(learningError || (previewError && hasText)) && <p className="tth-note is-error" role="alert">{learningError || previewError}</p>}
+            {isDesktop && learning && <label className="tth-learn">
+              <input type="checkbox" checked={learning.enabled} onChange={event => {
+                void window.fanotes.handwritingLearning?.('enabled', event.target.checked).then(next => { if (next?.model) setLearning({ ...next, model: next.model }) }).catch(() => setLearningError('Die Einstellung konnte nicht gespeichert werden.'))
+              }} />
+              <span>
+                <b>Automatisch aus Notizen lernen</b>
+                <small data-i18n-ignore>{learning.busy ? uiText('Lernt gerade aus deinen Notizen …', 'Learning from your notes …') : learning.observationCount ? uiText(`${learning.pageCount} Handschriftseiten ausgewertet, nur auf diesem Gerät.`, `${learning.pageCount} handwritten pages analysed, on this device only.`) : uiText('Schreibe wie gewohnt; FaNotes lernt lokal auf diesem Gerät.', 'Write as usual; FaNotes learns locally on this device.')}</small>
+              </span>
+            </label>}
+          </div>
         </aside>
       </div>
 
-      <footer className="lw-tth-footer">
-        <p><Sparkles size={14} /> {isDesktop ? 'Variation follows observed handwriting; unknown letter shapes use the school script.' : 'Jede Erzeugung variiert Form, Neigung, Grundlinie, Druck und Strichbreite behutsam.'}</p>
-        <div>
-          <button type="button" className="lw-tth-cancel" onClick={onClose}>Abbrechen</button>
-          <button type="button" className="lw-tth-insert" disabled={!canInsert} onClick={() => onInsert(result.strokes, result)}>
-            <PenLine size={17} /> Als Handschrift einfügen
-          </button>
-        </div>
+      <footer className="confirm-dialog-actions tth-dialog__actions">
+        <p className="tth-dialog__hint" role="status" data-i18n-ignore>{status || <><Sparkles size={13} aria-hidden="true" /> {uiText('Strg+Eingabe fügt ein', 'Ctrl+Enter inserts')}</>}</p>
+        <button type="button" className="secondary-button" onClick={onClose}>Abbrechen</button>
+        <button type="button" className="primary-button lw-tth-insert" disabled={!canInsert} onClick={insert}>
+          <PenLine size={15} /> Als Handschrift einfügen
+        </button>
       </footer>
     </section>
-  </div>
+  </div>, document.body)
 }
-
-const textToHandwritingStyles = `
-.lw-tth-backdrop{position:fixed;z-index:1000;inset:0;display:grid;place-items:center;padding:24px;background:rgba(15,15,15,.35);backdrop-filter:blur(2px);pointer-events:auto;animation:lw-tth-fade .16s ease-out}.lw-tth-dialog{display:flex;width:min(1080px,calc(100vw - 34px));max-height:min(820px,calc(100vh - 34px));flex-direction:column;overflow:hidden;border:1px solid var(--border-strong,rgba(255,255,255,.17));border-radius:12px;color:var(--text,#ededf3);background:color-mix(in srgb,var(--background,#191919) 94%,var(--accent,#2a6f97) 6%);box-shadow:0 34px 120px rgba(0,0,0,.48);font:500 13px/1.45 var(--ui-font,Inter,system-ui,sans-serif);animation:lw-tth-rise .2s cubic-bezier(.2,.75,.25,1)}.lw-tth-dialog *{box-sizing:border-box}.lw-tth-dialog button,.lw-tth-dialog input,.lw-tth-dialog select,.lw-tth-dialog textarea{font:inherit}.lw-tth-head{display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--border,rgba(255,255,255,.1));background:color-mix(in srgb,var(--background-secondary,#202020) 88%,transparent)}.lw-tth-symbol{display:grid;width:36px;height:36px;flex:0 0 auto;place-items:center;border-radius:8px;color:var(--bg,#191919);background:var(--text,#ededec);box-shadow:none}.lw-tth-head>div{min-width:0;flex:1}.lw-tth-head h2{margin:0;font-size:18px;line-height:1.3}.lw-tth-head p{margin:3px 0 0;color:var(--text-muted,#9898a8);font-size:12px}.lw-tth-icon{display:grid;width:34px;height:34px;place-items:center;border:0;border-radius:9px;color:inherit;background:transparent;cursor:pointer}.lw-tth-icon:hover{background:color-mix(in srgb,var(--text,#fff) 8%,transparent)}
-.lw-tth-body{display:grid;grid-template-columns:minmax(360px,1fr) minmax(330px,440px);min-height:0;overflow:auto}.lw-tth-controls{display:flex;min-width:0;flex-direction:column;gap:15px;padding:20px}.lw-tth-text-field{display:grid;gap:7px}.lw-tth-text-field>span,.lw-tth-select>span{font-weight:750}.lw-tth-text-field textarea{width:100%;min-height:154px;resize:vertical;padding:12px 13px;border:1px solid var(--border-strong,rgba(255,255,255,.16));border-radius:12px;outline:none;color:var(--text,#fff);background:var(--background-secondary,#202020);line-height:1.55}.lw-tth-text-field textarea:focus{border-color:var(--accent,#2a6f97);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent,#2a6f97) 18%,transparent)}.lw-tth-text-field small{justify-self:end;color:var(--text-muted,#999);font-size: 12px}.lw-tth-option-grid{display:grid;gap:12px;padding:13px;border:1px solid var(--border,rgba(255,255,255,.1));border-radius:12px;background:color-mix(in srgb,var(--background-secondary,#202020) 70%,transparent)}.lw-tth-option-grid label{display:grid;grid-template-columns:1fr minmax(110px,42%);align-items:center;gap:12px}.lw-tth-option-grid label>span{display:flex;justify-content:space-between;gap:10px;color:var(--text-muted,#aaa);font-size: 12px}.lw-tth-option-grid output{color:var(--text,#fff);font-variant-numeric:tabular-nums}.lw-tth-option-grid input{width:100%;accent-color:var(--accent,#2a6f97)}.lw-tth-choice-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.lw-tth-choice-row button{display:flex;min-height:38px;align-items:center;justify-content:center;gap:7px;border:1px solid var(--border,rgba(255,255,255,.11));border-radius:10px;color:var(--text-muted,#aaa);background:var(--background-secondary,#202020);cursor:pointer}.lw-tth-choice-row button.is-active{border-color:color-mix(in srgb,var(--accent,#2a6f97) 55%,transparent);color:var(--text,#fff);background:color-mix(in srgb,var(--accent,#2a6f97) 20%,var(--background-secondary,#202020))}.lw-tth-select{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:12px}.lw-tth-select select{height:38px;padding:0 11px;border:1px solid var(--border-strong,rgba(255,255,255,.16));border-radius:10px;outline:none;color:var(--text,#fff);background:var(--background-secondary,#202020)}
-.lw-tth-message{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;padding:11px 12px;border:1px solid;border-radius:11px}.lw-tth-message>div{display:flex;min-width:0;flex-direction:column}.lw-tth-message strong{font-size: 12px}.lw-tth-message span{overflow-wrap:anywhere;font-size: 12px;opacity:.84}.lw-tth-message button{padding:6px 9px;border:0;border-radius:7px;color:inherit;background:color-mix(in srgb,var(--text,#ededec) 8%,transparent);cursor:pointer}.lw-tth-message.is-warning{border-color:color-mix(in srgb,var(--warning,#e7b34a) 38%,transparent);color:var(--warning,#e7b34a);background:color-mix(in srgb,var(--warning,#e7b34a) 8%,transparent)}.lw-tth-message.is-error{border-color:color-mix(in srgb,var(--danger,#e05469) 38%,transparent);color:var(--danger,#e86b7e);background:color-mix(in srgb,var(--danger,#e05469) 8%,transparent)}
-.lw-tth-preview{display:flex;min-height:0;flex-direction:column;padding:20px;border-left:1px solid var(--border,rgba(255,255,255,.1));background:color-mix(in srgb,var(--background-secondary,#202020) 72%,transparent)}.lw-tth-preview-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px}.lw-tth-preview-head>div{display:flex;min-width:0;flex-direction:column}.lw-tth-preview-head small{color:var(--text-muted,#999);font-size: 12px}.lw-tth-preview-head button{display:flex;height:32px;align-items:center;gap:6px;padding:0 9px;border:1px solid var(--border,rgba(255,255,255,.12));border-radius:8px;color:inherit;background:color-mix(in srgb,var(--text,#fff) 5%,transparent);cursor:pointer}.lw-tth-preview-head button:disabled{opacity:.45;cursor:not-allowed}.lw-tth-paper-wrap{position:relative;display:grid;min-height:310px;flex:1;place-items:center;overflow:auto;border-radius:12px;background:color-mix(in srgb,var(--text,#ededec) 8%,var(--bg,#191919));box-shadow:inset 0 0 0 1px var(--border,rgba(255,255,255,.08))}.lw-tth-preview-canvas{display:block;width:auto;max-width:calc(100% - 24px);height:auto;max-height:none;background:#fbfcff;box-shadow:0 12px 36px rgba(0,0,0,.3)}.lw-tth-preview-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:9px;color:var(--text-muted,#b3b3ae);font-size: 12px;pointer-events:none}.lw-tth-fit-note{margin:9px 0 0;color:var(--text-muted,#999);font-size: 12px;text-align:center}
-.lw-tth-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 20px;border-top:1px solid var(--border,rgba(255,255,255,.1));background:color-mix(in srgb,var(--background-secondary,#202020) 88%,transparent)}.lw-tth-footer p{display:flex;align-items:center;gap:6px;margin:0;color:var(--text-muted,#999);font-size: 12px}.lw-tth-footer>div{display:flex;gap:8px}.lw-tth-footer button{height:34px;padding:0 13px;border:0;border-radius:6px;cursor:pointer}.lw-tth-cancel{color:var(--text,#fff);background:color-mix(in srgb,var(--text,#fff) 7%,transparent)}.lw-tth-insert{display:flex;align-items:center;gap:7px;font-weight:500;color:var(--bg,#191919);background:var(--text,#ededec);box-shadow:none}.lw-tth-insert:disabled{opacity:.42;cursor:not-allowed;box-shadow:none}
-@keyframes lw-tth-fade{from{opacity:0}}@keyframes lw-tth-rise{from{opacity:0;transform:translateY(10px) scale(.985)}}
-@media(max-width:780px){.lw-tth-backdrop{padding:10px}.lw-tth-dialog{width:calc(100vw - 12px);max-height:calc(100vh - 12px);border-radius:12px}.lw-tth-body{display:block}.lw-tth-preview{min-height:420px;border-top:1px solid var(--border,rgba(255,255,255,.1));border-left:0}.lw-tth-footer{align-items:stretch;flex-direction:column}.lw-tth-footer>div{display:grid;grid-template-columns:1fr 1fr}.lw-tth-footer button{justify-content:center}.lw-tth-option-grid label{grid-template-columns:1fr}.lw-tth-choice-row{grid-template-columns:1fr}}
-`
