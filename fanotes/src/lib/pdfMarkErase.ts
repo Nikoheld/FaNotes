@@ -12,8 +12,34 @@ export const PDF_MARK_SPAN_CLASS = 'pdf-anchored-mark'
 
 /** Leaf runs of a text layer. Marked-content wrappers are spans too; only the leaves carry glyphs. */
 export const pdfTextLeafSpans = (textHost: ParentNode): HTMLElement[] => (
-  [...textHost.querySelectorAll('span')].filter((span) => !span.querySelector('span'))
+  [...textHost.querySelectorAll('span')].filter((span) => (
+    !span.classList.contains(PDF_MARK_PART_CLASS) && !span.querySelector(`span:not(.${PDF_MARK_PART_CLASS})`)
+  ))
 )
+
+/** Inline wrapper inside a leaf span that paints only the marked words of that run. */
+export const PDF_MARK_PART_CLASS = 'pdf-anchored-mark-part'
+
+/** Paints `from`..`to` (raw character offsets) of a leaf span; the whole span when it is fully covered. */
+export const markSpanRange = (span: HTMLElement, from: number, to: number) => {
+  const text = span.textContent ?? ''
+  const start = Math.max(0, from)
+  const end = Math.min(text.length, to)
+  span.classList.add(PDF_MARK_SPAN_CLASS)
+  if (end <= start) return
+  const lead = text.slice(0, start).trim().length
+  const trail = text.slice(end).trim().length
+  if (!lead && !trail) return
+  const node = span.firstChild
+  if (!node || node.nodeType !== Node.TEXT_NODE || span.childNodes.length !== 1) return
+  const range = document.createRange()
+  range.setStart(node, start)
+  range.setEnd(node, end)
+  const part = document.createElement('span')
+  part.className = PDF_MARK_PART_CLASS
+  range.surroundContents(part)
+  span.classList.add('pdf-anchored-mark-partial')
+}
 
 const pointToRect = (x: number, y: number, rect: ClientRect) => {
   const dx = Math.max(rect.left - x, 0, x - rect.right)

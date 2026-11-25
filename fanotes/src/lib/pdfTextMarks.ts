@@ -94,6 +94,8 @@ export const quotesOnPage = (marks: readonly PdfTextMark[], page: number) => (
 /** Page text as the text layer joins it, and the leaf span of every character (-1: the joining space). */
 const pageTextIndex = (spanTexts: readonly string[]) => {
   const spanAt: number[] = []
+  /** UTF-16 offset of every character inside its span's raw text (-1: the joining space). */
+  const rawAt: number[] = []
   let norm = ''
   spanTexts.forEach((raw, index) => {
     const text = raw.replace(/\s+/gu, ' ').trim()
@@ -101,13 +103,29 @@ const pageTextIndex = (spanTexts: readonly string[]) => {
     if (norm && !norm.endsWith(' ')) {
       norm += ' '
       spanAt.push(-1)
+      rawAt.push(-1)
     }
+    // Walk the raw text along the collapsed text to find each character's offset.
+    let offset = raw.search(/\S/u)
+    let previousSpace = false
     for (const char of text) {
+      if (char === ' ' && !previousSpace && /\s/u.test(raw[offset] ?? '')) {
+        // A collapsed whitespace run counts as one character.
+        norm += char
+        spanAt.push(index)
+        rawAt.push(offset)
+        while (offset < raw.length && /\s/u.test(raw[offset])) offset += 1
+        previousSpace = true
+        continue
+      }
+      previousSpace = false
       norm += char
       spanAt.push(index)
+      rawAt.push(offset)
+      offset += char.length
     }
   })
-  return { norm, spanAt }
+  return { norm, spanAt, rawAt }
 }
 
 const quoteRef = (quote: string | PdfQuoteRef): PdfQuoteRef => (typeof quote === 'string' ? { quote } : quote)
@@ -159,6 +177,34 @@ export const spanIndexesForQuotes = (spanTexts: readonly string[], quotes: Reado
     }
   }
   return [...hit].sort((left, right) => left - right)
+}
+
+/**
+ * Where a quote covers each span: raw character range [from, to) per span
+ * index. A span the quote only touches at one end gets a partial range, so the
+ * text layer can paint just the selected words instead of the whole line.
+ */
+export const spanRangesForQuotes = (
+  spanTexts: readonly string[],
+  quotes: ReadonlyArray<string | PdfQuoteRef>,
+): Map<number, { from: number; to: number }> => {
+  const { norm, spanAt, rawAt } = pageTextIndex(spanTexts)
+  const ranges = new Map<number, { from: number; to: number }>()
+  for (const quote of quotes) {
+    const { needle, starts } = paintedStarts(norm, quoteRef(quote))
+    for (const at of starts) {
+      for (let cursor = at; cursor < at + needle.length; cursor += 1) {
+        const span = spanAt[cursor]
+        if (span < 0) continue
+        const from = rawAt[cursor]
+        const to = from + (norm[cursor] === ' ' ? 1 : (String.fromCodePoint(norm.codePointAt(cursor) ?? 32).length))
+        const known = ranges.get(span)
+        if (!known) ranges.set(span, { from, to })
+        else ranges.set(span, { from: Math.min(known.from, from), to: Math.max(known.to, to) })
+      }
+    }
+  }
+  return ranges
 }
 
 let pieceSerial = 0

@@ -107,7 +107,9 @@ try {
   assert.match(read('electron/ai-provider.cjs'), /const systemPrompt = marking \? PDF_IMPORTANT_SYSTEM : SYSTEM_PROMPT/)
   assert.match(main, /const prompt = marking \? request\.markdown : lmStudioPrompt\(request\)/)
   assert.match(main, /marking \? aiProviderModule\.PDF_IMPORTANT_SYSTEM/)
-  assert.match(view, /spanIndexesForQuotes/)
+  assert.match(view, /spanRangesForQuotes/)
+  // A mark inside one long run covers only the selected words of that run.
+  assert.deepEqual([...painted.spanRangesForQuotes(['The quick brown fox'], ['quick brown'])], [[0, { from: 4, to: 15 }]])
   assert.doesNotMatch(view, /quote\.includes\(text\)/)
   console.log('pdf-important-marks ok')
 } finally {
