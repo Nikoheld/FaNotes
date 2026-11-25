@@ -875,12 +875,9 @@ class NoteStore(
                     when (extension) {
                         ".md", ".markdown" -> VaultNode(titleOf(name), entry.path, NoteKind.MARKDOWN, entry.mtimeMs)
                         ".pdf" -> VaultNode(titleOf(name), entry.path, NoteKind.PDF, entry.mtimeMs)
-                        FAMD_EXTENSION -> {
-                            val md = companionPath(entry.path, ".md")
-                            val markdown = companionPath(entry.path, ".markdown")
-                            if (io.exists(md) || io.exists(markdown)) null
+                        // A `.famd` next to prose or a PDF is that note's companion, not a second note (desktop `famdSiblingPaths`).
+                        FAMD_EXTENSION -> if (FAMD_SIBLING_EXTENSIONS.any { io.exists(companionPath(entry.path, it)) }) null
                             else VaultNode(titleOf(name), entry.path, NoteKind.MARKDOWN, entry.mtimeMs)
-                        }
                         else -> if (includeFiles) fileKindOf(name)?.let { VaultNode(name, entry.path, it, entry.mtimeMs) } else null
                     }
                 }
@@ -896,6 +893,9 @@ class NoteStore(
     }
 
 }
+
+/** Notes whose handwriting lives in a `.famd` of the same name. */
+private val FAMD_SIBLING_EXTENSIONS = listOf(".md", ".markdown", ".pdf")
 
 private fun jsonObject(vararg pairs: Pair<String, JsonValue>) = JsonValue.Obj().also { obj ->
     for ((key, value) in pairs) obj.fields[key] = value

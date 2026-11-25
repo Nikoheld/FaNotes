@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { dateLabel } from '../lib/i18n'
 import { renderMarkdown, type MarkdownHooks } from '../lib/markdown'
-import { collectPages, readFamd } from '../lib/famd'
+import { collectPages, readFamd, type InkDoc } from '../lib/famd'
 import { renderPage } from '../lib/inkRender'
 import { readStoryText, type StoryText } from '../lib/story'
 import { useKanti } from '../state'
@@ -23,6 +23,7 @@ const useBytes = (backend: VaultBackend, path: string, reloadKey = 0) => {
   const [state, setState] = useState<{ path: string; bytes: Uint8Array | null; error: boolean; loading: boolean }>({ path, bytes: null, error: false, loading: true })
   useEffect(() => {
     let live = true
+    if (!path) { setState({ path, bytes: null, error: false, loading: false }); return undefined }
     setState({ path, bytes: null, error: false, loading: true })
     backend.read(path).then((file) => { if (live) setState({ path, bytes: file.bytes, error: file.bytes === null, loading: false }) }, () => { if (live) setState({ path, bytes: null, error: true, loading: false }) })
     return () => { live = false }
@@ -156,18 +157,34 @@ const NoteBody = ({ backend, note, notes, paths, onOpen, writable }: { backend: 
   const { t } = useKanti()
   if (note.kind === 'markdown') return <MarkdownNote backend={backend} note={note} notes={notes} paths={paths} onOpen={onOpen} writable={writable} />
   if (note.kind === 'story') return <StoryView backend={backend} path={note.path} />
-  return <BinaryNote backend={backend} note={note} fallback={t.fileOpenFailed} />
+  return <BinaryNote backend={backend} note={note} paths={paths} fallback={t.fileOpenFailed} />
 }
 
-const BinaryNote = ({ backend, note, fallback }: { backend: VaultBackend; note: LibNote; fallback: string }) => {
+/** The desktop drawing over a PDF: the `.famd` next to it, when it holds a plain drawing (not side pages). */
+const usePdfInk = (backend: VaultBackend, note: LibNote, paths: Set<string>): InkDoc | null => {
+  const companion = note.kind === 'pdf' ? note.path.replace(/\.pdf$/iu, '.famd') : ''
+  // An empty path reads nothing (no companion in the vault).
+  const file = useBytes(backend, companion && paths.has(companion) ? companion : '')
+  return useMemo(() => {
+    if (!companion || !file.bytes) return null
+    try {
+      const payload = readFamd(textOf(file.bytes) ?? '').payload
+      if ((payload?.ink as { kind?: unknown } | undefined)?.kind === 'fanotes-pdf-side-pages') return null
+      return collectPages(payload)[0]?.doc ?? null
+    } catch { return null }
+  }, [companion, file.bytes])
+}
+
+const BinaryNote = ({ backend, note, paths, fallback }: { backend: VaultBackend; note: LibNote; paths: Set<string>; fallback: string }) => {
   const { t } = useKanti()
   const file = useBytes(backend, note.path)
+  const ink = usePdfInk(backend, note, paths)
   const text = useMemo(() => (note.kind === 'famd' ? textOf(file.bytes) ?? '' : ''), [note.kind, file.bytes])
   const image = useMemo(() => (note.kind === 'image' && file.bytes ? bytesToDataUrl(file.bytes, mimeOf(note.path)) : ''), [note.kind, note.path, file.bytes])
   if (file.loading) return <span className="spinner" aria-hidden="true" />
   if (!file.bytes) return <Banner tone="warning" icon="warning">{fallback}</Banner>
   if (note.kind === 'famd') return <InkPages source={text} />
-  if (note.kind === 'pdf') return <Suspense fallback={<span className="spinner" aria-hidden="true" />}><PdfViewer bytes={file.bytes} /></Suspense>
+  if (note.kind === 'pdf') return <Suspense fallback={<span className="spinner" aria-hidden="true" />}><PdfViewer bytes={file.bytes} ink={ink} /></Suspense>
   if (note.kind === 'image') return <img className="md-image note-image" src={image} alt={note.name} />
   if (note.kind === 'audio' || note.kind === 'video') return <MediaPlayer bytes={file.bytes} path={note.path} kind={note.kind} />
   return <p className="muted">{t.kindFile}: {note.name}</p>

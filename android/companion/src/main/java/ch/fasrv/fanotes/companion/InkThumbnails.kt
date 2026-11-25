@@ -69,17 +69,18 @@ private fun drawThumbnailStroke(canvas: Canvas, document: InkDocument, stroke: I
     drawInkStroke(canvas, document, stroke, scale, scale, 0.0, paint, maxSegments = 200)
 
 /**
- * Draws one stroke. Ink x runs 0..[InkDocument.sourceWidth] and is multiplied by [scaleX]; ink y is shifted up by [offsetY]
- * ink units and multiplied by [scaleY]. A thumbnail passes a [maxSegments] limit, a page of a PDF draws every segment (0).
+ * Draws one stroke. Ink x runs 0..[InkDocument.sourceWidth], is shifted left by [offsetX] ink units and multiplied by
+ * [scaleX]; ink y is shifted up by [offsetY] ink units and multiplied by [scaleY]. A thumbnail passes a [maxSegments]
+ * limit, a page of a PDF draws every segment (0).
  */
-private fun drawInkStroke(canvas: Canvas, document: InkDocument, stroke: InkStroke, scaleX: Float, scaleY: Float, offsetY: Double, paint: Paint, maxSegments: Int) {
+private fun drawInkStroke(canvas: Canvas, document: InkDocument, stroke: InkStroke, scaleX: Float, scaleY: Float, offsetY: Double, paint: Paint, maxSegments: Int, offsetX: Double = 0.0) {
     val points = stroke.points
     if (points.isEmpty()) return
     paint.style = Paint.Style.STROKE
     paint.color = runCatching { android.graphics.Color.parseColor(stroke.color) }.getOrDefault(0xFF202333.toInt())
     paint.alpha = ((stroke.opacity ?: 1.0) * 255).toInt().coerceIn(0, 255)
     val stride = if (maxSegments > 0) (points.size / maxSegments).coerceAtLeast(1) else 1
-    fun px(x: Double) = (x * document.sourceWidth * scaleX).toFloat()
+    fun px(x: Double) = ((x * document.sourceWidth - offsetX) * scaleX).toFloat()
     fun py(y: Double) = ((y * document.sourceHeight - offsetY) * scaleY).toFloat()
     var i = stride
     while (i < points.size) {
@@ -98,8 +99,8 @@ private fun drawInkStroke(canvas: Canvas, document: InkDocument, stroke: InkStro
 }
 
 /**
- * Draws the strokes of [document] that lie on [page] (see [pdfInkPages]) into [bitmap], which holds that page
- * rendered at any resolution. The mapping is the one the FaNotes Android app uses for the desktop's handwriting.
+ * Draws the strokes of [document] that lie on [page] (see [ch.fasrv.fanotes.ink.desktopPdfInkPages]) into [bitmap],
+ * which holds that page rendered at any resolution.
  */
 fun drawInkOnPdfPage(bitmap: Bitmap, document: InkDocument, page: PdfInkPage) {
     if (document.strokes.isEmpty() || page.height <= 0.0 || page.width <= 0.0) return
@@ -114,7 +115,7 @@ fun drawInkOnPdfPage(bitmap: Bitmap, document: InkDocument, page: PdfInkPage) {
         for (point in stroke.points) { val y = point.y * document.sourceHeight; if (y < low) low = y; if (y > high) high = y }
         val margin = stroke.baseWidth * 2
         if (stroke.points.isNotEmpty() && high + margin >= page.top && low - margin <= bottom) {
-            drawInkStroke(canvas, document, stroke, scaleX, scaleY, page.top, paint, maxSegments = 0)
+            drawInkStroke(canvas, document, stroke, scaleX, scaleY, page.top, paint, maxSegments = 0, offsetX = page.left)
         }
     }
 }

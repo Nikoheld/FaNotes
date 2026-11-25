@@ -30,6 +30,8 @@ export const baseName = (path: string) => path.slice(path.lastIndexOf('/') + 1)
 export const titleOf = (path: string) => baseName(path).replace(/\.(md|markdown|famd|pdf|story)$/iu, '')
 export const folderOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')
 
+const FAMD_SIBLINGS = ['.md', '.markdown', '.pdf']
+
 const STORY_SEGMENT = /^(.*?\.story)(?:\/|$)/iu
 
 /** What the library shows: the user's notes and files, stories as one entry; nothing internal, no task or calendar file. */
@@ -48,7 +50,11 @@ export const libraryNotes = (entries: VaultEntry[]): LibNote[] => {
     }
     out.push({ path, name: titleOf(path), folder: folderOf(path), kind: kindOf(path), mtimeMs: entry.mtimeMs, size: entry.size })
   }
-  return [...out, ...stories.values()]
+  // A `.famd` next to prose or a PDF is that note's handwriting, not a second note (desktop `famdSiblingPaths`).
+  const paths = new Set(entries.map((entry) => entry.path))
+  const companion = (note: LibNote) => note.kind === 'famd'
+    && FAMD_SIBLINGS.some((extension) => paths.has(note.path.replace(/\.famd$/iu, extension)))
+  return [...out.filter((note) => !companion(note)), ...stories.values()]
 }
 
 export type NoteSort = 'recent' | 'name'

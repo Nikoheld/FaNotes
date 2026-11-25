@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.dp
 import ch.fasrv.fanotes.desk.pdfNeedsPassword
 import ch.fasrv.fanotes.desk.pdfPasswordSupported
 import ch.fasrv.fanotes.ink.InkDocument
-import ch.fasrv.fanotes.ink.pdfInkPages
+import ch.fasrv.fanotes.ink.desktopPdfInkPages
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -225,7 +225,7 @@ fun PdfReaderContent(source: PdfPageSource, startPage: Int = 0, query: String = 
         android.graphics.Color.argb((it.alpha * 255).toInt(), (it.red * 255).toInt(), (it.green * 255).toInt(), (it.blue * 255).toInt())
     }
     val inkPages = remember(source.id, ink?.updatedAt, ink?.strokes?.size) {
-        ink?.takeIf { it.strokes.isNotEmpty() }?.let { document -> pdfInkPages(document.sourceHeight, true, source.aspects.map { it.toDouble() }) }
+        ink?.takeIf { it.strokes.isNotEmpty() }?.let { document -> desktopPdfInkPages(document.sourceWidth, document.sourceHeight, source.aspects.map { it.toDouble() }) }
     }
     val inkKey = if (inkPages == null) "-" else "${ink?.updatedAt}:${ink?.strokes?.size}"
     var startMatches by remember(source.id, query) { mutableStateOf<Int?>(null) }

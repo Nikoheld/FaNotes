@@ -45,6 +45,19 @@ class NoteTreeFilesTest {
     }
 
     @Test
+    fun aPdfsHandwritingCompanionIsNotListedAsASecondNote() {
+        val root = vault()
+        Files.write(root.resolve("Buch.famd"), "x".toByteArray())
+        Files.write(root.resolve("Note.famd"), "x".toByteArray())
+        Files.write(root.resolve("Skizze.famd"), "x".toByteArray())
+        val nodes = flat(NoteStore(DirectoryVault(root)).tree(includeFiles = true))
+        assertEquals(listOf("Buch.pdf"), nodes.filter { it.name == "Buch" }.map { it.path })
+        assertEquals(listOf("Note.md"), nodes.filter { it.name == "Note" }.map { it.path })
+        // A handwriting note of its own still shows.
+        assertEquals(listOf("Skizze.famd"), nodes.filter { it.name == "Skizze" }.map { it.path })
+    }
+
+    @Test
     fun includeFilesListsMediaByCaseInsensitiveExtensionAndNothingElse() {
         val nodes = flat(NoteStore(DirectoryVault(vault())).tree(includeFiles = true)).associateBy { it.name }
         assertEquals(NoteKind.IMAGE, nodes.getValue("Foto.JPG").kind)
