@@ -98,9 +98,10 @@ describe('agenda', () => {
     expect(demo.grades).toHaveLength(12)
     expect(demo.exams).toHaveLength(5)
     expect(Object.keys(demo.weekRead || {})).toHaveLength(13)
-    // One cancelled lesson and one substitution this week, and the same again next week.
-    expect(entries.filter((entry) => entry.cancelled)).toHaveLength(2)
-    expect(entries.filter((entry) => entry.substitution)).toHaveLength(2)
+    // This week and next week each carry a cancelled lesson and a substitution; earlier weeks add past
+    // cancellations (and one substitution) for the statistics page.
+    expect(entries.filter((entry) => entry.cancelled)).toHaveLength(7)
+    expect(entries.filter((entry) => entry.substitution)).toHaveLength(3)
     expect(entries.every((entry) => entry.event.id.startsWith('demo-'))).toBe(true)
   })
   it('finds what runs now or comes next, and skips cancelled lessons', () => {

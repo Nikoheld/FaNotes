@@ -1,0 +1,2697 @@
+{
+ "cases": [
+  {
+   "name": "cancellations: marker, status text, substitution, marker kinds, duplicates, future and today",
+   "now": "2026-11-25T10:00:00.000Z",
+   "snapshot": {
+    "grades": [],
+    "events": [
+     {
+      "id": "m1",
+      "start": "2026-11-16T07:40:00",
+      "end": "2026-11-16T08:25:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Abc"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     },
+     {
+      "id": "m2",
+      "start": "2026-11-23T07:40:00",
+      "end": "2026-11-23T08:25:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Abc"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "m3",
+      "start": "2026-11-17T08:30:00",
+      "end": "2026-11-17T09:15:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Abc"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "Entfällt",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     },
+     {
+      "id": "m4",
+      "start": "2026-11-18T08:30:00",
+      "end": "2026-11-18T09:15:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Abc"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": "Xyz"
+     },
+     {
+      "id": "m5",
+      "start": "2026-11-19T08:30:00",
+      "end": "2026-11-19T09:15:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Abc"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "moved",
+      "substitute": ""
+     },
+     {
+      "id": "m6",
+      "start": "2026-11-20T08:30:00",
+      "end": "2026-11-20T09:15:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Abc"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "changed",
+      "substitute": ""
+     },
+     {
+      "id": "m7",
+      "start": "2026-11-24T08:30:00",
+      "end": "2026-11-24T09:15:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Abc"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "added",
+      "substitute": ""
+     },
+     {
+      "id": "d1",
+      "start": "2026-11-12T09:25:00",
+      "end": "2026-11-12T10:10:00",
+      "text": "Englisch",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Def"
+      ],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     },
+     {
+      "id": "d1",
+      "start": "2026-11-12T09:25:00",
+      "end": "2026-11-12T10:10:00",
+      "text": "Englisch",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Def"
+      ],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "e1",
+      "start": "2026-11-13T09:25:00",
+      "end": "2026-11-13T10:10:00",
+      "text": "Englisch",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Def"
+      ],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     },
+     {
+      "id": "e2",
+      "start": "2026-11-20T09:25:00",
+      "end": "2026-11-20T10:10:00",
+      "text": "Englisch",
+      "comment": "Vertretung Abc",
+      "room": "A1",
+      "teachers": [
+       "Def"
+      ],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     },
+     {
+      "id": "e3",
+      "start": "2026-11-19T09:25:00",
+      "end": "2026-11-19T10:10:00",
+      "text": "Englisch",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Def"
+      ],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": "Xyz"
+     },
+     {
+      "id": "s1",
+      "start": "2026-11-17T10:25:00",
+      "end": "2026-11-17T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     },
+     {
+      "id": "s2",
+      "start": "2026-11-24T10:25:00",
+      "end": "2026-11-24T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     },
+     {
+      "id": "w1",
+      "start": "2026-11-14T09:00:00",
+      "end": "2026-11-14T09:45:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     },
+     {
+      "id": "t1",
+      "start": "2026-11-25T07:40:00",
+      "end": "2026-11-25T08:25:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Abc"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "t2",
+      "start": "2026-11-25T13:00:00",
+      "end": "2026-11-25T13:45:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Abc"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "f1",
+      "start": "2026-11-26T07:40:00",
+      "end": "2026-11-26T08:25:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Abc"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "x1",
+      "start": "2026-11-18T08:00:00",
+      "end": "2026-11-18T08:45:00",
+      "text": "Prüfung Kapitel 3",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     }
+    ],
+    "exams": [],
+    "absences": [],
+    "gradeHistory": []
+   },
+   "expected": {
+    "cancellations": {
+     "totals": {
+      "total": 15,
+      "cancelled": 5,
+      "substituted": 2,
+      "moved": 1,
+      "changed": 1,
+      "added": 1,
+      "rate": 0.3333333333333333
+     },
+     "courses": [
+      {
+       "key": "eng|g24b",
+       "title": "Englisch (Eng_G24b_Def)",
+       "teacher": "Def",
+       "total": 4,
+       "cancelled": 2,
+       "substituted": 1,
+       "moved": 0,
+       "changed": 0,
+       "added": 0,
+       "rate": 0.5
+      },
+      {
+       "key": "mat|g24a",
+       "title": "Mathematik (Mat_G24a_Abc)",
+       "teacher": "Abc",
+       "total": 8,
+       "cancelled": 3,
+       "substituted": 1,
+       "moved": 1,
+       "changed": 1,
+       "added": 1,
+       "rate": 0.375
+      },
+      {
+       "key": "Turnen",
+       "title": "Turnen",
+       "teacher": "",
+       "total": 3,
+       "cancelled": 0,
+       "substituted": 0,
+       "moved": 0,
+       "changed": 0,
+       "added": 0,
+       "rate": 0
+      }
+     ],
+     "weekdays": [
+      {
+       "weekday": 1,
+       "total": 2,
+       "cancelled": 1
+      },
+      {
+       "weekday": 2,
+       "total": 4,
+       "cancelled": 1
+      },
+      {
+       "weekday": 3,
+       "total": 2,
+       "cancelled": 1
+      },
+      {
+       "weekday": 4,
+       "total": 3,
+       "cancelled": 2
+      },
+      {
+       "weekday": 5,
+       "total": 3,
+       "cancelled": 0
+      },
+      {
+       "weekday": 6,
+       "total": 1,
+       "cancelled": 0
+      }
+     ],
+     "clocks": [
+      {
+       "clock": "07:40",
+       "total": 3,
+       "cancelled": 2
+      },
+      {
+       "clock": "08:30",
+       "total": 5,
+       "cancelled": 1
+      },
+      {
+       "clock": "09:00",
+       "total": 1,
+       "cancelled": 0
+      },
+      {
+       "clock": "09:25",
+       "total": 4,
+       "cancelled": 2
+      },
+      {
+       "clock": "10:25",
+       "total": 2,
+       "cancelled": 0
+      }
+     ],
+     "coverage": {
+      "firstDay": "2026-11-12",
+      "lastDay": "2026-11-25",
+      "weeks": 3
+     },
+     "recent": [
+      {
+       "day": "2026-11-25",
+       "title": "Mathematik (Mat_G24a_Abc)",
+       "clock": "07:40"
+      },
+      {
+       "day": "2026-11-23",
+       "title": "Mathematik (Mat_G24a_Abc)",
+       "clock": "07:40"
+      },
+      {
+       "day": "2026-11-19",
+       "title": "Englisch (Eng_G24b_Def)",
+       "clock": "09:25"
+      },
+      {
+       "day": "2026-11-17",
+       "title": "Mathematik (Mat_G24a_Abc)",
+       "clock": "08:30"
+      },
+      {
+       "day": "2026-11-12",
+       "title": "Englisch (Eng_G24b_Def)",
+       "clock": "09:25"
+      }
+     ]
+    },
+    "grading": {
+     "count": 0,
+     "median": null,
+     "mean": null,
+     "courses": [],
+     "recent": []
+    },
+    "waiting": [],
+    "gradeChanges": {
+     "count": 0,
+     "items": []
+    },
+    "examLoad": {
+     "weeks": [],
+     "busiestMonday": "",
+     "busiestCount": 0,
+     "next28": 0
+    },
+    "absences": []
+   }
+  },
+  {
+   "name": "recent cancellations are capped at ten and listed newest first",
+   "now": "2026-11-25T10:00:00.000Z",
+   "snapshot": {
+    "grades": [],
+    "events": [
+     {
+      "id": "r0",
+      "start": "2026-11-02T10:25:00",
+      "end": "2026-11-02T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "r1",
+      "start": "2026-11-03T10:25:00",
+      "end": "2026-11-03T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "r2",
+      "start": "2026-11-04T10:25:00",
+      "end": "2026-11-04T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "r3",
+      "start": "2026-11-05T10:25:00",
+      "end": "2026-11-05T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "r4",
+      "start": "2026-11-06T10:25:00",
+      "end": "2026-11-06T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "r5",
+      "start": "2026-11-07T10:25:00",
+      "end": "2026-11-07T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "r6",
+      "start": "2026-11-08T10:25:00",
+      "end": "2026-11-08T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "r7",
+      "start": "2026-11-09T10:25:00",
+      "end": "2026-11-09T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "r8",
+      "start": "2026-11-10T10:25:00",
+      "end": "2026-11-10T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "r9",
+      "start": "2026-11-11T10:25:00",
+      "end": "2026-11-11T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "r10",
+      "start": "2026-11-12T10:25:00",
+      "end": "2026-11-12T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "r11",
+      "start": "2026-11-13T10:25:00",
+      "end": "2026-11-13T11:10:00",
+      "text": "Turnen",
+      "comment": "",
+      "room": "A1",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Turnen",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     }
+    ],
+    "exams": [],
+    "absences": [],
+    "gradeHistory": []
+   },
+   "expected": {
+    "cancellations": {
+     "totals": {
+      "total": 12,
+      "cancelled": 12,
+      "substituted": 0,
+      "moved": 0,
+      "changed": 0,
+      "added": 0,
+      "rate": 1
+     },
+     "courses": [
+      {
+       "key": "Turnen",
+       "title": "Turnen",
+       "teacher": "",
+       "total": 12,
+       "cancelled": 12,
+       "substituted": 0,
+       "moved": 0,
+       "changed": 0,
+       "added": 0,
+       "rate": 1
+      }
+     ],
+     "weekdays": [
+      {
+       "weekday": 1,
+       "total": 2,
+       "cancelled": 2
+      },
+      {
+       "weekday": 2,
+       "total": 2,
+       "cancelled": 2
+      },
+      {
+       "weekday": 3,
+       "total": 2,
+       "cancelled": 2
+      },
+      {
+       "weekday": 4,
+       "total": 2,
+       "cancelled": 2
+      },
+      {
+       "weekday": 5,
+       "total": 2,
+       "cancelled": 2
+      },
+      {
+       "weekday": 6,
+       "total": 1,
+       "cancelled": 1
+      },
+      {
+       "weekday": 7,
+       "total": 1,
+       "cancelled": 1
+      }
+     ],
+     "clocks": [
+      {
+       "clock": "10:25",
+       "total": 12,
+       "cancelled": 12
+      }
+     ],
+     "coverage": {
+      "firstDay": "2026-11-02",
+      "lastDay": "2026-11-13",
+      "weeks": 2
+     },
+     "recent": [
+      {
+       "day": "2026-11-13",
+       "title": "Turnen",
+       "clock": "10:25"
+      },
+      {
+       "day": "2026-11-12",
+       "title": "Turnen",
+       "clock": "10:25"
+      },
+      {
+       "day": "2026-11-11",
+       "title": "Turnen",
+       "clock": "10:25"
+      },
+      {
+       "day": "2026-11-10",
+       "title": "Turnen",
+       "clock": "10:25"
+      },
+      {
+       "day": "2026-11-09",
+       "title": "Turnen",
+       "clock": "10:25"
+      },
+      {
+       "day": "2026-11-08",
+       "title": "Turnen",
+       "clock": "10:25"
+      },
+      {
+       "day": "2026-11-07",
+       "title": "Turnen",
+       "clock": "10:25"
+      },
+      {
+       "day": "2026-11-06",
+       "title": "Turnen",
+       "clock": "10:25"
+      },
+      {
+       "day": "2026-11-05",
+       "title": "Turnen",
+       "clock": "10:25"
+      },
+      {
+       "day": "2026-11-04",
+       "title": "Turnen",
+       "clock": "10:25"
+      }
+     ]
+    },
+    "grading": {
+     "count": 0,
+     "median": null,
+     "mean": null,
+     "courses": [],
+     "recent": []
+    },
+    "waiting": [],
+    "gradeChanges": {
+     "count": 0,
+     "items": []
+    },
+    "examLoad": {
+     "weeks": [],
+     "busiestMonday": "",
+     "busiestCount": 0,
+     "next28": 0
+    },
+    "absences": []
+   }
+  },
+  {
+   "name": "grading time: seed batch, delays, zone day, odd and even median, skipped tracks",
+   "now": "2026-11-25T10:00:00.000Z",
+   "snapshot": {
+    "grades": [
+     {
+      "id": "g1",
+      "course": "Mat_G24a_Abc",
+      "courseId": "Mat_G24a_Abc",
+      "subject": "Mathematik",
+      "title": "Test 1",
+      "date": "10.11.2026",
+      "mark": 5.5,
+      "weight": 1,
+      "confirmed": true,
+      "comment": ""
+     },
+     {
+      "id": "g2",
+      "course": "Eng_G24b_Def",
+      "courseId": "Eng_G24b_Def",
+      "subject": "Englisch",
+      "title": "Essay",
+      "date": "2026-11-03",
+      "mark": 4,
+      "weight": 1,
+      "confirmed": true,
+      "comment": ""
+     }
+    ],
+    "events": [
+     {
+      "id": "l1",
+      "start": "2026-11-16T07:40:00",
+      "end": "2026-11-16T08:25:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Abc"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     },
+     {
+      "id": "l2",
+      "start": "2026-11-17T07:40:00",
+      "end": "2026-11-17T08:25:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Zzz"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "cancelled",
+      "substitute": ""
+     },
+     {
+      "id": "l3",
+      "start": "2026-11-18T09:25:00",
+      "end": "2026-11-18T10:10:00",
+      "text": "Englisch",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Def"
+      ],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     },
+     {
+      "id": "l4",
+      "start": "2026-11-19T09:25:00",
+      "end": "2026-11-19T10:10:00",
+      "text": "Englisch",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Def",
+       "Ghi"
+      ],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     },
+     {
+      "id": "l5",
+      "start": "2026-11-20T09:25:00",
+      "end": "2026-11-20T10:10:00",
+      "text": "Englisch",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Def",
+       "Ghi"
+      ],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     }
+    ],
+    "exams": [],
+    "absences": [],
+    "gradeHistory": [
+     {
+      "id": "s1",
+      "gradeId": "g-s1",
+      "courseId": "Mat_G24a_Abc",
+      "course": "Mat_G24a_Abc",
+      "title": "Alt 1",
+      "date": "2026-08-20",
+      "firstSeenAt": "2026-09-01T06:00:00.000Z",
+      "versions": [
+       {
+        "mark": 4,
+        "weight": 1,
+        "title": "Alt 1",
+        "date": "2026-08-20",
+        "seenAt": "2026-09-01T06:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "s2",
+      "gradeId": "g-s2",
+      "courseId": "Eng_G24b_Def",
+      "course": "Eng_G24b_Def",
+      "title": "Alt 2",
+      "date": "2026-08-25",
+      "firstSeenAt": "2026-09-01T06:00:00.000Z",
+      "versions": [
+       {
+        "mark": 5,
+        "weight": 1,
+        "title": "Alt 2",
+        "date": "2026-08-25",
+        "seenAt": "2026-09-01T06:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "t1",
+      "gradeId": "g-t1",
+      "courseId": "Mat_G24a_Abc",
+      "course": "Mat_G24a_Abc",
+      "title": "Test 1",
+      "date": "10.11.2026",
+      "firstSeenAt": "2026-11-13T09:00:00.000Z",
+      "versions": [
+       {
+        "mark": 5.5,
+        "weight": 1,
+        "title": "Test 1",
+        "date": "10.11.2026",
+        "seenAt": "2026-11-13T09:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "t2",
+      "gradeId": "g-t2",
+      "courseId": "Mat_G24a_Abc",
+      "course": "Mat_G24a_Abc",
+      "title": "Test 2",
+      "date": "2026-11-02",
+      "firstSeenAt": "2026-11-09T09:00:00.000Z",
+      "versions": [
+       {
+        "mark": 4,
+        "weight": 1,
+        "title": "Test 2",
+        "date": "2026-11-02",
+        "seenAt": "2026-11-09T09:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "t3",
+      "gradeId": "g-t3",
+      "courseId": "Mat_G24a_Abc",
+      "course": "Mat_G24a_Abc",
+      "title": "Test 3",
+      "date": "2026-10-20",
+      "firstSeenAt": "2026-11-10T05:00:00.000Z",
+      "versions": [
+       {
+        "mark": 4.5,
+        "weight": 1,
+        "title": "Test 3",
+        "date": "2026-10-20",
+        "seenAt": "2026-11-10T05:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "t4",
+      "gradeId": "g-t4",
+      "courseId": "Eng_G24b_Def",
+      "course": "Eng_G24b_Def",
+      "title": "Essay",
+      "date": "2026-11-03",
+      "firstSeenAt": "2026-11-06T23:30:00.000Z",
+      "versions": [
+       {
+        "mark": 4,
+        "weight": 1,
+        "title": "Essay",
+        "date": "2026-11-03",
+        "seenAt": "2026-11-06T23:30:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "t5",
+      "gradeId": "g-t5",
+      "courseId": "Eng_G24b_Def",
+      "course": "Eng_G24b_Def",
+      "title": "Vokabeln",
+      "date": "2026-11-04",
+      "firstSeenAt": "2026-11-10T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 5,
+        "weight": 1,
+        "title": "Vokabeln",
+        "date": "2026-11-04",
+        "seenAt": "2026-11-10T08:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "t6",
+      "gradeId": "g-t6",
+      "courseId": "Bio",
+      "course": "Bio",
+      "title": "Test Zelle",
+      "date": "2026-11-05",
+      "firstSeenAt": "2026-11-12T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 5,
+        "weight": 1,
+        "title": "Test Zelle",
+        "date": "2026-11-05",
+        "seenAt": "2026-11-12T08:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "n1",
+      "gradeId": "g-n1",
+      "courseId": "Eng_G24b_Def",
+      "course": "Eng_G24b_Def",
+      "title": "Zu früh",
+      "date": "2026-11-20",
+      "firstSeenAt": "2026-11-18T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 5,
+        "weight": 1,
+        "title": "Zu früh",
+        "date": "2026-11-20",
+        "seenAt": "2026-11-18T08:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "n2",
+      "gradeId": "g-n2",
+      "courseId": "Eng_G24b_Def",
+      "course": "Eng_G24b_Def",
+      "title": "Zu spät",
+      "date": "2026-04-01",
+      "firstSeenAt": "2026-11-18T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 5,
+        "weight": 1,
+        "title": "Zu spät",
+        "date": "2026-04-01",
+        "seenAt": "2026-11-18T08:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "n3",
+      "gradeId": "g-n3",
+      "courseId": "Eng_G24b_Def",
+      "course": "Eng_G24b_Def",
+      "title": "Entfernt",
+      "date": "2026-11-01",
+      "firstSeenAt": "2026-11-18T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 5,
+        "weight": 1,
+        "title": "Entfernt",
+        "date": "2026-11-01",
+        "seenAt": "2026-11-18T08:00:00.000Z"
+       }
+      ],
+      "removedAt": "2026-11-19T08:00:00.000Z"
+     },
+     {
+      "id": "n4",
+      "gradeId": "g-n4",
+      "courseId": "Eng_G24b_Def",
+      "course": "Eng_G24b_Def",
+      "title": "Ohne Datum",
+      "date": "bald",
+      "firstSeenAt": "2026-11-18T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 5,
+        "weight": 1,
+        "title": "Ohne Datum",
+        "date": "bald",
+        "seenAt": "2026-11-18T08:00:00.000Z"
+       }
+      ]
+     }
+    ]
+   },
+   "expected": {
+    "cancellations": {
+     "totals": {
+      "total": 5,
+      "cancelled": 1,
+      "substituted": 0,
+      "moved": 0,
+      "changed": 0,
+      "added": 0,
+      "rate": 0.2
+     },
+     "courses": [
+      {
+       "key": "mat|g24a",
+       "title": "Mathematik (Mat_G24a_Abc)",
+       "teacher": "Abc",
+       "total": 2,
+       "cancelled": 1,
+       "substituted": 0,
+       "moved": 0,
+       "changed": 0,
+       "added": 0,
+       "rate": 0.5
+      },
+      {
+       "key": "eng|g24b",
+       "title": "Englisch (Eng_G24b_Def)",
+       "teacher": "Def, Ghi",
+       "total": 3,
+       "cancelled": 0,
+       "substituted": 0,
+       "moved": 0,
+       "changed": 0,
+       "added": 0,
+       "rate": 0
+      }
+     ],
+     "weekdays": [
+      {
+       "weekday": 1,
+       "total": 1,
+       "cancelled": 0
+      },
+      {
+       "weekday": 2,
+       "total": 1,
+       "cancelled": 1
+      },
+      {
+       "weekday": 3,
+       "total": 1,
+       "cancelled": 0
+      },
+      {
+       "weekday": 4,
+       "total": 1,
+       "cancelled": 0
+      },
+      {
+       "weekday": 5,
+       "total": 1,
+       "cancelled": 0
+      }
+     ],
+     "clocks": [
+      {
+       "clock": "07:40",
+       "total": 2,
+       "cancelled": 1
+      },
+      {
+       "clock": "09:25",
+       "total": 3,
+       "cancelled": 0
+      }
+     ],
+     "coverage": {
+      "firstDay": "2026-11-16",
+      "lastDay": "2026-11-20",
+      "weeks": 1
+     },
+     "recent": [
+      {
+       "day": "2026-11-17",
+       "title": "Mathematik (Mat_G24a_Abc)",
+       "clock": "07:40"
+      }
+     ]
+    },
+    "grading": {
+     "count": 6,
+     "median": 6.5,
+     "mean": 8,
+     "courses": [
+      {
+       "key": "eng|g24b",
+       "title": "Englisch (Eng_G24b_Def)",
+       "teacher": "Def, Ghi",
+       "count": 2,
+       "median": 5,
+       "mean": 5,
+       "fastest": 4,
+       "slowest": 6
+      },
+      {
+       "key": "Bio",
+       "title": "Bio",
+       "teacher": "",
+       "count": 1,
+       "median": 7,
+       "mean": 7,
+       "fastest": 7,
+       "slowest": 7
+      },
+      {
+       "key": "mat|g24a",
+       "title": "Mathematik (Mat_G24a_Abc)",
+       "teacher": "Abc",
+       "count": 3,
+       "median": 7,
+       "mean": 10.3,
+       "fastest": 3,
+       "slowest": 21
+      }
+     ],
+     "recent": [
+      {
+       "title": "Test 1",
+       "course": "Mathematik (Mat_G24a_Abc)",
+       "testDay": "2026-11-10",
+       "delay": 3
+      },
+      {
+       "title": "Test Zelle",
+       "course": "Bio",
+       "testDay": "2026-11-05",
+       "delay": 7
+      },
+      {
+       "title": "Vokabeln",
+       "course": "Englisch (Eng_G24b_Def)",
+       "testDay": "2026-11-04",
+       "delay": 6
+      },
+      {
+       "title": "Test 3",
+       "course": "Mathematik (Mat_G24a_Abc)",
+       "testDay": "2026-10-20",
+       "delay": 21
+      },
+      {
+       "title": "Test 2",
+       "course": "Mathematik (Mat_G24a_Abc)",
+       "testDay": "2026-11-02",
+       "delay": 7
+      },
+      {
+       "title": "Essay",
+       "course": "Englisch (Eng_G24b_Def)",
+       "testDay": "2026-11-03",
+       "delay": 4
+      }
+     ]
+    },
+    "waiting": [],
+    "gradeChanges": {
+     "count": 0,
+     "items": []
+    },
+    "examLoad": {
+     "weeks": [],
+     "busiestMonday": "",
+     "busiestCount": 0,
+     "next28": 0
+    },
+    "absences": []
+   }
+  },
+  {
+   "name": "grading time: no data when every track was first seen at once",
+   "now": "2026-11-25T10:00:00.000Z",
+   "snapshot": {
+    "grades": [],
+    "events": [],
+    "exams": [],
+    "absences": [],
+    "gradeHistory": [
+     {
+      "id": "a",
+      "gradeId": "g-a",
+      "courseId": "Mat_G24a_Abc",
+      "course": "Mat_G24a_Abc",
+      "title": "A",
+      "date": "2026-11-02",
+      "firstSeenAt": "2026-11-10T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 4,
+        "weight": 1,
+        "title": "A",
+        "date": "2026-11-02",
+        "seenAt": "2026-11-10T08:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "b",
+      "gradeId": "g-b",
+      "courseId": "Mat_G24a_Abc",
+      "course": "Mat_G24a_Abc",
+      "title": "B",
+      "date": "2026-11-03",
+      "firstSeenAt": "2026-11-10T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 5,
+        "weight": 1,
+        "title": "B",
+        "date": "2026-11-03",
+        "seenAt": "2026-11-10T08:00:00.000Z"
+       }
+      ]
+     }
+    ]
+   },
+   "expected": {
+    "cancellations": {
+     "totals": {
+      "total": 0,
+      "cancelled": 0,
+      "substituted": 0,
+      "moved": 0,
+      "changed": 0,
+      "added": 0,
+      "rate": 0
+     },
+     "courses": [],
+     "weekdays": [
+      {
+       "weekday": 1,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 2,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 3,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 4,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 5,
+       "total": 0,
+       "cancelled": 0
+      }
+     ],
+     "clocks": [],
+     "coverage": {
+      "firstDay": "",
+      "lastDay": "",
+      "weeks": 0
+     },
+     "recent": []
+    },
+    "grading": {
+     "count": 0,
+     "median": null,
+     "mean": null,
+     "courses": [],
+     "recent": []
+    },
+    "waiting": [],
+    "gradeChanges": {
+     "count": 0,
+     "items": []
+    },
+    "examLoad": {
+     "weeks": [],
+     "busiestMonday": "",
+     "busiestCount": 0,
+     "next28": 0
+    },
+    "absences": []
+   }
+  },
+  {
+   "name": "waiting for a grade: ±3 days match, identity and title matching, limits",
+   "now": "2026-11-25T10:00:00.000Z",
+   "snapshot": {
+    "grades": [
+     {
+      "id": "g1",
+      "course": "Mat_G24a_Abc",
+      "courseId": "Mat_G24a_Abc",
+      "subject": "Mathematik",
+      "title": "Kapitel 3",
+      "date": "2026-11-12",
+      "mark": 5,
+      "weight": 1,
+      "confirmed": true,
+      "comment": ""
+     }
+    ],
+    "events": [
+     {
+      "id": "l1",
+      "start": "2026-11-16T07:40:00",
+      "end": "2026-11-16T08:25:00",
+      "text": "Mathematik",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Abc"
+      ],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     },
+     {
+      "id": "l2",
+      "start": "2026-11-18T09:25:00",
+      "end": "2026-11-18T10:10:00",
+      "text": "Englisch",
+      "comment": "",
+      "room": "A1",
+      "teachers": [
+       "Def"
+      ],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "",
+      "color": "#888888",
+      "timetableText": "",
+      "marker": "",
+      "substitute": ""
+     }
+    ],
+    "exams": [
+     {
+      "id": "e1",
+      "start": "2026-11-10T08:00:00",
+      "end": "2026-11-10T08:45:00",
+      "text": "Prüfung Kapitel 3",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "e2",
+      "start": "2026-11-05T08:00:00",
+      "end": "2026-11-05T08:45:00",
+      "text": "Prüfung Essay",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "e3",
+      "start": "2026-11-18T08:00:00",
+      "end": "2026-11-18T08:45:00",
+      "text": "Test Zelle",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Biologie",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "e4",
+      "start": "2026-11-11T08:00:00",
+      "end": "2026-11-11T08:45:00",
+      "text": "Test Atome",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Chemie",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "e5",
+      "start": "2026-11-12T08:00:00",
+      "end": "2026-11-12T08:45:00",
+      "text": "Klassentest",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "e6",
+      "start": "2026-07-20T08:00:00",
+      "end": "2026-07-20T08:45:00",
+      "text": "Prüfung alt",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "e7",
+      "start": "2026-11-25T08:00:00",
+      "end": "2026-11-25T08:45:00",
+      "text": "Prüfung heute",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "e8",
+      "start": "2026-12-02T08:00:00",
+      "end": "2026-12-02T08:45:00",
+      "text": "Prüfung später",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "e9",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "Prüfung abgesagt",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "abgesagt",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "e10",
+      "start": "15.11.2026T08:00:00",
+      "end": "15.11.2026T08:45:00",
+      "text": "Prüfung Swiss",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     }
+    ],
+    "absences": [],
+    "gradeHistory": [
+     {
+      "id": "h1",
+      "gradeId": "g-h1",
+      "courseId": "Eng_G24b_Def",
+      "course": "Eng_G24b_Def",
+      "title": "Essay",
+      "date": "2026-11-09",
+      "firstSeenAt": "2026-11-20T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 4,
+        "weight": 1,
+        "title": "Essay",
+        "date": "2026-11-09",
+        "seenAt": "2026-11-20T08:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "h2",
+      "gradeId": "g-h2",
+      "courseId": "Eng_G24b_Def",
+      "course": "Eng_G24b_Def",
+      "title": "Gelöscht",
+      "date": "2026-11-05",
+      "firstSeenAt": "2026-11-20T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 4,
+        "weight": 1,
+        "title": "Gelöscht",
+        "date": "2026-11-05",
+        "seenAt": "2026-11-20T08:00:00.000Z"
+       }
+      ],
+      "removedAt": "2026-11-21T08:00:00.000Z"
+     },
+     {
+      "id": "h3",
+      "gradeId": "g-h3",
+      "courseId": "Biologie",
+      "course": "Biologie",
+      "title": "Zelle",
+      "date": "2026-11-19",
+      "firstSeenAt": "2026-11-22T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 5,
+        "weight": 1,
+        "title": "Zelle",
+        "date": "2026-11-19",
+        "seenAt": "2026-11-22T08:00:00.000Z"
+       }
+      ]
+     }
+    ]
+   },
+   "expected": {
+    "cancellations": {
+     "totals": {
+      "total": 2,
+      "cancelled": 0,
+      "substituted": 0,
+      "moved": 0,
+      "changed": 0,
+      "added": 0,
+      "rate": 0
+     },
+     "courses": [
+      {
+       "key": "eng|g24b",
+       "title": "Englisch (Eng_G24b_Def)",
+       "teacher": "Def",
+       "total": 1,
+       "cancelled": 0,
+       "substituted": 0,
+       "moved": 0,
+       "changed": 0,
+       "added": 0,
+       "rate": 0
+      },
+      {
+       "key": "mat|g24a",
+       "title": "Mathematik (Mat_G24a_Abc)",
+       "teacher": "Abc",
+       "total": 1,
+       "cancelled": 0,
+       "substituted": 0,
+       "moved": 0,
+       "changed": 0,
+       "added": 0,
+       "rate": 0
+      }
+     ],
+     "weekdays": [
+      {
+       "weekday": 1,
+       "total": 1,
+       "cancelled": 0
+      },
+      {
+       "weekday": 2,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 3,
+       "total": 1,
+       "cancelled": 0
+      },
+      {
+       "weekday": 4,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 5,
+       "total": 0,
+       "cancelled": 0
+      }
+     ],
+     "clocks": [
+      {
+       "clock": "07:40",
+       "total": 1,
+       "cancelled": 0
+      },
+      {
+       "clock": "09:25",
+       "total": 1,
+       "cancelled": 0
+      }
+     ],
+     "coverage": {
+      "firstDay": "2026-11-16",
+      "lastDay": "2026-11-18",
+      "weeks": 1
+     },
+     "recent": []
+    },
+    "grading": {
+     "count": 1,
+     "median": 3,
+     "mean": 3,
+     "courses": [
+      {
+       "key": "Biologie",
+       "title": "Biologie",
+       "teacher": "",
+       "count": 1,
+       "median": 3,
+       "mean": 3,
+       "fastest": 3,
+       "slowest": 3
+      }
+     ],
+     "recent": [
+      {
+       "title": "Zelle",
+       "course": "Biologie",
+       "testDay": "2026-11-19",
+       "delay": 3
+      }
+     ]
+    },
+    "waiting": [
+     {
+      "title": "Prüfung Essay",
+      "course": "Englisch (Eng_G24b_Def)",
+      "examDay": "2026-11-05",
+      "daysWaiting": 20
+     },
+     {
+      "title": "Test Atome",
+      "course": "Chemie",
+      "examDay": "2026-11-11",
+      "daysWaiting": 14
+     },
+     {
+      "title": "Prüfung Swiss",
+      "course": "Englisch (Eng_G24b_Def)",
+      "examDay": "2026-11-15",
+      "daysWaiting": 10
+     }
+    ],
+    "gradeChanges": {
+     "count": 0,
+     "items": []
+    },
+    "examLoad": {
+     "weeks": [
+      {
+       "monday": "2026-07-20",
+       "count": 1
+      },
+      {
+       "monday": "2026-11-02",
+       "count": 1
+      },
+      {
+       "monday": "2026-11-09",
+       "count": 4
+      },
+      {
+       "monday": "2026-11-16",
+       "count": 1
+      },
+      {
+       "monday": "2026-11-23",
+       "count": 1
+      },
+      {
+       "monday": "2026-11-30",
+       "count": 1
+      }
+     ],
+     "busiestMonday": "2026-11-09",
+     "busiestCount": 4,
+     "next28": 2
+    },
+    "absences": []
+   }
+  },
+  {
+   "name": "grade changes count two different marks only",
+   "now": "2026-11-25T10:00:00.000Z",
+   "snapshot": {
+    "grades": [],
+    "events": [],
+    "exams": [],
+    "absences": [],
+    "gradeHistory": [
+     {
+      "id": "c1",
+      "gradeId": "g-c1",
+      "courseId": "Mat_G24a_Abc",
+      "course": "Mat_G24a_Abc",
+      "title": "Geometrie",
+      "date": "2026-11-02",
+      "firstSeenAt": "2026-11-05T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 4,
+        "weight": 1,
+        "title": "Geometrie",
+        "date": "2026-11-02",
+        "seenAt": "2026-11-05T08:00:00.000Z"
+       },
+       {
+        "mark": 4.5,
+        "weight": 1,
+        "title": "Geometrie",
+        "date": "2026-11-02",
+        "seenAt": "2026-11-20T10:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "c2",
+      "gradeId": "g-c2",
+      "courseId": "Eng_G24b_Def",
+      "course": "Eng_G24b_Def",
+      "title": "Essay",
+      "date": "2026-11-03",
+      "firstSeenAt": "2026-11-08T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 4,
+        "weight": 1,
+        "title": "Essay",
+        "date": "2026-11-03",
+        "seenAt": "2026-11-08T08:00:00.000Z"
+       },
+       {
+        "mark": 4,
+        "weight": 1,
+        "title": "Essay",
+        "date": "2026-11-03",
+        "seenAt": "2026-11-20T10:00:00.000Z"
+       },
+       {
+        "mark": 4,
+        "weight": 1,
+        "title": "Essay",
+        "date": "2026-11-03",
+        "seenAt": "2026-11-20T10:00:00.000Z"
+       }
+      ]
+     },
+     {
+      "id": "c3",
+      "gradeId": "g-c3",
+      "courseId": "Eng_G24b_Def",
+      "course": "Eng_G24b_Def",
+      "title": "Hidden",
+      "date": "2026-11-03",
+      "firstSeenAt": "2026-11-08T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": null,
+        "weight": 1,
+        "title": "Hidden",
+        "date": "2026-11-03",
+        "seenAt": "2026-11-08T08:00:00.000Z"
+       },
+       {
+        "mark": null,
+        "weight": 1,
+        "title": "Hidden",
+        "date": "2026-11-03",
+        "seenAt": "2026-11-20T10:00:00.000Z"
+       }
+      ],
+      "hidden": true
+     },
+     {
+      "id": "c4",
+      "gradeId": "g-c4",
+      "courseId": "Mat_G24a_Abc",
+      "course": "Mat_G24a_Abc",
+      "title": "Entfernt",
+      "date": "2026-11-03",
+      "firstSeenAt": "2026-11-08T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 3,
+        "weight": 1,
+        "title": "Entfernt",
+        "date": "2026-11-03",
+        "seenAt": "2026-11-08T08:00:00.000Z"
+       },
+       {
+        "mark": 4,
+        "weight": 1,
+        "title": "Entfernt",
+        "date": "2026-11-03",
+        "seenAt": "2026-11-20T10:00:00.000Z"
+       }
+      ],
+      "removedAt": "2026-11-21T08:00:00.000Z"
+     },
+     {
+      "id": "c5",
+      "gradeId": "g-c5",
+      "courseId": "Eng_G24b_Def",
+      "course": "Eng_G24b_Def",
+      "title": "Vokabeln",
+      "date": "2026-11-04",
+      "firstSeenAt": "2026-11-10T08:00:00.000Z",
+      "versions": [
+       {
+        "mark": 5,
+        "weight": 1,
+        "title": "Vokabeln",
+        "date": "2026-11-04",
+        "seenAt": "2026-11-10T08:00:00.000Z"
+       },
+       {
+        "mark": 4,
+        "weight": 1,
+        "title": "Vokabeln",
+        "date": "2026-11-04",
+        "seenAt": "2026-11-20T10:00:00.000Z"
+       },
+       {
+        "mark": 5.5,
+        "weight": 1,
+        "title": "Vokabeln",
+        "date": "2026-11-04",
+        "seenAt": "2026-11-20T10:00:00.000Z"
+       }
+      ]
+     }
+    ]
+   },
+   "expected": {
+    "cancellations": {
+     "totals": {
+      "total": 0,
+      "cancelled": 0,
+      "substituted": 0,
+      "moved": 0,
+      "changed": 0,
+      "added": 0,
+      "rate": 0
+     },
+     "courses": [],
+     "weekdays": [
+      {
+       "weekday": 1,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 2,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 3,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 4,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 5,
+       "total": 0,
+       "cancelled": 0
+      }
+     ],
+     "clocks": [],
+     "coverage": {
+      "firstDay": "",
+      "lastDay": "",
+      "weeks": 0
+     },
+     "recent": []
+    },
+    "grading": {
+     "count": 3,
+     "median": 5,
+     "mean": 5.3,
+     "courses": [
+      {
+       "key": "eng|g24b",
+       "title": "Eng_G24b_Def",
+       "teacher": "",
+       "count": 3,
+       "median": 5,
+       "mean": 5.3,
+       "fastest": 5,
+       "slowest": 6
+      }
+     ],
+     "recent": [
+      {
+       "title": "Vokabeln",
+       "course": "Eng_G24b_Def",
+       "testDay": "2026-11-04",
+       "delay": 6
+      },
+      {
+       "title": "Hidden",
+       "course": "Eng_G24b_Def",
+       "testDay": "2026-11-03",
+       "delay": 5
+      },
+      {
+       "title": "Essay",
+       "course": "Eng_G24b_Def",
+       "testDay": "2026-11-03",
+       "delay": 5
+      }
+     ]
+    },
+    "waiting": [],
+    "gradeChanges": {
+     "count": 2,
+     "items": [
+      {
+       "title": "Vokabeln",
+       "course": "Eng_G24b_Def",
+       "firstSeenDay": "2026-11-10",
+       "versions": 3
+      },
+      {
+       "title": "Geometrie",
+       "course": "Mat_G24a_Abc",
+       "firstSeenDay": "2026-11-05",
+       "versions": 2
+      }
+     ]
+    },
+    "examLoad": {
+     "weeks": [],
+     "busiestMonday": "",
+     "busiestCount": 0,
+     "next28": 0
+    },
+    "absences": []
+   }
+  },
+  {
+   "name": "exam load: busiest week tie goes to the earliest, next 28 days",
+   "now": "2026-11-25T10:00:00.000Z",
+   "snapshot": {
+    "grades": [],
+    "events": [],
+    "exams": [
+     {
+      "id": "a1",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "Prüfung A",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "a2",
+      "start": "2026-11-05T08:00:00",
+      "end": "2026-11-05T08:45:00",
+      "text": "Prüfung B",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "b1",
+      "start": "2026-11-23T08:00:00",
+      "end": "2026-11-23T08:45:00",
+      "text": "Prüfung C",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "b2",
+      "start": "2026-11-27T08:00:00",
+      "end": "2026-11-27T08:45:00",
+      "text": "Prüfung D",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Eng_G24b_Def",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "c1",
+      "start": "2026-12-22T08:00:00",
+      "end": "2026-12-22T08:45:00",
+      "text": "Prüfung E",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "c2",
+      "start": "2026-12-23T08:00:00",
+      "end": "2026-12-23T08:45:00",
+      "text": "Prüfung F",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "c3",
+      "start": "2026-12-24T08:00:00",
+      "end": "2026-12-24T08:45:00",
+      "text": "Prüfung G",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "cancelled",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     },
+     {
+      "id": "a1",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "Prüfung A",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Mat_G24a_Abc",
+      "status": "",
+      "eventType": "exam",
+      "color": "#888888",
+      "timetableText": ""
+     }
+    ],
+    "absences": [],
+    "gradeHistory": []
+   },
+   "expected": {
+    "cancellations": {
+     "totals": {
+      "total": 0,
+      "cancelled": 0,
+      "substituted": 0,
+      "moved": 0,
+      "changed": 0,
+      "added": 0,
+      "rate": 0
+     },
+     "courses": [],
+     "weekdays": [
+      {
+       "weekday": 1,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 2,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 3,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 4,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 5,
+       "total": 0,
+       "cancelled": 0
+      }
+     ],
+     "clocks": [],
+     "coverage": {
+      "firstDay": "",
+      "lastDay": "",
+      "weeks": 0
+     },
+     "recent": []
+    },
+    "grading": {
+     "count": 0,
+     "median": null,
+     "mean": null,
+     "courses": [],
+     "recent": []
+    },
+    "waiting": [
+     {
+      "title": "Prüfung A",
+      "course": "Mat_G24a_Abc",
+      "examDay": "2026-11-03",
+      "daysWaiting": 22
+     },
+     {
+      "title": "Prüfung B",
+      "course": "Eng_G24b_Def",
+      "examDay": "2026-11-05",
+      "daysWaiting": 20
+     },
+     {
+      "title": "Prüfung C",
+      "course": "Mat_G24a_Abc",
+      "examDay": "2026-11-23",
+      "daysWaiting": 2
+     }
+    ],
+    "gradeChanges": {
+     "count": 0,
+     "items": []
+    },
+    "examLoad": {
+     "weeks": [
+      {
+       "monday": "2026-11-02",
+       "count": 2
+      },
+      {
+       "monday": "2026-11-23",
+       "count": 2
+      },
+      {
+       "monday": "2026-12-21",
+       "count": 2
+      }
+     ],
+     "busiestMonday": "2026-11-02",
+     "busiestCount": 2,
+     "next28": 2
+    },
+    "absences": []
+   }
+  },
+  {
+   "name": "absences per subject",
+   "now": "2026-11-25T10:00:00.000Z",
+   "snapshot": {
+    "grades": [],
+    "events": [],
+    "exams": [],
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "2026-11-02",
+      "dateTo": "2026-11-02",
+      "hourFrom": "1",
+      "hourTo": "2",
+      "subject": "Mathematik",
+      "reason": "",
+      "excused": true,
+      "acknowledged": true,
+      "status": ""
+     },
+     {
+      "id": "a2",
+      "dateFrom": "2026-11-03",
+      "dateTo": "2026-11-03",
+      "hourFrom": "1",
+      "hourTo": "2",
+      "subject": "Mathematik",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": ""
+     },
+     {
+      "id": "a3",
+      "dateFrom": "2026-11-04",
+      "dateTo": "2026-11-04",
+      "hourFrom": "1",
+      "hourTo": "2",
+      "subject": "Englisch",
+      "reason": "",
+      "excused": true,
+      "acknowledged": true,
+      "status": ""
+     },
+     {
+      "id": "a4",
+      "dateFrom": "2026-11-05",
+      "dateTo": "2026-11-05",
+      "hourFrom": "1",
+      "hourTo": "2",
+      "subject": "",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": ""
+     },
+     {
+      "id": "a5",
+      "dateFrom": "2026-11-06",
+      "dateTo": "2026-11-06",
+      "hourFrom": "1",
+      "hourTo": "2",
+      "subject": "Englisch",
+      "reason": "",
+      "excused": true,
+      "acknowledged": true,
+      "status": ""
+     }
+    ],
+    "gradeHistory": []
+   },
+   "expected": {
+    "cancellations": {
+     "totals": {
+      "total": 0,
+      "cancelled": 0,
+      "substituted": 0,
+      "moved": 0,
+      "changed": 0,
+      "added": 0,
+      "rate": 0
+     },
+     "courses": [],
+     "weekdays": [
+      {
+       "weekday": 1,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 2,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 3,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 4,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 5,
+       "total": 0,
+       "cancelled": 0
+      }
+     ],
+     "clocks": [],
+     "coverage": {
+      "firstDay": "",
+      "lastDay": "",
+      "weeks": 0
+     },
+     "recent": []
+    },
+    "grading": {
+     "count": 0,
+     "median": null,
+     "mean": null,
+     "courses": [],
+     "recent": []
+    },
+    "waiting": [],
+    "gradeChanges": {
+     "count": 0,
+     "items": []
+    },
+    "examLoad": {
+     "weeks": [],
+     "busiestMonday": "",
+     "busiestCount": 0,
+     "next28": 0
+    },
+    "absences": [
+     {
+      "subject": "Englisch",
+      "count": 2,
+      "excused": 2
+     },
+     {
+      "subject": "Mathematik",
+      "count": 2,
+      "excused": 1
+     },
+     {
+      "subject": "",
+      "count": 1,
+      "excused": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "an empty snapshot gives empty statistics",
+   "now": "2026-11-25T10:00:00.000Z",
+   "snapshot": {
+    "grades": [],
+    "events": [],
+    "exams": [],
+    "absences": [],
+    "gradeHistory": []
+   },
+   "expected": {
+    "cancellations": {
+     "totals": {
+      "total": 0,
+      "cancelled": 0,
+      "substituted": 0,
+      "moved": 0,
+      "changed": 0,
+      "added": 0,
+      "rate": 0
+     },
+     "courses": [],
+     "weekdays": [
+      {
+       "weekday": 1,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 2,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 3,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 4,
+       "total": 0,
+       "cancelled": 0
+      },
+      {
+       "weekday": 5,
+       "total": 0,
+       "cancelled": 0
+      }
+     ],
+     "clocks": [],
+     "coverage": {
+      "firstDay": "",
+      "lastDay": "",
+      "weeks": 0
+     },
+     "recent": []
+    },
+    "grading": {
+     "count": 0,
+     "median": null,
+     "mean": null,
+     "courses": [],
+     "recent": []
+    },
+    "waiting": [],
+    "gradeChanges": {
+     "count": 0,
+     "items": []
+    },
+    "examLoad": {
+     "weeks": [],
+     "busiestMonday": "",
+     "busiestCount": 0,
+     "next28": 0
+    },
+    "absences": []
+   }
+  }
+ ]
+}

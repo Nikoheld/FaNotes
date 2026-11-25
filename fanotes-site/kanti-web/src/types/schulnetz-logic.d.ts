@@ -29,4 +29,6 @@ declare module '@shared/schulnetz-logic' {
   export function gradeTargetId(grade: Partial<SchoolGrade>): string
   export function isSummaryGrade(grade: Partial<SchoolGrade>): boolean
   export function looksLikeCourseCode(value: string): boolean
+  export interface CourseIdentity { subject: string; group: string; teacher: string }
+  export function courseIdentity(label: string): CourseIdentity | null
 }

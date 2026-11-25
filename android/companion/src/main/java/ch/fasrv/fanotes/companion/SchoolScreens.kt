@@ -90,6 +90,8 @@ fun SchoolScreen(model: CompanionModel) {
                 SettingRow(Icons.Outlined.Forum, t(R.string.updates), t(R.string.messages_school_events_holidays), if (fetched) updates.toString() else "") { model.navigate(Page.Updates) }
                 FineDivider()
                 SettingRow(Icons.AutoMirrored.Outlined.ReceiptLong, t(R.string.school_account), t(R.string.read_your_available_account_statement)) { model.navigate(Page.Statement) }
+                FineDivider()
+                SettingRow(Icons.Outlined.BarChart, t(R.string.stats_title), t(R.string.stats_subtitle)) { model.navigate(Page.Stats) }
             }
         }
         item(key = "plan-head") { SectionLabel(t(R.string.plan_with_your_school)) }

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import { weekMonday } from './lib/agenda'
 import { useEntries } from './vault/entries'
 import { useVault } from './vault/store'
@@ -24,6 +24,7 @@ const Grades = lazy(() => import('./views/Grades').then((module) => ({ default: 
 const Notes = lazy(() => import('./views/Notes').then((module) => ({ default: module.Notes })))
 const Settings = lazy(() => import('./views/Settings').then((module) => ({ default: module.Settings })))
 const Timetable = lazy(() => import('./views/Timetable').then((module) => ({ default: module.Timetable })))
+const Stats = lazy(() => import('./views/Stats').then((module) => ({ default: module.Stats })))
 const Updates = lazy(() => import('./views/Updates').then((module) => ({ default: module.Updates })))
 
 const ViewLoading = () => <div className="loading"><span className="spinner" /></div>
@@ -31,7 +32,7 @@ const ViewLoading = () => <div className="loading"><span className="spinner" /><
 /** Where a new group starts in the sidebar: school, on the way, then the settings at the bottom. */
 const NAV_CLASS: Partial<Record<View, string>> = { timetable: 'nav-group', commute: 'nav-group', settings: 'nav-end' }
 
-const ICONS: Record<View, IconName> = { today: 'today', timetable: 'timetable', grades: 'grades', agenda: 'agenda', absences: 'absences', updates: 'updates', mensa: 'restaurant', commute: 'train', notes: 'note', settings: 'settings' }
+const ICONS: Record<View, IconName> = { today: 'today', timetable: 'timetable', grades: 'grades', agenda: 'agenda', absences: 'absences', updates: 'updates', mensa: 'restaurant', commute: 'train', notes: 'note', settings: 'settings', stats: 'grades' }
 
 /** The theme as CSS variables on the root, following the system light/dark switch for "system". */
 const useTheme = () => {
@@ -172,7 +173,8 @@ const Sidebar = () => {
       ) : active ? <p className="connection-name" title={active.label}><i className={`connection-dot${data.status?.needsReauth || kanti.offline ? ' off' : ''}`} aria-hidden="true" /><span>{active.label}</span></p> : null}
       <ul className="nav">
         {visibleViews(prefs.showMensa).map((view, index) => (
-          <li key={view} className={NAV_CLASS[view]}>
+          <Fragment key={view}>
+          <li className={NAV_CLASS[view]}>
             <a
               href={view === 'today' ? '/' : undefined}
               className={route.view === view ? 'active' : ''}
@@ -187,6 +189,16 @@ const Sidebar = () => {
               <Kbd>{index + 1}</Kbd>
             </a>
           </li>
+          {view === 'grades' ? (
+            <li>
+              <a className={route.view === 'stats' ? 'active' : ''} aria-current={route.view === 'stats' ? 'page' : undefined} role="link" tabIndex={0}
+                onClick={(event) => { event.preventDefault(); kanti.navigate('stats') }} onKeyDown={(event) => { if (event.key === 'Enter') kanti.navigate('stats') }}>
+                <Icon name={ICONS.stats} />
+                <span className="nav-label" title={t.stats}>{t.stats}</span>
+              </a>
+            </li>
+          ) : null}
+          </Fragment>
         ))}
       </ul>
       <div className="sidebar-foot">
@@ -258,7 +270,7 @@ export const App = () => {
     )
   }
 
-  const views: Record<View, ComponentType> = { today: Today, timetable: Timetable, grades: Grades, agenda: Agenda, absences: Absences, updates: Updates, mensa: Mensa, commute: Commute, notes: Notes, settings: Settings }
+  const views: Record<View, ComponentType> = { today: Today, timetable: Timetable, grades: Grades, agenda: Agenda, absences: Absences, updates: Updates, mensa: Mensa, commute: Commute, notes: Notes, settings: Settings, stats: Stats }
   const Current = views[route.view]
   const status = data.status
   return (

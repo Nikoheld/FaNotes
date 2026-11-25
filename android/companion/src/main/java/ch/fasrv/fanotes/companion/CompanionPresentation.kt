@@ -19,7 +19,7 @@ enum class Page(val title: String) {
     Settings("Settings"), Connections("Account & sync"), Appearance("Appearance"), ArchivedSubjects("Archived subjects"),
     Navigation("Navigation bar"), Planning("Planning & grades"), Notifications("Notifications"),
     Profile("Your activity"), Diagnostics("Diagnostics"), Auth("Connect FaNotes"), Trash("Recently deleted"), DocSearch("Document search"), WebAccess("Kanti+ in the browser"),
-    Commute("Commute routes"), CommuteEdit("Commute route"), CommuteDetail("Commute"), CommuteTrip("Commute connection"), Mensa("Mensa")
+    Commute("Commute routes"), CommuteEdit("Commute route"), CommuteDetail("Commute"), CommuteTrip("Commute connection"), Mensa("Mensa"), Stats("Statistics")
 }
 data class CompanionRoute(val destination: Destination = Destination.Today, val page: Page? = null)
 
@@ -84,6 +84,7 @@ fun Page.uiTitle(): String = when (this) {
     Page.CommuteDetail -> t(R.string.commute_route)
     Page.CommuteTrip -> t(R.string.commute_detail_title)
     Page.Mensa -> t(R.string.mensa_title)
+    Page.Stats -> t(R.string.stats_title)
 }
 fun navPlacement(id: String): NavPlacement = when (startTabId(id)) {
     "planner" -> NavPlacement(CompanionRoute(Destination.Planner))
