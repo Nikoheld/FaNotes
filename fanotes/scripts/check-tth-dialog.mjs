@@ -173,10 +173,10 @@ const runDialog = async () => {
       }
       assert(generated, 'Desktop worker must generate an insertable offline preview without imported samples')
       assert(await evaluate(`window.__tthLookups.some(query => query.text === 'Pasted handwritten line')`), 'desktop previews must query the full local word corpus')
-      const state = await evaluate(`(() => { const box = document.querySelector('.lw-tth-message input[type="checkbox"]'); const before = box.checked; box.click(); return before })()`)
+      const state = await evaluate(`(() => { const box = document.querySelector('.tth-learn input[type="checkbox"]'); const before = box.checked; box.click(); return before })()`)
       assert.equal(state, true, 'automatic learning defaults on')
       await wait(100)
-      assert.equal(await evaluate(`document.querySelector('.lw-tth-message input[type="checkbox"]').checked`), false)
+      assert.equal(await evaluate(`document.querySelector('.tth-learn input[type="checkbox"]').checked`), false)
       for (let attempt = 0; attempt < 100; attempt++) {
         if (await evaluate(`!document.querySelector('.lw-tth-insert').disabled`)) break
         await wait(50)
