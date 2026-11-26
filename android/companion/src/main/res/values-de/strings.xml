@@ -1555,4 +1555,53 @@
     <string name="removed_grades">Entfernte Noten</string>
     <string name="removed_grades_help">Schulnetz führt diese Noten nicht mehr. Sie zählen in keinem Schnitt.</string>
     <string name="grade_removed_on">Entfernt am %1$s</string>
+    <string name="stats_title">Statistik</string>
+    <string name="stats_subtitle">Ausfälle, Korrekturdauer und Tests, die auf eine Note warten</string>
+    <string name="stats_cancellations">Ausfälle</string>
+    <string name="stats_grading">Korrekturdauer</string>
+    <string name="stats_waiting">Warten auf Note</string>
+    <string name="stats_changed">Geänderte Noten</string>
+    <string name="stats_exam_load">Prüfungslast</string>
+    <string name="stats_no_subject">Ohne Fach</string>
+    <plurals name="stats_coverage">
+        <item quantity="one">Basierend auf %1$d Woche, %2$s–%3$s</item>
+        <item quantity="other">Basierend auf %1$d Wochen, %2$s–%3$s</item>
+    </plurals>
+    <string name="stats_coverage_none">Es sind noch keine vergangenen Lektionen geladen.</string>
+    <string name="stats_note">Eine Lektion, die Schulnetz ganz löscht, kann nicht gezählt werden. Die Korrekturdauer wird ab dem Moment gemessen, in dem Kanti+ die Note zum ersten Mal gesehen hat.</string>
+    <string name="stats_cancelled_summary">%1$d von %2$d Lektionen ausgefallen (%3$d%%)</string>
+    <string name="stats_cancelled_extra">%1$d vertreten · %2$d verschoben · %3$d geändert</string>
+    <string name="stats_cancelled_none">Für vergangene Wochen sind keine Lektionen geladen.</string>
+    <string name="stats_course_counts">%1$d von %2$d ausgefallen</string>
+    <string name="stats_course_substituted">%1$d vertreten</string>
+    <string name="stats_by_weekday">Nach Wochentag</string>
+    <string name="stats_by_time">Nach Beginn</string>
+    <string name="stats_latest_cancelled">Letzte Ausfälle</string>
+    <plurals name="stats_median_days">
+        <item quantity="one">Median: %1$s Tag</item>
+        <item quantity="other">Median: %1$s Tage</item>
+    </plurals>
+    <string name="stats_grading_overall">Mittel %1$s Tage · %2$d korrigierte Tests</string>
+    <string name="stats_grading_none">Noch zu wenig Daten. Gezählt werden Noten, die Kanti+ nach Beginn der Beobachtung neu erscheinen sah.</string>
+    <string name="stats_course_delay">Median %1$s · Mittel %2$s · %3$d–%4$d Tage · %5$d Tests</string>
+    <string name="stats_latest_graded">Zuletzt korrigierte Tests</string>
+    <string name="stats_graded_row">Test am %1$s · nach %2$d Tagen gesehen</string>
+    <string name="stats_waiting_none">Kein Test wartet auf eine Note.</string>
+    <string name="stats_waiting_help">Tests der letzten 120 Tage ohne Note innerhalb von 3 Tagen um den Prüfungstag.</string>
+    <plurals name="stats_waiting_days">
+        <item quantity="one">%d Tag</item>
+        <item quantity="other">%d Tage</item>
+    </plurals>
+    <string name="stats_changed_none">Keine Note wurde geändert.</string>
+    <string name="stats_changed_help">Noten, deren Wert sich änderte, nachdem Kanti+ sie zum ersten Mal gesehen hat. Hier werden keine Noten angezeigt.</string>
+    <string name="stats_changed_row">Zuerst gesehen %1$s · %2$d Versionen</string>
+    <string name="stats_exam_none">Keine Prüfungen in den geladenen Wochen.</string>
+    <string name="stats_exam_busiest">Intensivste Woche: %1$s mit %2$d Prüfungen</string>
+    <plurals name="stats_exam_next">
+        <item quantity="one">%d Prüfung in den nächsten 28 Tagen</item>
+        <item quantity="other">%d Prüfungen in den nächsten 28 Tagen</item>
+    </plurals>
+    <string name="stats_exam_week">Woche ab %1$s</string>
+    <string name="stats_absence_none">Keine Absenzen.</string>
+    <string name="stats_absence_row">%1$d Absenzen · %2$d entschuldigt</string>
 </resources>

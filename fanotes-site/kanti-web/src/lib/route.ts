@@ -12,6 +12,7 @@ export const PATHS: Record<View, string> = {
   commute: '/pendeln',
   notes: '/notizen',
   settings: '/einstellungen',
+  stats: '/statistik',
 }
 
 /** The operator's upload page. Reachable by URL only; it is in no menu and works without a session. */

@@ -53,6 +53,7 @@ export const Grades = () => {
   return (
     <div className="view view-grades">
       <VaultHint compact />
+      <div className="stats-link"><Button tone="outline" onClick={() => kanti.navigate('stats')}><Icon name="grades" size={18} /> {t.stats}</Button></div>
       <div className="metric-row">
         <Card className="metric"><span className="metric-label">{t.pluspunkte}</span><span className={`metric-value tabular ${totals.total >= 0 ? 'positive' : 'negative'}`}>{plusLabel(totals.total)}</span><small className="metric-sub tabular">+{totals.plus} / −{Math.abs(totals.minus)}</small></Card>
         <Card className="metric"><span className="metric-label">{t.overall}</span><span className="metric-value tabular">{markLabel(overall)}</span><small className="metric-sub">{t.subjects(courses.length)}</small></Card>

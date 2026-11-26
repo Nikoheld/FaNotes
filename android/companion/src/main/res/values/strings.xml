@@ -1555,4 +1555,53 @@
     <string name="removed_grades">Removed grades</string>
     <string name="removed_grades_help">Schulnetz no longer lists these grades. They do not count in any average.</string>
     <string name="grade_removed_on">Removed %1$s</string>
+    <string name="stats_title">Statistics</string>
+    <string name="stats_subtitle">Cancelled lessons, grading time and tests waiting for a grade</string>
+    <string name="stats_cancellations">Cancelled lessons</string>
+    <string name="stats_grading">Grading time</string>
+    <string name="stats_waiting">Waiting for a grade</string>
+    <string name="stats_changed">Corrected grades</string>
+    <string name="stats_exam_load">Exam load</string>
+    <string name="stats_no_subject">No subject</string>
+    <plurals name="stats_coverage">
+        <item quantity="one">Based on %1$d week, %2$s–%3$s</item>
+        <item quantity="other">Based on %1$d weeks, %2$s–%3$s</item>
+    </plurals>
+    <string name="stats_coverage_none">No past lessons are loaded yet.</string>
+    <string name="stats_note">A lesson that Schulnetz deletes entirely cannot be counted. Grading time is measured from when Kanti+ first saw the grade.</string>
+    <string name="stats_cancelled_summary">%1$d of %2$d lessons cancelled (%3$d%%)</string>
+    <string name="stats_cancelled_extra">%1$d substituted · %2$d moved · %3$d changed</string>
+    <string name="stats_cancelled_none">No lessons are loaded for past weeks.</string>
+    <string name="stats_course_counts">%1$d of %2$d cancelled</string>
+    <string name="stats_course_substituted">%1$d substituted</string>
+    <string name="stats_by_weekday">By weekday</string>
+    <string name="stats_by_time">By start time</string>
+    <string name="stats_latest_cancelled">Latest cancellations</string>
+    <plurals name="stats_median_days">
+        <item quantity="one">Median: %1$s day</item>
+        <item quantity="other">Median: %1$s days</item>
+    </plurals>
+    <string name="stats_grading_overall">Mean %1$s days · %2$d graded tests</string>
+    <string name="stats_grading_none">Not enough data yet. Grading time counts grades that Kanti+ saw appear after it started to watch.</string>
+    <string name="stats_course_delay">Median %1$s · mean %2$s · %3$d–%4$d days · %5$d tests</string>
+    <string name="stats_latest_graded">Latest graded tests</string>
+    <string name="stats_graded_row">Test on %1$s · seen after %2$d days</string>
+    <string name="stats_waiting_none">No test is waiting for a grade.</string>
+    <string name="stats_waiting_help">Tests of the last 120 days with no grade within 3 days of the test day.</string>
+    <plurals name="stats_waiting_days">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <string name="stats_changed_none">No grade has been corrected.</string>
+    <string name="stats_changed_help">Grades whose mark changed after Kanti+ first saw them. No marks are shown here.</string>
+    <string name="stats_changed_row">First seen %1$s · %2$d versions</string>
+    <string name="stats_exam_none">No exams in the loaded weeks.</string>
+    <string name="stats_exam_busiest">Busiest week: %1$s with %2$d exams</string>
+    <plurals name="stats_exam_next">
+        <item quantity="one">%d exam in the next 28 days</item>
+        <item quantity="other">%d exams in the next 28 days</item>
+    </plurals>
+    <string name="stats_exam_week">Week of %1$s</string>
+    <string name="stats_absence_none">No absences.</string>
+    <string name="stats_absence_row">%1$d absences · %2$d excused</string>
 </resources>

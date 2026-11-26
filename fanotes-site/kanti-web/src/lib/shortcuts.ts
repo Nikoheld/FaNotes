@@ -1,7 +1,7 @@
 // Keyboard shortcuts. The mapping is pure (key event in, action out) so it is tested without a page.
 
-export type View = 'today' | 'timetable' | 'grades' | 'agenda' | 'absences' | 'updates' | 'mensa' | 'commute' | 'notes' | 'settings'
-/** Every view in menu order, the optional Mensa included. */
+export type View = 'today' | 'timetable' | 'grades' | 'agenda' | 'absences' | 'updates' | 'mensa' | 'commute' | 'notes' | 'settings' | 'stats'
+/** Every view in menu order, the optional Mensa included. The statistics page ('stats') is a sub-page: it has a route and a sidebar link, but no number key. */
 export const ALL_VIEWS: View[] = ['today', 'timetable', 'grades', 'agenda', 'absences', 'updates', 'mensa', 'commute', 'notes', 'settings']
 /** The views in the menu while the Mensa is off (the default); the number keys count along this list. */
 export const VIEWS: View[] = ALL_VIEWS.filter((view) => view !== 'mensa')

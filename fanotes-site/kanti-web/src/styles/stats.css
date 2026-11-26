@@ -1,0 +1,12 @@
+/* The statistics page: stacked cards of rows with a thin bar. */
+.view-stats .stats-grid { display: grid; gap: var(--s4); }
+.view-stats .stats-coverage { margin: 0 var(--s1) var(--s4); line-height: 1.5; }
+.view-stats .stat-list { display: flex; flex-direction: column; padding: var(--s2) var(--s4); }
+.view-stats .stat-heading { font-size: var(--text-s); font-weight: 650; color: var(--muted); margin: var(--s3) 0 var(--s1); }
+.view-stats .stat-big { font-size: 28px; font-weight: 650; letter-spacing: -0.02em; }
+.stat-line { display: flex; align-items: flex-start; gap: var(--s3); padding: 10px 0; border-bottom: 1px solid var(--hairline); }
+.stat-line:last-child { border-bottom: none; }
+.stat-line-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.stat-line-title { overflow-wrap: anywhere; }
+.stat-line-side { color: var(--muted); font-size: var(--text-s); white-space: nowrap; }
+.stats-link { display: flex; justify-content: flex-end; margin-bottom: var(--s3); }

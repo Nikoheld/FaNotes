@@ -3,6 +3,7 @@ package ch.fasrv.fanotes.schulnetz
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZonedDateTime
+import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 
 /*
@@ -141,6 +142,13 @@ fun demoSnapshot(today: LocalDate, now: ZonedDateTime = today.atTime(7, 0).atZon
                 val subject = SUBJECTS.getValue(name ?: return@mapIndexedNotNull null)
                 when {
                     week == nextMonday && dayIndex == 3 && slot == 4 -> lesson(day, slot, subject, status = "entfällt", comment = "Lektion fällt aus")
+                    // Past cancellations and a substitution, so the statistics have something to count.
+                    week == monday.minusWeeks(1) && dayIndex == 1 && slot == 2 -> lesson(day, slot, subject, status = "entfällt", comment = "Lektion fällt aus")
+                    week == monday.minusWeeks(1) && dayIndex == 4 && slot == 4 -> lesson(day, slot, subject, status = "entfällt", comment = "Lektion fällt aus")
+                    week == monday.minusWeeks(1) && dayIndex == 0 && slot == 1 -> lesson(day, slot, subject, comment = "Vertretung", teacher = "Lehrperson Z")
+                    week == monday.minusWeeks(2) && dayIndex == 3 && slot == 1 -> lesson(day, slot, subject, status = "entfällt", comment = "Lektion fällt aus")
+                    week == monday.minusWeeks(2) && dayIndex == 2 && slot == 3 -> lesson(day, slot, subject, status = "entfällt", comment = "Lektion fällt aus")
+                    week == monday && dayIndex == 0 && slot == 1 -> lesson(day, slot, subject, status = "entfällt", comment = "Lektion fällt aus")
                     week == nextMonday && dayIndex == 4 && slot == 3 -> lesson(day, slot, subject, comment = "Vertretung", teacher = "Lehrperson Z")
                     else -> lesson(day, slot, subject)
                 }
@@ -173,6 +181,24 @@ fun demoSnapshot(today: LocalDate, now: ZonedDateTime = today.atTime(7, 0).atZon
         grade("g1", "Geschichte", "Antike", today.minusDays(38), 5.0),
         grade("w1", "Wirtschaft und Recht", "Marktformen", today.minusDays(16), 4.5),
     )
+    // When the app first saw each grade. The oldest batch is the first read (not counted as new);
+    // the rest appeared a few days after the test, one of them corrected from 4.0 to 4.5.
+    fun seen(daysAgo: Long) = today.minusDays(daysAgo).atTime(9, 0).atZone(SCHOOL_ZONE).toInstant().toString()
+    fun track(g: SchoolGrade, firstSeen: String, vararg marks: Double) = GradeTrack(
+        id = "${g.id}-history", gradeId = g.id, courseId = g.courseId, course = g.course, title = g.title, date = g.date, firstSeenAt = firstSeen,
+        versions = marks.mapIndexed { index, mark -> GradeVersion(mark, g.weight, g.title, g.date, if (index == 0) firstSeen else seen(9)) },
+    )
+    val seedBatch = setOf("m1", "d1", "p1", "g1")
+    val delays = mapOf("m2" to 3L, "e1" to 5L, "f1" to 9L, "b1" to 4L, "d2" to 2L, "c1" to 7L, "p2" to 4L, "w1" to 6L)
+    val gradeHistory = grades.mapNotNull { g ->
+        val key = g.id.removePrefix("${DEMO_ID_PREFIX}grade-")
+        val day = LocalDate.parse(g.date)
+        when {
+            key in seedBatch -> track(g, seen(46), g.mark!!)
+            key == "m2" -> track(g, seen(ChronoUnit.DAYS.between(day.plusDays(3), today)), 4.0, 4.5)
+            else -> delays[key]?.let { delay -> track(g, seen(ChronoUnit.DAYS.between(day.plusDays(delay), today)), g.mark!!) }
+        }
+    }
     // A booked entry with its points and an open report of a double lesson (estimated 2 + 1 = 3).
     val reportDay = weekday(today.minusDays(3))
     val reportSubjects = WEEK[reportDay.dayOfWeek.value - 1]
@@ -198,6 +224,7 @@ fun demoSnapshot(today: LocalDate, now: ZonedDateTime = today.atTime(7, 0).atZon
         fetchedAt = stamp,
         profile = SchoolProfile(id = "${DEMO_ID_PREFIX}profile", firstName = "Demo", lastName = "Schüler:in", className = "K26A", email = ""),
         grades = grades,
+        gradeHistory = gradeHistory,
         events = lessons + appointments,
         exams = exams,
         absences = absences,

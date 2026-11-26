@@ -126,6 +126,13 @@ export const demoSnapshot = (today: string, now = new Date(`${today}T06:00:00Z`)
       // The current week carries one cancelled and one substituted lesson too (they show in the week grid).
       if (week === monday && dayIndex === 3 && slot === 3) return [lesson(day, slot, subject, 'cancelled', 'Lektion fällt aus', subject.teacher, 'cancelled')]
       if (week === monday && dayIndex === 4 && slot === 2) return [lesson(day, slot, subject, '', 'Vertretung', subject.teacher, 'changed', 'Lehrperson Z')]
+      // Past cancellations and a substitution, so the statistics have something to count.
+      const lastMonday = addDays(monday, -7)
+      const earlierMonday = addDays(monday, -14)
+      if (week === lastMonday && ((dayIndex === 1 && slot === 2) || (dayIndex === 4 && slot === 4))) return [lesson(day, slot, subject, 'cancelled', 'Lektion fällt aus', subject.teacher, 'cancelled')]
+      if (week === earlierMonday && ((dayIndex === 3 && slot === 1) || (dayIndex === 2 && slot === 3))) return [lesson(day, slot, subject, 'cancelled', 'Lektion fällt aus', subject.teacher, 'cancelled')]
+      if (week === lastMonday && dayIndex === 0 && slot === 1) return [lesson(day, slot, subject, '', 'Vertretung', subject.teacher, 'changed', 'Lehrperson Z')]
+      if (week === monday && dayIndex === 0 && slot === 1) return [lesson(day, slot, subject, 'cancelled', 'Lektion fällt aus', subject.teacher, 'cancelled')]
       if (week === nextMonday && dayIndex === 3 && slot === 4) return [lesson(day, slot, subject, 'cancelled', 'Lektion fällt aus', subject.teacher, 'cancelled')]
       if (week === nextMonday && dayIndex === 4 && slot === 3) return [lesson(day, slot, subject, '', 'Vertretung', subject.teacher, 'changed', 'Lehrperson Z')]
       return [lesson(day, slot, subject)]
@@ -166,9 +173,18 @@ export const demoSnapshot = (today: string, now = new Date(`${today}T06:00:00Z`)
   })
   const corrected = grades.find((item) => item.id.endsWith('grade-m2')) as SchoolGrade
   const dropped = grade('p3', 'Physik', 'Test Optik', addDays(today, -30), 3.0)
+  // The oldest batch is the first read (not counted as new); the rest appeared a few days after the test.
+  const seenAt = (day: string, delay: number) => new Date(Date.parse(`${addDays(day, delay)}T09:00:00Z`)).toISOString()
+  const seedBatch = new Set(['m1', 'd1', 'p1', 'g1'])
+  const delays: Record<string, number> = { m2: 3, e1: 5, f1: 9, b1: 4, d2: 2, c1: 7, p2: 4, w1: 6 }
   const gradeHistory: GradeTrack[] = [
-    ...grades.filter((item) => item !== corrected).map((item, index) => track(`demo-h${index}`, item, [version(item, item.mark as number, earlier(20))])),
-    track('demo-hm2', corrected, [version(corrected, 4.0, earlier(18)), version(corrected, 4.5, earlier(9))]),
+    ...grades.flatMap((item, index) => {
+      const key = item.id.replace(`${DEMO_ID_PREFIX}grade-`, '')
+      if (seedBatch.has(key)) return [track(`demo-h${index}`, item, [version(item, item.mark as number, earlier(46))])]
+      if (item === corrected) return []
+      return [track(`demo-h${index}`, item, [version(item, item.mark as number, seenAt(item.date, delays[key] ?? 4))])]
+    }),
+    track('demo-hm2', corrected, [version(corrected, 4.0, seenAt(corrected.date, 3)), version(corrected, 4.5, earlier(9))]),
     track('demo-hp3', dropped, [version(dropped, 3.0, earlier(25))], earlier(3)),
   ]
   return {
