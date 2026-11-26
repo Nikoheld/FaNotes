@@ -21,7 +21,8 @@ data class WorksheetPlacement(
     val page: Int = 1,
 )
 
-data class WorksheetPageSpec(val id: String, val page: Int, val aspect: Double)
+/** [floating] is the stored placement of a floating image: it is laid out by itself and does not push the next sheet down. */
+data class WorksheetPageSpec(val id: String, val page: Int, val aspect: Double, val floating: SheetImagePlacement? = null)
 
 data class AnchoredHighlight(val worksheetId: String, val mark: WorksheetHighlight)
 
@@ -60,6 +61,16 @@ fun layoutWorksheetPages(
     var previousId = ""
     for (spec in pages) {
         if (spec.id.isBlank()) continue
+        val floating = spec.floating
+        if (floating != null) {
+            val box = clampSheetPlacement(floating)
+            val floatWidth = box.width * pageWidth
+            placed += WorksheetPlacement(
+                spec.id, box.x * pageWidth, -1.0, box.y * pageWidth, floatWidth,
+                floatWidth * clampSheetAspect(spec.aspect), 1,
+            )
+            continue
+        }
         val aspect = if (spec.aspect.isFinite()) spec.aspect.coerceIn(0.05, 8.0) else 1.0
         val height = width * aspect
         val showCaption = spec.id != previousId

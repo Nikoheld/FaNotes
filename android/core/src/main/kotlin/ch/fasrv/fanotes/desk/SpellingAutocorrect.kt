@@ -48,8 +48,11 @@ fun autocorrectTyping(
     enabled: Boolean,
     mark: AutocorrectMark?,
     declined: (String) -> Boolean,
-    languageAt: (Int) -> String?,
+    /** The passage around a word start in [before]; see [paragraphPassageAt]. Null while the dictionaries load. */
+    passageAt: (Int) -> PassageAt?,
     isProperName: (String) -> Boolean = ::isCanonicalProperName,
+    /** Asked once when a French word is finished before the French list is in memory: start reading it. */
+    onFrenchNeeded: () -> Unit = {},
 ): AutocorrectResult? {
     if (!enabled) return null
     revertAutocorrectBackspace(before, next, changeStart, changeDeleted, mark)?.let { return it }
@@ -59,7 +62,7 @@ fun autocorrectTyping(
     if (!BOUNDARY.matches(boundary)) return null
     if (next.substring(0, changeStart) != before.substring(0, changeStart.coerceAtMost(before.length))) return null
     if (changeStart > before.length || next.substring(changeStart + 1) != before.substring(changeStart)) return null
-    val planned = planAutocorrect(before, changeStart, lexicon, declined, languageAt, isProperName) ?: return null
+    val planned = planAutocorrect(before, changeStart, lexicon, declined, passageAt, isProperName, onFrenchNeeded) ?: return null
     val text = next.substring(0, planned.from) + planned.replacement + next.substring(planned.to)
     val cursor = (planned.from + planned.replacement.length + boundary.length).coerceIn(0, text.length)
     return AutocorrectResult(
@@ -77,8 +80,9 @@ private fun planAutocorrect(
     wordEnd: Int,
     lexicon: SpellingLexicon,
     declined: (String) -> Boolean,
-    languageAt: (Int) -> String?,
+    passageAt: (Int) -> PassageAt?,
     isProperName: (String) -> Boolean,
+    onFrenchNeeded: () -> Unit,
 ): PlannedWord? {
     if (wordEnd <= 0 || wordEnd > before.length) return null
     val lineStart = lineStartAt(before, wordEnd)
@@ -87,14 +91,22 @@ private fun planAutocorrect(
     if (start == wordEnd) return null
     if (start > lineStart && STUCK_BEFORE.matches(before[start - 1].toString())) return null
     val word = before.substring(start, wordEnd)
-    if (declined(word) || !lexicon.isMisspelled(word)) return null
+    if (declined(word)) return null
+    // Autocorrect only acts when the passage's language is certain and the word is unknown in every
+    // dictionary (not only the languages seen so far); with any doubt the word stays underlined.
+    val passage = passageAt(start)?.passage ?: return null
+    val language = passage.language
+    // Reading the French list takes a moment; start it as soon as a word is finished in a French passage.
+    if (language == "fr" && !lexicon.frenchReady) onFrenchNeeded()
+    if (language == null || !passage.confident || passage.foreign || passage.unsupported) return null
+    if (!lexicon.isMisspelled(word, TEXT_LANGUAGES)) return null
+    // Without the French list there is nothing to correct a French word with.
+    if (language == "fr" && !lexicon.frenchReady) return null
     if (insideFence(before, start)) return null
     val lineEnd = before.indexOf('\n', lineStart).let { if (it < 0) before.length else it }
     val ignored = automaticIgnoredRanges(SpellingSegment(lineStart, before.substring(lineStart, lineEnd)))
     if (ignored.any { start < it.to && wordEnd > it.from }) return null
-    val language = languageAt(lineStart)
-    val languages = if (language == "de" || language == "en") listOf(language) else lexicon.languages
-    val suggestions = suggestCorrections(word, languages, lexicon, limit = 4, maxDistance = 1)
+    val suggestions = suggestCorrections(word, listOf(language), lexicon, limit = 4, maxDistance = 1)
     val decision = decideAutocorrect(
         word,
         suggestions,
@@ -155,3 +167,41 @@ private fun properNames(): Set<String> {
 
 @Volatile
 private var names: Set<String>? = null
+
+private const val PARAGRAPH_LOOKBEHIND = 3
+private const val PARAGRAPH_LOOKAHEAD = 2
+
+/**
+ * What is known about the passage around [offset] in [text], decided now from the text as it is: its
+ * language, whether that is certain, and the languages a word there may be valid in. The paragraph
+ * neighbours are up to three lines before and two after, ended by a blank line.
+ */
+fun paragraphPassageAt(
+    text: String,
+    offset: Int,
+    profile: LanguageEvidence?,
+    dictionaries: SpellingDictionaries,
+    acceptedWords: Set<String> = emptySet(),
+): PassageAt {
+    val lineStart = lineStartAt(text, offset)
+    val lineEnd = text.indexOf('\n', lineStart).let { if (it < 0) text.length else it }
+    val previous = ArrayList<String>()
+    var cursor = lineStart
+    while (cursor > 0 && previous.size < PARAGRAPH_LOOKBEHIND) {
+        val start = text.lastIndexOf('\n', cursor - 2).let { if (it < 0) 0 else it + 1 }
+        val line = text.substring(start, cursor - 1)
+        if (line.isBlank()) break
+        previous += line
+        cursor = start
+    }
+    val next = ArrayList<String>()
+    cursor = lineEnd + 1
+    while (cursor <= text.length && lineEnd < text.length && next.size < PARAGRAPH_LOOKAHEAD) {
+        val end = text.indexOf('\n', cursor).let { if (it < 0) text.length else it }
+        val line = text.substring(cursor, end)
+        if (line.isBlank()) break
+        next += line
+        cursor = end + 1
+    }
+    return resolvePassageAt(text.substring(lineStart, lineEnd), offset - lineStart, previous, next, profile, dictionaries, acceptedWords)
+}

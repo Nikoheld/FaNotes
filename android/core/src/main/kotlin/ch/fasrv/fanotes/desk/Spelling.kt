@@ -10,15 +10,27 @@ import java.util.Locale
  * Local spellcheck shared with the desktop editor (`fanotes/src/lib/spelling.ts`).
  * German and English live in Bloom filters built from the same Hunspell
  * dictionaries. A word the cursor is inside, and words in code, math, links,
- * and HTML, stay unmarked. French school words are recognised and not marked.
+ * and HTML, stay unmarked. German, English and French live in Bloom filters. Each passage of a
+ * note gets its own language (`LanguageDetect.kt`, desktop #1473) and a word is underlined only
+ * when no language the passage may use knows it. French loads lazily.
  */
 
 data class SpellingError(val from: Int, val to: Int, val word: String, val language: String)
-data class SpellingLine(val from: Int, val to: Int, val language: String)
+/** The line's main language: its first confident passage, else the best guess, else the note's main language. */
+data class SpellingLine(val from: Int, val to: Int, val language: String, val confident: Boolean = false)
+
+/** One passage of a line (sentence, list item, table cell, side of a vocabulary pair, quotation) and its language. */
+data class SpellingPassage(val from: Int, val to: Int, val kind: PassageKind, val language: PassageLanguage)
+
 data class SpellingCheckResult(
     val errors: List<SpellingError>,
     val lines: List<SpellingLine>,
     val detectedLanguage: String,
+    val passages: List<SpellingPassage> = emptyList(),
+    /** Languages the note uses, most used first. */
+    val languages: List<String> = emptyList(),
+    /** The language evidence of the whole note (the profile). */
+    val profile: LanguageEvidence = LanguageEvidence(),
 )
 
 data class SpellingSegment(val from: Int, val text: String)
@@ -43,22 +55,6 @@ private val TECHNICAL_WORDS = setOf(
     "javascript", "katex", "latex", "linux", "lm", "markdown", "nas", "ollama", "openai",
     "opencode", "pdf", "typescript", "url", "vulkan", "wayland", "web", "windows",
 )
-private val DE_STOPWORDS = setOf(
-    "aber", "als", "auch", "auf", "aus", "bei", "das", "dem", "den", "der", "des", "die",
-    "ein", "eine", "einer", "eines", "für", "hat", "ich", "im", "in", "ist", "mit", "nicht",
-    "oder", "sich", "sie", "sind", "und", "von", "war", "werden", "wie", "wir", "zu", "zum",
-)
-private val EN_STOPWORDS = setOf(
-    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "in", "is",
-    "it", "not", "of", "on", "or", "she", "that", "the", "this", "to", "was", "we", "were",
-    "will", "with", "you",
-)
-private val FRENCH_STOPWORDS = setOf(
-    "le", "la", "les", "un", "une", "des", "de", "du", "et", "ou", "mais", "dans", "sur", "avec",
-    "pour", "par", "je", "tu", "il", "elle", "nous", "vous", "est", "sont", "pas", "que", "qui",
-    "au", "aux", "ce", "cette", "ces", "mon", "ton", "son",
-)
-
 private val DE_LOCALE = Locale.forLanguageTag("de-CH")
 private val EN_LOCALE = Locale.forLanguageTag("en-US")
 private val FR_LOCALE = Locale.forLanguageTag("fr-FR")
@@ -125,7 +121,36 @@ class SpellingDictionaries(
     val en: BloomFilter,
     val deWords: Set<String>?,
     val enWords: Set<String>?,
-)
+    /** The French filter, or null when this build ships none (then only the small school lexicon vouches for French). */
+    val fr: BloomFilter? = null,
+    /** Reads the exact French list (about 5 MB). Called at most once, and only when a French passage needs suggestions. */
+    private val frenchLoader: (() -> Set<String>)? = null,
+) {
+    @Volatile
+    private var frenchList: Set<String>? = null
+    private var frenchFailed = false
+
+    /** True once [frenchWords] has been read. */
+    val frenchWordsLoaded: Boolean get() = frenchList != null
+
+    val hasFrench: Boolean get() = fr != null && frenchLoader != null
+
+    /** The exact French list. Reads it on first use; null when there is none. Blocks, so call it off the UI thread. */
+    fun frenchWords(): Set<String>? {
+        frenchList?.let { return it }
+        val loader = frenchLoader ?: return null
+        synchronized(this) {
+            frenchList?.let { return it }
+            if (frenchFailed) return null
+            return try {
+                loader().also { frenchList = it }
+            } catch (_: Exception) {
+                frenchFailed = true
+                null
+            }
+        }
+    }
+}
 
 fun loadBundledSpelling(includeCandidates: Boolean = false): SpellingDictionaries {
     val manifest = parseJson(resourceText("manifest.json")) as? JsonValue.Obj
@@ -138,20 +163,230 @@ fun loadBundledSpelling(includeCandidates: Boolean = false): SpellingDictionarie
     val en = loadBloom(languages, "en")
     val deWords = if (includeCandidates) loadCandidates(languages, "de") else null
     val enWords = if (includeCandidates) loadCandidates(languages, "en") else null
-    return SpellingDictionaries(de, en, deWords, enWords)
+    // French is optional: a missing or unreadable file only switches French off.
+    val french = manifest.obj("french")
+    val fr = if (french != null) runCatching { loadBloom(frenchEntry(french), "fr") }.getOrNull() else null
+    val loader: (() -> Set<String>)? = if (fr != null && french != null) ({ loadCandidates(frenchEntry(french), "fr") }) else null
+    return SpellingDictionaries(de, en, deWords, enWords, fr, loader)
 }
 
+/** The manifest's `french` entry has the shape of a `languages` entry; wrap it so the loaders can share code. */
+private fun frenchEntry(french: JsonValue.Obj): JsonValue.Obj = JsonValue.Obj().also { it.put("fr", french) }
+
 fun normalizeWord(word: String, language: String): String {
-    val locale = if (language == "de") DE_LOCALE else EN_LOCALE
+    val locale = when (language) {
+        "de" -> DE_LOCALE
+        "fr" -> FR_LOCALE
+        else -> EN_LOCALE
+    }
     val normalized = Normalizer.normalize(word, Normalizer.Form.NFC)
         .lowercase(locale)
         .trim('\'', '’', '-')
-    return if (language == "de") normalized.replace("ß", "ss") else normalized
+    return when (language) {
+        "de" -> normalized.replace("ß", "ss")
+        // French typography uses the curly apostrophe; the filter holds the plain one.
+        "fr" -> normalized.replace('’', '\'')
+        else -> normalized
+    }
 }
 
 fun normalizeForDictionary(word: String): String = normalizeWord(word.trim(), "de").trim('\'', '’', '-')
 
 fun isFrenchWord(word: String): Boolean = foldFrench(word) in FRENCH_LEXICON
+
+private data class SegmentToken(
+    val word: String,
+    val from: Int,
+    val to: Int,
+    val normalized: String,
+    val membership: WordLanguages,
+) {
+    fun evidenceToken() = EvidenceToken(word, normalized, membership)
+}
+
+/**
+ * The words of a segment that count for evidence and for underlining: no code, links, math, the word
+ * under the caret, acronyms or camelCase.
+ */
+private fun collectTokens(
+    segment: SpellingSegment,
+    ignoredRanges: List<SpellingRange>,
+    cursorPositions: List<Int>,
+    dictionaries: SpellingDictionaries,
+    acceptedWords: Set<String>,
+): List<SegmentToken> {
+    val localIgnored = ignoredRanges + automaticIgnoredRanges(segment)
+    return WORD_PATTERN.findAll(segment.text).mapNotNull { match ->
+        val word = match.value
+        val from = segment.from + match.range.first
+        val to = from + word.length
+        val normalized = normalizeWord(word, "de")
+        if (
+            normalized.length < 2 ||
+            intersects(from, to, localIgnored) ||
+            cursorPositions.any { cursor -> cursor in from..to } ||
+            (match.range.first > 0 && segment.text[match.range.first - 1] == '#') ||
+            (word.length in 2..16 && word.all { it in 'A'..'Z' || it == 'Ä' || it == 'Ö' || it == 'Ü' }) ||
+            CAMEL.containsMatchIn(word)
+        ) {
+            null
+        } else {
+            SegmentToken(word, from, to, normalized, wordMembership(word, dictionaries, acceptedWords))
+        }
+    }.toList()
+}
+
+/* ---------- evidence of lines and of the whole note ---------- */
+
+private const val LINE_EVIDENCE_LIMIT = 60_000
+private const val MAX_EVIDENCE_LINE_LENGTH = 800
+
+/** The language evidence of lines already read, remembered by their text: an unchanged line is never read twice. */
+private object LineEvidenceCache {
+    private var owner: SpellingDictionaries? = null
+    private var acceptedKey = 0
+    private var map = HashMap<String, LanguageEvidence>()
+
+    @Synchronized
+    fun evidence(text: String, dictionaries: SpellingDictionaries, accepted: Set<String>): LanguageEvidence {
+        val key = accepted.hashCode()
+        if (owner !== dictionaries || acceptedKey != key) {
+            owner = dictionaries
+            acceptedKey = key
+            map = HashMap()
+        }
+        map[text]?.let { return it }
+        val clipped = if (text.length > MAX_EVIDENCE_LINE_LENGTH) text.substring(0, MAX_EVIDENCE_LINE_LENGTH) else text
+        val evidence = if (LETTER.containsMatchIn(clipped)) {
+            scoreTokens(collectTokens(SpellingSegment(0, clipped), emptyList(), emptyList(), dictionaries, accepted).map { it.evidenceToken() }).evidence
+        } else {
+            LanguageEvidence()
+        }
+        if (map.size >= LINE_EVIDENCE_LIMIT) map = HashMap()
+        map[text] = evidence
+        return evidence
+    }
+}
+
+private val LETTER = Regex("""\p{L}""")
+
+/** The language profile of a whole note: the evidence of all its prose lines (no code fences, display math or front matter). */
+fun documentProfile(lines: Iterable<String>, dictionaries: SpellingDictionaries, accepted: Set<String> = emptySet()): LanguageEvidence {
+    val profile = LanguageEvidence()
+    val filter = ProseLineFilter()
+    for (line in lines) {
+        if (!filter.isProse(line) || !LETTER.containsMatchIn(line)) continue
+        addEvidence(profile, LineEvidenceCache.evidence(line, dictionaries, accepted))
+    }
+    return profile
+}
+
+/* ---------- passages ---------- */
+
+private class PreparedPassage(val range: PassageRange, val score: PassageScore, val resolution: PassageLanguage, val tokens: List<SegmentToken>)
+
+private fun passageIndexOf(passages: List<PassageRange>, offset: Int): Int {
+    val inside = passages.indexOfFirst { offset >= it.from && offset < it.to }
+    if (inside >= 0) return inside
+    var before = -1
+    passages.forEachIndexed { index, passage -> if (passage.from <= offset) before = index }
+    return maxOf(0, before)
+}
+
+private val NEIGHBOUR_WEIGHTS_BEFORE = doubleArrayOf(0.5, 0.3, 0.15)
+private val NEIGHBOUR_WEIGHTS_AFTER = doubleArrayOf(0.5, 0.25)
+
+/**
+ * Weighted evidence of the nearest lines of the same paragraph. Both lists start at the closest line;
+ * a null entry (a blank or missing line) ends the paragraph in that direction.
+ */
+private fun neighbourEvidence(before: List<LanguageEvidence?>, after: List<LanguageEvidence?>): LanguageEvidence {
+    val total = LanguageEvidence()
+    for ((lines, weights) in listOf(before to NEIGHBOUR_WEIGHTS_BEFORE, after to NEIGHBOUR_WEIGHTS_AFTER)) {
+        for (distance in weights.indices) {
+            val line = lines.getOrNull(distance) ?: break
+            addEvidence(total, line, weights[distance])
+        }
+    }
+    return total
+}
+
+private fun preparePassages(
+    segment: SpellingSegment,
+    tokens: List<SegmentToken>,
+    neighbours: LanguageEvidence,
+    prior: LanguageEvidence,
+): List<PreparedPassage> {
+    val ranges = splitPassages(segment.text)
+    if (ranges.isEmpty()) return emptyList()
+    val bucket = ranges.map { ArrayList<SegmentToken>() }
+    for (token in tokens) bucket[passageIndexOf(ranges, token.from - segment.from)].add(token)
+    val scores = bucket.map { list -> scoreTokens(list.map { it.evidenceToken() }) }
+    // Sentences of an Italian line are Italian even when one of them carries few telltale words.
+    val lineScore = scores.fold(scoreTokens(emptyList())) { sum, score -> mergeScores(sum, score) }
+    val wholeLineUnsupported = ranges.all { it.kind != PassageKind.VOCABULARY && it.kind != PassageKind.CELL && it.kind != PassageKind.COLUMN } && isUnsupported(lineScore)
+    val sentenceLike = ranges.all { it.kind == PassageKind.SENTENCE || it.kind == PassageKind.QUOTE || it.kind == PassageKind.LINE }
+    val first = ranges.mapIndexed { index, _ ->
+        // Sentences of one line often share a language; the sides of a vocabulary pair never do.
+        val siblings = LanguageEvidence()
+        if (sentenceLike) scores.forEachIndexed { other, score -> if (other != index) addEvidence(siblings, score.evidence) }
+        if (wholeLineUnsupported) {
+            UNKNOWN_PASSAGE.copy(unsupported = true, foreign = true, source = PassageSource.LOCAL)
+        } else {
+            resolvePassage(scores[index], ResolveContext(neighbours = neighbours, prior = prior, siblings = siblings))
+        }
+    }
+    return ranges.mapIndexed { index, range ->
+        val own = first[index]
+        val pair = !sentenceLike
+        // A weak side of a pair is not the language of its confident partner.
+        val partners = if (pair) {
+            first.withIndex().filter { (otherIndex, other) -> otherIndex != index && other.confident && other.language != null }.map { it.value.language!! }
+        } else {
+            emptyList()
+        }
+        val resolution = if (pair && !own.confident && partners.isNotEmpty()) {
+            resolvePassage(scores[index], ResolveContext(neighbours = neighbours, prior = prior, partnerLanguages = partners))
+        } else {
+            own
+        }
+        PreparedPassage(range, scores[index], resolution, bucket[index])
+    }
+}
+
+/** The languages a word may be written in besides German and English: French once the note or the passage uses it. */
+fun allowedLanguages(present: List<String>, passageLanguage: String?): List<String> {
+    val allowed = arrayListOf("de", "en")
+    if ("fr" in present || passageLanguage == "fr") allowed += "fr"
+    return allowed
+}
+
+class PassageAt(val passage: PassageLanguage, val present: List<String>, val allowed: List<String>)
+
+/**
+ * The language of the passage around [offset] in the line [text], computed on the spot from what is
+ * loaded. This is what autocorrect asks, so a line typed a moment ago is already understood.
+ * [previous] and [next] are the lines of the same paragraph, nearest first.
+ */
+fun resolvePassageAt(
+    text: String,
+    offset: Int,
+    previous: List<String>,
+    next: List<String>,
+    profile: LanguageEvidence?,
+    dictionaries: SpellingDictionaries,
+    acceptedWords: Set<String> = emptySet(),
+): PassageAt {
+    val tokens = collectTokens(SpellingSegment(0, text), emptyList(), emptyList(), dictionaries, acceptedWords)
+    fun evidenceOf(line: String) = if (line.isBlank()) null else LineEvidenceCache.evidence(line, dictionaries, acceptedWords)
+    val neighbours = neighbourEvidence(previous.map(::evidenceOf), next.map(::evidenceOf))
+    val present = profile?.let(::presentLanguages).orEmpty()
+    val prior = profile?.let(::profilePrior) ?: LanguageEvidence()
+    val passages = preparePassages(SpellingSegment(0, text), tokens, neighbours, prior)
+    if (passages.isEmpty()) return PassageAt(UNKNOWN_PASSAGE, present, allowedLanguages(present, null))
+    val passage = passages[passageIndexOf(passages.map { it.range }, offset)]
+    return PassageAt(passage.resolution, present, allowedLanguages(present, passage.resolution.language))
+}
 
 fun checkSpelling(
     segments: List<SpellingSegment>,
@@ -159,68 +394,75 @@ fun checkSpelling(
     ignoredRanges: List<SpellingRange> = emptyList(),
     cursorPositions: List<Int> = emptyList(),
     acceptedWords: Set<String> = emptySet(),
+    /** The lines of the whole note, for its language profile. Without them the profile is read from [segments]. */
+    documentLines: Iterable<String>? = null,
 ): SpellingCheckResult {
     if (segments.isEmpty()) return SpellingCheckResult(emptyList(), emptyList(), "unknown")
-    val scored = segments.map { segment ->
-        val localIgnored = ignoredRanges + automaticIgnoredRanges(segment)
-        val words = WORD_PATTERN.findAll(segment.text).mapNotNull { match ->
-            val word = match.value
-            val from = segment.from + match.range.first
-            val to = from + word.length
-            val normalized = normalizeWord(word, "de")
-            if (
-                normalized.length < 2 ||
-                intersects(from, to, localIgnored) ||
-                cursorPositions.any { cursor -> cursor in from..to } ||
-                (match.range.first > 0 && segment.text[match.range.first - 1] == '#') ||
-                (word.length in 2..16 && word.all { it in 'A'..'Z' || it == 'Ä' || it == 'Ö' || it == 'Ü' }) ||
-                CAMEL.containsMatchIn(word)
-            ) {
-                null
-            } else {
-                CheckedWord(word, from, to, normalized, wordMembership(word, dictionaries, acceptedWords))
-            }
-        }.toList()
-        val evidence = SpellEvidence()
-        for (token in words) {
-            if (token.normalized in DE_STOPWORDS) evidence.de += 3
-            if (token.normalized in EN_STOPWORDS) evidence.en += 3
-            if (token.normalized in FRENCH_STOPWORDS || isFrenchWord(token.word)) evidence.fr += 3
-            if (token.membership.de && !token.membership.en) evidence.de += 2
-            if (token.membership.en && !token.membership.de) evidence.en += 2
-        }
-        ScoredSegment(segment, words, evidence, evidenceLanguage(evidence))
+    val tokenLists = segments.map { collectTokens(it, ignoredRanges, cursorPositions, dictionaries, acceptedWords) }
+    val ownEvidence: List<LanguageEvidence?> = segments.mapIndexed { index, segment ->
+        if (segment.text.isBlank()) null else scoreTokens(tokenLists[index].map { it.evidenceToken() }).evidence
     }
-    val document = SpellEvidence()
-    for (segment in scored) {
-        document.de += segment.evidence.de
-        document.en += segment.evidence.en
-        document.fr += segment.evidence.fr
+    // The note's profile: the whole text when the caller hands it over, otherwise just these lines.
+    val profile = if (documentLines != null) {
+        documentProfile(documentLines, dictionaries, acceptedWords)
+    } else {
+        LanguageEvidence().also { total -> ownEvidence.forEach { line -> if (line != null) addEvidence(total, line) } }
     }
-    val documentLanguage = evidenceLanguage(document) ?: if (document.en > document.de) "en" else "de"
-    val explicit = LinkedHashSet<String>()
-    for (segment in scored) segment.language?.let { explicit += it }
-    val frenchLead = document.fr > document.de && document.fr > document.en
-    val detected = when {
-        frenchLead -> "fr"
-        explicit.size > 1 -> "mixed"
-        explicit.size == 1 -> explicit.first()
-        document.de > 0 || document.en > 0 -> documentLanguage
-        else -> "unknown"
+    val present = presentLanguages(profile)
+    val prior = profilePrior(profile)
+
+    // Neighbours only count across directly following lines of the same paragraph.
+    fun follows(index: Int) = index > 0 && index < segments.size &&
+        segments[index - 1].from + segments[index - 1].text.length + 1 == segments[index].from
+    fun reach(index: Int, step: Int, count: Int): List<LanguageEvidence?> = (1..count).map { distance ->
+        val at = index + step * distance
+        val joined = if (step == -1) follows(at + 1) else follows(at)
+        if (at >= 0 && at < segments.size && joined) ownEvidence[at] else null
     }
+    val prepared = segments.mapIndexed { index, segment ->
+        val passages = preparePassages(
+            segment,
+            tokenLists[index],
+            neighbourEvidence(reach(index, -1, NEIGHBOUR_WEIGHTS_BEFORE.size), reach(index, 1, NEIGHBOUR_WEIGHTS_AFTER.size)),
+            prior,
+        )
+        passages
+    }
+
+    val documentLanguage = present.firstOrNull() ?: decideLanguage(profile).language ?: "de"
     val errors = ArrayList<SpellingError>()
     val lines = ArrayList<SpellingLine>()
-    for (segment in scored) {
-        val resolved = segment.language ?: documentLanguage
-        if (segment.segment.text.isNotBlank()) {
-            lines += SpellingLine(segment.segment.from, segment.segment.from + segment.segment.text.length, resolved)
+    val passages = ArrayList<SpellingPassage>()
+    for ((index, segment) in segments.withIndex()) {
+        if (segment.text.isBlank()) continue
+        val item = prepared[index]
+        val confident = item.firstOrNull { it.resolution.confident && it.resolution.language != null }
+        val guess = item.firstOrNull { it.resolution.language != null }
+        lines += SpellingLine(
+            segment.from,
+            segment.from + segment.text.length,
+            (confident ?: guess)?.resolution?.language ?: documentLanguage,
+            confident != null,
+        )
+        for (passage in item) {
+            passages += SpellingPassage(segment.from + passage.range.from, segment.from + passage.range.to, passage.range.kind, passage.resolution)
+            if (passage.resolution.unsupported) continue
+            val allowed = allowedLanguages(present, passage.resolution.language)
+            val language = passage.resolution.language ?: documentLanguage
+            for (token in passage.tokens) {
+                if (allowed.any { token.membership[it] }) continue
+                errors += SpellingError(token.from, token.to, token.word, language)
+            }
         }
-        for (token in segment.words) {
-            if (token.membership.de || token.membership.en || isFrenchWord(token.word)) continue
-            errors += SpellingError(token.from, token.to, token.word, resolved)
+        // Words that fell outside every passage (nothing to read around them) are still checked.
+        if (item.isEmpty()) {
+            for (token in tokenLists[index]) {
+                if (allowedLanguages(present, null).any { token.membership[it] }) continue
+                errors += SpellingError(token.from, token.to, token.word, documentLanguage)
+            }
         }
     }
-    return SpellingCheckResult(errors, lines, detected)
+    return SpellingCheckResult(errors, lines, detectedLanguageOf(present), passages, present, profile)
 }
 
 /** One note, split into lines the way the desktop checks the visible editor. */
@@ -250,7 +492,7 @@ fun checkNoteSpelling(
     for (match in DISPLAY_MATH.findAll(markdown)) {
         ignored += SpellingRange(match.range.first, match.range.last + 1)
     }
-    return checkSpelling(segments, dictionaries, ignored, cursors, acceptedWords)
+    return checkSpelling(segments, dictionaries, ignored, cursors, acceptedWords, documentLines = parts)
 }
 
 fun automaticIgnoredRanges(segment: SpellingSegment): List<SpellingRange> {
@@ -293,59 +535,58 @@ internal fun splitsIntoGermanParts(rawWord: String, hasPart: (String) -> Boolean
     return findParts(0, 0)
 }
 
-internal data class LanguageMembership(val de: Boolean, val en: Boolean)
+private val FRENCH_ELISION_PREFIX = Regex("""^(?:[cdjlmnst]|qu|jusqu|lorsqu|puisqu|quoiqu)'(.+)$""")
 
+/**
+ * A French word the filter knows: whole, or after an elision prefix ("l'homme", "qu'il"). The filter
+ * holds no elided or inverted forms, only the dictionary's own stems.
+ */
+private fun frenchKnown(normalized: String, filter: BloomFilter?): Boolean {
+    if (filter == null || normalized.isEmpty()) return false
+    if (filter.has(normalized, "fr")) return true
+    val rest = FRENCH_ELISION_PREFIX.find(normalized)?.groupValues?.get(1)
+    return rest != null && filter.has(rest, "fr")
+}
+
+/** Which of German, English and French know [word]. Words of the user, technical terms and empty words belong to all. */
 internal fun wordMembership(
     word: String,
     dictionaries: SpellingDictionaries,
     acceptedWords: Set<String> = emptySet(),
-): LanguageMembership {
+): WordLanguages {
     val normalized = normalizeWord(word, "de")
-    if (normalized.isEmpty() || normalized in TECHNICAL_WORDS || normalized in acceptedWords) {
-        return LanguageMembership(de = true, en = true)
-    }
+    val all = WordLanguages(de = true, en = true, fr = true)
+    if (normalized.isEmpty() || normalized in TECHNICAL_WORDS || normalized in acceptedWords) return all
+    val french = normalizeWord(word, "fr")
+    // Without the French dictionary only the small school lexicon can vouch for a French word.
+    fun frenchWord(part: String) = if (dictionaries.fr != null) frenchKnown(part, dictionaries.fr) else isFrenchWord(part)
     if ('-' in normalized) {
         val parts = normalized.split('-').filter { it.isNotEmpty() }
         if (parts.size > 1) {
             val membership = parts.map { part ->
-                LanguageMembership(
+                WordLanguages(
                     de = dictionaries.de.has(part, "de") || splitsIntoGermanParts(part) { dictionaries.de.hasNormalized(it) },
                     en = dictionaries.en.has(part, "en"),
+                    // The "-t-" of "a-t-il" is no word of its own.
+                    fr = part == "t" || frenchWord(normalizeWord(part, "fr")),
                 )
             }
-            if (membership.all { it.de || it.en }) return LanguageMembership(de = true, en = true)
-            return LanguageMembership(
+            val common = WordLanguages(
                 de = membership.all { it.de },
                 en = membership.all { it.en },
+                fr = frenchWord(french) || membership.all { it.fr },
             )
+            if (common.de || common.en || common.fr) return common
+            // Mixed school vocabulary such as "Inline-Mathematik" is valid when every hyphen part exists in some language.
+            if (membership.all { it.de || it.en || it.fr }) return all
+            return common
         }
     }
-    return LanguageMembership(
+    return WordLanguages(
         de = dictionaries.de.hasNormalized(normalized) || splitsIntoGermanParts(normalized) { dictionaries.de.hasNormalized(it) },
         en = dictionaries.en.has(normalized, "en"),
+        fr = frenchWord(french),
     )
-}
-
-private data class SpellEvidence(var de: Int = 0, var en: Int = 0, var fr: Int = 0)
-private data class CheckedWord(
-    val word: String,
-    val from: Int,
-    val to: Int,
-    val normalized: String,
-    val membership: LanguageMembership,
-)
-private data class ScoredSegment(
-    val segment: SpellingSegment,
-    val words: List<CheckedWord>,
-    val evidence: SpellEvidence,
-    val language: String?,
-)
-
-private fun evidenceLanguage(evidence: SpellEvidence): String? {
-    if (evidence.de == 0 && evidence.en == 0) return null
-    if (evidence.de >= evidence.en * 1.35) return "de"
-    if (evidence.en >= evidence.de * 1.35) return "en"
-    return null
 }
 
 private fun intersects(from: Int, to: Int, ranges: List<SpellingRange>): Boolean =

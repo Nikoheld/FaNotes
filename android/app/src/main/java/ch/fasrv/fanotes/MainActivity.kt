@@ -1313,6 +1313,7 @@ fun FaNotesScreen(
                     code,
                     ch.fasrv.fanotes.desk.ChromeText.language,
                     ch.fasrv.fanotes.desk.ChromeText.catalog,
+                    if (code == "mixed") ch.fasrv.fanotes.desk.detectNoteLanguages(settledText) else emptyList(),
                 )?.let { "Aa $it" }.orEmpty()
             },
             desk["words"] != "off",
@@ -3332,6 +3333,23 @@ private fun EditorMoreMenu(
     if (sheets.isNotEmpty()) {
         TextButton(onClick = { model.toggleWorksheetText() }) {
             Text(ch.fasrv.fanotes.desk.ChromeText.ui(if (placingSheetText) "Auf Seite platzieren" else "Textfeld"))
+        }
+    }
+    sheets.filter { it.placement != null }.forEach { slice ->
+        // A placed picture: step it around the sheet (paper widths, same clamp as the desktop).
+        val step = 0.05
+        Text(
+            ch.fasrv.fanotes.desk.presentNoteText(slice.label.ifBlank { "Arbeitsblatt" }),
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 6.dp, start = 4.dp),
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            MoreAction("◀") { model.nudgeWorksheetImage(slice.worksheetId, -step, 0.0, 0.0) }
+            MoreAction("▶") { model.nudgeWorksheetImage(slice.worksheetId, step, 0.0, 0.0) }
+            MoreAction("▲") { model.nudgeWorksheetImage(slice.worksheetId, 0.0, -step, 0.0) }
+            MoreAction("▼") { model.nudgeWorksheetImage(slice.worksheetId, 0.0, step, 0.0) }
+            MoreAction("−") { model.nudgeWorksheetImage(slice.worksheetId, 0.0, 0.0, -step) }
+            MoreAction("+") { model.nudgeWorksheetImage(slice.worksheetId, 0.0, 0.0, step) }
         }
     }
     sheets.forEach { slice ->

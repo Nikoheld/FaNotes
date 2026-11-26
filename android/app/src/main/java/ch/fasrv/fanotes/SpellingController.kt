@@ -24,6 +24,8 @@ import ch.fasrv.fanotes.desk.SpellingLexicon
 import ch.fasrv.fanotes.desk.SpellingLine
 import ch.fasrv.fanotes.desk.checkNoteSpelling
 import ch.fasrv.fanotes.desk.loadBundledSpelling
+import ch.fasrv.fanotes.desk.LanguageEvidence
+import ch.fasrv.fanotes.desk.paragraphPassageAt
 import ch.fasrv.fanotes.desk.suggestCorrections
 import java.util.concurrent.Executors
 
@@ -49,6 +51,7 @@ class SpellingController(private val view: EditText) {
     private var autocorrectMark: AutocorrectMark? = null
     private var errors: List<SpellingError> = emptyList()
     private var lines: List<SpellingLine> = emptyList()
+    private var profile: LanguageEvidence? = null
     private var popup: PopupWindow? = null
     private val handler = Handler(Looper.getMainLooper())
     private val wave = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -110,6 +113,7 @@ class SpellingController(private val view: EditText) {
                     if (current != token) return@post
                     errors = result.errors
                     lines = result.lines
+                    profile = result.profile
                     view.invalidate()
                     onLanguage(result.detectedLanguage)
                 }
@@ -175,7 +179,13 @@ class SpellingController(private val view: EditText) {
             true,
             autocorrectMark,
             declined,
-            { offset -> lines.firstOrNull { offset in it.from..it.to }?.language },
+            { offset ->
+                SpellingBundle.readyDictionaries()?.let { paragraphPassageAt(before, offset, profile, it, acceptedWords()) }
+            },
+            onFrenchNeeded = {
+                val personal = acceptedWords()
+                executor.execute { SpellingBundle.lexicon(personal)?.loadFrench() }
+            },
         )
         if (result == null) {
             autocorrectMark = null
@@ -189,6 +199,7 @@ class SpellingController(private val view: EditText) {
     private fun clear() {
         errors = emptyList()
         lines = emptyList()
+        profile = null
         popup?.dismiss()
         view.invalidate()
         onLanguage("unknown")
@@ -196,18 +207,32 @@ class SpellingController(private val view: EditText) {
 
     private fun show(error: SpellingError) {
         popup?.dismiss()
-        val language = lines.firstOrNull { error.from in it.from..it.to }?.language
+        val text = view.text?.toString().orEmpty()
+        val noteProfile = profile
         val window = popupWindow(menuView(error, emptyList(), loading = true))
         popup = window
         place(window, error.from)
         val personal = acceptedWords()
         executor.execute {
             val lexicon = SpellingBundle.lexicon(personal)
-            val suggestions = if (lexicon == null || !lexicon.isMisspelled(error.word)) {
+            val suggestions = if (lexicon == null) {
                 emptyList()
             } else {
-                val languages = if (language == "de" || language == "en") listOf(language) else lexicon.languages
-                suggestCorrections(error.word, languages, lexicon).map { it.word }
+                val dictionaries = SpellingBundle.readyDictionaries()
+                val passage = dictionaries?.let { paragraphPassageAt(text, error.from.coerceIn(0, text.length), noteProfile, it, personal) }
+                val allowed = passage?.allowed ?: lexicon.languages
+                // The menu offers words of the passage's language; when that is unsure, of every language the note uses.
+                val language = passage?.passage?.language
+                val among = if (passage?.passage?.confident == true && language != null) listOf(language) else allowed
+                val elided = if ("fr" in among) FRENCH_ELISION.matchEntire(error.word) else null
+                if (!lexicon.isMisspelled(error.word, allowed)) {
+                    emptyList()
+                } else {
+                    if ("fr" in among) lexicon.loadFrench()
+                    val typed = elided?.groupValues?.get(2) ?: error.word
+                    // "l'homem": the elision stays, the word after it is corrected.
+                    suggestCorrections(typed, among, lexicon).map { elided?.groupValues?.get(1).orEmpty() + it.word }
+                }
             }
             handler.post {
                 if (popup !== window) return@post
@@ -318,6 +343,7 @@ class SpellingController(private val view: EditText) {
     private fun dp(value: Int) = (value * view.resources.displayMetrics.density).toInt()
 
     private companion object {
+        val FRENCH_ELISION = Regex("""^((?:[cdjlmnst]|qu|jusqu|lorsqu|puisqu|quoiqu)['’])(\p{L}+)$""", RegexOption.IGNORE_CASE)
         val SCHEDULE = Any()
         val executor = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "fanotes-spelling").apply { isDaemon = true }
@@ -344,6 +370,11 @@ private object SpellingBundle {
 
     fun warm() {
         lexicon(emptySet())
+    }
+
+    fun readyDictionaries(): SpellingDictionaries? = synchronized(gate) {
+        val dictionaries = full ?: return null
+        if (dictionaries.deWords == null || dictionaries.enWords == null) null else dictionaries
     }
 
     fun readyLexicon(personal: Set<String>): SpellingLexicon? = synchronized(gate) {

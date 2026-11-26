@@ -7,6 +7,9 @@
     "en": [
       "dictionary-en@4.0.0",
       "dictionary-en-gb@3.0.0"
+    ],
+    "fr": [
+      "dictionary-fr@3.0.0"
     ]
   },
   "ocrFrequencySource": "SUBTLEXus via subtlex-word-frequencies@2.0.0",
@@ -37,6 +40,18 @@
         "wordCount": 88134,
         "sha256": "33f55dbcf4516e5bafa45d1381272f6d80e3f335a9c7013d06f37218ef5751e1"
       }
+    }
+  },
+  "french": {
+    "file": "fr.bloom",
+    "bitCount": 5329576,
+    "wordCount": 444131,
+    "sha256": "85e2b6977b0891f05e7c5ed7213475147952bb7116f433a74ca658e0e53ae74d",
+    "candidates": {
+      "file": "fr.words",
+      "size": 5135373,
+      "wordCount": 438239,
+      "sha256": "a2d584c8cb98a7017f3efbbff3323ca8aeebe75c39901e4b52b804d8b4f746de"
     }
   }
 }

@@ -24,7 +24,25 @@ interface SuggestionLexicon {
 private val ALPHABETS = mapOf(
     "de" to "abcdefghijklmnopqrstuvwxyzäöü",
     "en" to "abcdefghijklmnopqrstuvwxyz",
+    "fr" to "abcdefghijklmnopqrstuvwxyzàâçéèêëîïôùûüÿœ",
 )
+
+/** Accent slips in French: a missing or wrong accent costs as little as a missing umlaut. */
+private val FRENCH_ACCENTS = mapOf(
+    'a' to "àâ", 'à' to "aâ", 'â' to "aà",
+    'c' to "ç", 'ç' to "c",
+    'e' to "éèêë", 'é' to "eèêë", 'è' to "eéêë", 'ê' to "eéèë", 'ë' to "eéèê",
+    'i' to "îï", 'î' to "iï", 'ï' to "iî",
+    'o' to "ôœ", 'ô' to "o", 'œ' to "o",
+    'u' to "ùûü", 'ù' to "uûü", 'û' to "uùü", 'ü' to "uùû",
+    'y' to "ÿ", 'ÿ' to "y",
+)
+
+/** The accent variants of a letter that count as one cheap slip: umlauts for German, accents for French. */
+private fun accentVariants(letter: Char, language: String?): List<Char> {
+    if (language == "fr") return FRENCH_ACCENTS[letter]?.toList().orEmpty()
+    return UMLAUT_PAIRS[letter]?.let { listOf(it) }.orEmpty()
+}
 
 private val KEY_ROWS = listOf("qwertzuiopü", "asdfghjklöä", "yxcvbnm")
 private val KEY_ROW_OFFSETS = listOf(0.0, 0.5, 1.5)
@@ -57,6 +75,7 @@ private val UMLAUT_PAIRS = mapOf('a' to 'ä', 'ä' to 'a', 'o' to 'ö', 'ö' to 
 private val COMMON_WORDS = mapOf(
     "de" to ("der die das und ist in den von zu mit sich des auf für nicht ein eine einer eines einem einen als auch es an werden aus er hat dass sie nach wird bei noch wie einem über einen so zum war haben nur oder aber vor zur bis mehr durch man sein wurde sei wenn ich wir ihr euch uns mir mich dir dich kann können muss müssen soll sollen will wollen darf dürfen mag mögen heute morgen gestern dann denn doch schon sehr viel viele wenig mal jetzt hier dort immer nie wieder alle alles etwas nichts keine kein was wer wo wann warum welche welcher welches dieser diese dieses jener seine ihre unser unsere ihrer seiner haus hause schule schüler lehrer aufgabe aufgaben stunde stunden woche wochen tag tage jahr jahre zeit mensch menschen leben arbeit text buch seite frage antwort beispiel wichtig gut schlecht neu alt gross klein lang kurz").split(' ').toSet(),
     "en" to ("the of and to in a is that for it as was with be by on not he i this are or his from at which but have an had they you were their one all we can her has there been if more when will would who so no she about their them than then some into only other could time these two may first any my now such like our over man me even most made after also did many before must through back years where much your way well down should because each just those people how too little state good very make world still own see men work long get here between both life being under never day same another know while last might us great old year off come since against go came right used take three").split(' ').toSet(),
+    "fr" to ("le la les un une des de du et est en que qui dans pour pas sur au avec ce il elle je tu nous vous ils elles ne se son sa ses mais ou où donc car comme plus par être avoir fait faire dit très bien tout tous aussi cette ces mon ma mes ton ta tes leur leurs notre votre nos vos si y a été était sont ont suis es sommes êtes ai as avons avez peu peut sans sous entre chez vers avant après depuis pendant toujours jamais rien déjà encore alors maison école élève professeur livre cahier chien chat homme femme enfant ami ville pays monde jour nuit temps année semaine mois heure eau pain lait grand petit nouveau bon beau vieux jeune français allemand anglais").split(' ').toSet(),
 )
 private const val COMMON_WORD_BONUS = 25
 
@@ -75,7 +94,7 @@ data class SpellingEdit(val word: String, val kind: String)
 private const val MAX_DISTANCE_TWO_PROBES = 60_000
 private val GERMAN_COLLATOR: Collator = Collator.getInstance(Locale.GERMAN)
 
-fun editsAtDistanceOne(word: String, alphabet: String, likelyOnly: Boolean = false): List<SpellingEdit> {
+fun editsAtDistanceOne(word: String, alphabet: String, likelyOnly: Boolean = false, language: String? = null): List<SpellingEdit> {
     val letters = word.toList()
     val edits = ArrayList<SpellingEdit>()
     for (index in letters.indices) {
@@ -89,14 +108,16 @@ fun editsAtDistanceOne(word: String, alphabet: String, likelyOnly: Boolean = fal
             edits += SpellingEdit(swapped, "transpose")
         }
         edits += SpellingEdit(before + removed + removed + after, "double")
-        val umlaut = UMLAUT_PAIRS[removed]
-        if (umlaut != null && umlaut in alphabet) edits += SpellingEdit(before + umlaut + after, "umlaut")
+        val variants = accentVariants(removed, language)
+        for (variant in variants) {
+            if (variant in alphabet) edits += SpellingEdit(before + variant + after, "umlaut")
+        }
         for (near in keyNeighbours[removed].orEmpty()) {
-            if (near in alphabet && UMLAUT_PAIRS[removed] != near) edits += SpellingEdit(before + near + after, "near")
+            if (near in alphabet && near !in variants) edits += SpellingEdit(before + near + after, "near")
         }
         if (likelyOnly) continue
         for (letter in alphabet) {
-            if (letter == removed || UMLAUT_PAIRS[removed] == letter || keyNeighbours[removed]?.contains(letter) == true) continue
+            if (letter == removed || letter in variants || keyNeighbours[removed]?.contains(letter) == true) continue
             edits += SpellingEdit(before + letter + after, "replace")
         }
     }
@@ -115,7 +136,7 @@ fun editsAtDistanceOne(word: String, alphabet: String, likelyOnly: Boolean = fal
 }
 
 fun restoreWordCase(typed: String, replacement: String, language: String): String {
-    val locale = if (language == "de") Locale.forLanguageTag("de-CH") else Locale.forLanguageTag("en-US")
+    val locale = Locale.forLanguageTag(when (language) { "de" -> "de-CH"; "fr" -> "fr-FR"; else -> "en-US" })
     val letters = typed.filter { it.isLetter() }
     if (letters.length > 1 && letters.all { it == it.uppercase(locale).singleOrNull() && it != it.lowercase(locale).singleOrNull() }) {
         return replacement.uppercase(locale)
@@ -155,7 +176,7 @@ fun suggestCorrections(
         val lower = normalizedForm(typed, language)
         if (!lettersOnly.matches(lower)) continue
         val alphabet = ALPHABETS[language] ?: continue
-        val firstEdits = editsAtDistanceOne(lower, alphabet)
+        val firstEdits = editsAtDistanceOne(lower, alphabet, false, language)
         for (edit in firstEdits) consider(edit.word, language, 1, EDIT_COST[edit.kind] ?: 3, lower)
         var split = 2
         while (split <= lower.length - 2) {
@@ -185,7 +206,7 @@ fun suggestCorrections(
             var probes = 0
             val ordered = firstEdits.sortedBy { EDIT_COST[it.kind] ?: 3 }
             outer@ for (first in ordered) {
-                for (second in editsAtDistanceOne(first.word, alphabet, likelyOnly = true)) {
+                for (second in editsAtDistanceOne(first.word, alphabet, likelyOnly = true, language = language)) {
                     if (!seen.add(second.word)) continue
                     probes += 1
                     if (probes > MAX_DISTANCE_TWO_PROBES) break@outer
@@ -215,7 +236,7 @@ fun decideAutocorrect(
     val capitalised = upper.size == 1 && letters.first() == upper.first()
     if (upper.size == 1 && !capitalised) return null
     if (context.isProperName(normalizedForm(typed, "en"))) return null
-    if (capitalised && context.language == "en" && !context.sentenceStart) return null
+    if (capitalised && (context.language == "en" || context.language == "fr") && !context.sentenceStart) return null
     val nearest = suggestions.filter { it.distance == 1 && ' ' !in it.word }
     if (nearest.isEmpty()) return null
     val best = nearest[0]
@@ -225,12 +246,18 @@ fun decideAutocorrect(
     return best
 }
 
-/** Exact lists plus German compounds of listed parts, matching the desktop lexicon. */
+/** Exact lists plus German compounds of listed parts, matching the desktop lexicon. French is read lazily. */
 class SpellingLexicon(
     private val dictionaries: SpellingDictionaries,
     private val personal: Set<String> = emptySet(),
 ) : SuggestionLexicon {
     val languages = listOf("de", "en")
+
+    /** True once the exact French list is in memory; until then French suggestions and autocorrect stay off. */
+    val frenchReady: Boolean get() = dictionaries.frenchWordsLoaded
+
+    /** Reads the exact French list (about 5 MB). Blocks: call it off the UI thread. */
+    fun loadFrench(): Boolean = dictionaries.frenchWords() != null
 
     override fun hasWord(language: String, normalizedWord: String): Boolean {
         if (normalizedWord in personal) return true
@@ -241,18 +268,24 @@ class SpellingLexicon(
 
     override fun candidatePenalty(language: String, normalizedWord: String): Int {
         if (listed(language, normalizedWord) || normalizedWord in personal) return 0
-        val bloom = if (language == "de") dictionaries.de else dictionaries.en
-        return if (bloom.hasNormalized(normalizedWord)) 4 else 15
+        val bloom = when (language) {
+            "de" -> dictionaries.de
+            "fr" -> dictionaries.fr
+            else -> dictionaries.en
+        }
+        return if (bloom?.hasNormalized(normalizedWord) == true) 4 else 15
     }
 
-    fun isMisspelled(word: String): Boolean {
+    /** True when the word would be underlined: unknown to [among] (German and English by default) and to the user. */
+    fun isMisspelled(word: String, among: List<String> = languages): Boolean {
         val membership = wordMembership(word, dictionaries, personal)
-        return !membership.de && !membership.en
+        return among.none { membership[it] }
     }
 
     private fun listed(language: String, normalized: String): Boolean = when (language) {
         "de" -> dictionaries.deWords?.contains(normalized) == true
         "en" -> dictionaries.enWords?.contains(normalized) == true
+        "fr" -> dictionaries.frenchWordsLoaded && dictionaries.frenchWords()?.contains(normalized) == true
         else -> false
     }
 }
