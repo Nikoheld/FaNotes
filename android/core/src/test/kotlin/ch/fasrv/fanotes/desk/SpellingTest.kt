@@ -49,8 +49,10 @@ class SpellingTest {
         val excluded = check("Das ist ein Tset.", dictionaries, ignoredRanges = listOf(SpellingRange(12, 16)))
         assertEquals(emptyList(), excluded.errors)
 
-        val french = check("Das ist ein eleve im Text.", dictionaries)
-        assertFalse(french.errors.any { it.word == "eleve" })
+        // French passages are checked against the French dictionary, so accented words are fine there.
+        val french = check("Le professeur est dans la classe avec l'élève et les cahiers.", dictionaries)
+        assertEquals(emptyList(), french.errors)
+        assertEquals("fr", french.detectedLanguage)
         assertTrue(spellcheckEnabled(emptyMap()))
         assertFalse(spellcheckEnabled(mapOf("spellcheck" to "off")))
     }

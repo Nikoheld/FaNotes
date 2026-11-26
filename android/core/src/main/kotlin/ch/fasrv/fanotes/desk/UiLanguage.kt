@@ -72,8 +72,8 @@ fun presentNoteText(text: String): String = text
  * The status-bar note language. An English note stays "English" even when the
  * UI catalog would translate a matching chrome string.
  */
-fun statusBarLanguage(noteCode: String, uiLanguage: String, catalog: Map<String, String>): String? {
-    val label = statusLanguageLabel(noteCode) ?: return null
+fun statusBarLanguage(noteCode: String, uiLanguage: String, catalog: Map<String, String>, present: List<String> = emptyList()): String? {
+    val label = statusLanguageLabel(noteCode, present) ?: return null
     if (noteCode == "en") return "English"
     if (uiLanguage != "en") return label
     return label

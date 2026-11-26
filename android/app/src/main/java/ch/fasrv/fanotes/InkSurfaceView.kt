@@ -3215,7 +3215,8 @@ class InkSurfaceView @JvmOverloads constructor(
             ch.fasrv.fanotes.desk.WorksheetPageSpec(
                 slice.worksheetId,
                 slice.page,
-                bitmap.height.toDouble() / bitmap.width.toDouble(),
+                slice.storedAspect ?: (bitmap.height.toDouble() / bitmap.width.toDouble()),
+                slice.placement,
             )
         }
         return ch.fasrv.fanotes.desk.layoutWorksheetPages(sessionWidth(), markdownBottomPagePx(scale), pages)
@@ -3418,4 +3419,8 @@ data class BackdropSlice(
     val worksheetId: String = "",
     val label: String = "",
     val page: Int = 1,
+    /** Stored floating placement of an image worksheet, null for a full-width block. */
+    val placement: ch.fasrv.fanotes.desk.SheetImagePlacement? = null,
+    /** Stored aspect (height / width) of a placed image, null when the record has none. */
+    val storedAspect: Double? = null,
 )

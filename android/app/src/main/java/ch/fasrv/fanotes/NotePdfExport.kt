@@ -65,7 +65,7 @@ fun writeNotePdf(
     val worksheetPages = backdrops.mapNotNull { slice ->
         val bitmap = slice.bitmap ?: return@mapNotNull null
         if (slice.worksheetId.isEmpty() || bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return@mapNotNull null
-        WorksheetPageSpec(slice.worksheetId, slice.page, bitmap.height.toDouble() / bitmap.width.toDouble())
+        WorksheetPageSpec(slice.worksheetId, slice.page, slice.storedAspect ?: (bitmap.height.toDouble() / bitmap.width.toDouble()), slice.placement)
     }
     val placements = if (worksheetPages.isEmpty()) {
         emptyList()
