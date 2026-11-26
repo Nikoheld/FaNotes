@@ -10,7 +10,8 @@ import { exportInkDocx } from './inkDocx'
 import { exportInkPdfDetailed, type InkSheet } from './inkPdf'
 import { renderPdfPagesToPng } from './pdfRaster'
 import { rendererFontLoader } from './rendererFonts'
-import { captureBodyText, captureImages, captureTextFields, paperZoom } from './sheetCapture'
+import { captureBodyText, captureImages, captureTextFields, captureWorksheetImages, paperZoom } from './sheetCapture'
+import type { WorksheetExportItem } from './worksheetExport'
 import type { NoteExportOptions } from './types'
 
 export type InkDocumentInput = {
@@ -23,6 +24,8 @@ export type InkDocumentInput = {
   smoothing: number
   paperStyle: PaperStyle
   squareMm: number
+  /** Pictures and PDF worksheets of the note, placed at their box on the sheet. */
+  worksheets?: readonly WorksheetExportItem[]
 }
 
 /** The sheet as plain data: ink, text boxes, typed text and pictures. */
@@ -43,7 +46,7 @@ export const captureInkSheet = async (input: InkDocumentInput): Promise<InkSheet
     paper: { style: input.paperStyle, squareMm: input.squareMm },
     fields,
     body: captureBodyText(input.paper, textRoots, zoom),
-    images: await captureImages(input.paper, imageRoots, zoom),
+    images: [...captureWorksheetImages(input.paper, input.worksheets ?? [], zoom), ...await captureImages(input.paper, imageRoots, zoom)],
   }
 }
 

@@ -20,6 +20,8 @@ import {
 type TextToHandwritingDialogProps = {
   open: boolean
   samples: Sample[]
+  /** False while the trained letters are still being read; the dialog is already open and says so. */
+  samplesReady?: boolean
   pageWidth: number
   pageHeight: number
   suggestedStartY: number
@@ -145,6 +147,7 @@ const formatList = (chars: string[], limit = 14) => chars.slice(0, limit)
 export function TextToHandwritingDialog({
   open,
   samples,
+  samplesReady = true,
   pageWidth,
   pageHeight,
   suggestedStartY,
@@ -269,7 +272,7 @@ export function TextToHandwritingDialog({
   }, [isDesktop, open, fitToPage, options, pageHeight, pageWidth, samples, text])
   useEffect(() => {
     const worker = workerRef.current
-    if (!isDesktop || !open || !worker || lookupPending) return
+    if (!isDesktop || !open || !worker || lookupPending || !samplesReady) return
     const id = ++requestRef.current
     setGenerating(true)
     const timer = window.setTimeout(() => {
@@ -289,7 +292,7 @@ export function TextToHandwritingDialog({
       worker.postMessage({ op: 'synthesize', id, text, options: lightOptions, fit: fitToPage, page: generationInput.page })
     }, 100)
     return () => window.clearTimeout(timer)
-  }, [isDesktop, open, lookupPending, generationInput])
+  }, [isDesktop, open, lookupPending, generationInput, samplesReady])
   const empty = useMemo(() => synthesizeHandwriting('', [], { ...options, model: undefined }, { width: pageWidth, height: pageHeight }), [options, pageWidth, pageHeight])
   const result = isDesktop ? preview ?? empty : legacyResult ?? empty
   const trained = useMemo(() => new Set(samples.map((sample) => sample.label)), [samples])
@@ -301,7 +304,7 @@ export function TextToHandwritingDialog({
   const hasText = text.trim().length > 0
   const skipped = result.missingCharacters
   const busy = hasText && (generating || lookupPending)
-  const ready = !isDesktop || completedInput === generationInput
+  const ready = samplesReady && (!isDesktop || completedInput === generationInput)
   const canInsert = hasText && result.strokes.length > 0 && !result.overflow && !busy && !previewError && ready
   const previewWidth = result.pageWidth || pageWidth
   const previewHeight = result.pageHeight || pageHeight
@@ -483,8 +486,16 @@ export function TextToHandwritingDialog({
           </div>
           {fitToPage && hasText && result.fontSizeUsed < fontSize && <p className="tth-note" data-i18n-ignore>{uiText(`Für den verfügbaren Platz automatisch auf ${result.fontSizeUsed} px angepasst.`, `Automatically reduced to ${result.fontSizeUsed} px to fit the available space.`)}</p>}
 
-          <div className="tth-letters" role="status" data-tth-letters={trainedLetters ? 'trained' : 'none'}>
-            {!trainedLetters ? (
+          <div className="tth-letters" role="status" data-tth-letters={!samplesReady ? 'loading' : trainedLetters ? 'trained' : 'none'}>
+            {!samplesReady ? (
+              <div className="tth-card is-loading" aria-busy="true">
+                <RefreshCw size={16} aria-hidden="true" />
+                <div>
+                  <strong data-i18n-ignore>{uiText('Deine Buchstaben werden geladen …', 'Loading your letters …')}</strong>
+                  <span data-i18n-ignore>{uiText('Du kannst schon tippen, die Vorschau erscheint gleich in deiner Schrift.', 'You can already type; the preview appears in your handwriting in a moment.')}</span>
+                </div>
+              </div>
+            ) : !trainedLetters ? (
               <div className="tth-card is-empty">
                 <CircleAlert size={16} aria-hidden="true" />
                 <div>

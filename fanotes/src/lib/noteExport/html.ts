@@ -10,6 +10,7 @@ import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { markdownSanitizeSchema } from '../markdownSanitizeSchema'
+import { parseSheetAlt } from './worksheetExport'
 import { imageDataUrl, prepareNoteMarkdown, resolveNoteImages } from './prepare'
 import { collectImageSources, parseNoteMarkdown } from './ast'
 import { MARGINS_MM, PAGE_SIZES_MM, type NoteExportInput, type NoteExportOptions } from './types'
@@ -97,8 +98,11 @@ export function renderMarkdownBody(markdown: string, images: Map<string, string>
   const components = {
     img: ({ src, alt }: { src?: string; alt?: string }): ReactNode => {
       const url = src ? images.get(src) : undefined
+      const sheet = parseSheetAlt(alt)
       return url
-        ? createElement('img', { src: url, alt: alt ?? '' })
+        ? createElement('img', sheet
+          ? { src: url, alt: '', style: { width: `${sheet.width * 100}%`, marginLeft: `${sheet.x * 100}%` } }
+          : { src: url, alt: alt ?? '' })
         : createElement('span', { className: 'missing-image' }, alt ? `[${alt}]` : '[Bild]')
     },
     a: ({ href, children }: { href?: string; children?: ReactNode }): ReactNode => {

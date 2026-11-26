@@ -5586,6 +5586,9 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .tth-card span { color: var(--text-soft); overflow-wrap: anywhere; }
 .tth-card .secondary-button { align-self: center; white-space: nowrap; }
 .tth-card.is-ok > svg { color: var(--success); }
+.tth-card.is-loading > svg { color: var(--accent); animation: tth-spin 1s linear infinite; }
+@keyframes tth-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .tth-card.is-loading > svg { animation: none; } }
 .tth-card.is-empty > svg, .tth-card.is-warning > svg { color: var(--warning); }
 .tth-card.is-empty, .tth-card.is-warning { border-color: color-mix(in srgb, var(--warning) 36%, transparent); background: color-mix(in srgb, var(--warning) 8%, transparent); }
 .tth-card.is-error { border-color: color-mix(in srgb, var(--danger) 36%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); }

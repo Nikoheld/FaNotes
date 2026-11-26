@@ -599,8 +599,13 @@ const physicalInkAspect = (strokes: Stroke[]) => {
   return clamp(width / Math.max(1, height), 0.035, 12)
 }
 
+// Two scratch canvases for all samples: they are only used synchronously. A fresh canvas per sample (four per
+// sample, thousands for a big set) left enough garbage for a major GC of 100 ms on the main thread.
+let analysisCanvas: HTMLCanvasElement | null = null
+let glyphCanvas: HTMLCanvasElement | null = null
+
 const featureFromCanvas = (source: HTMLCanvasElement): FeatureVector => {
-  const canvas = document.createElement('canvas')
+  const canvas = analysisCanvas ??= document.createElement('canvas')
   canvas.width = ANALYSIS_SIZE
   canvas.height = ANALYSIS_SIZE
   const context = canvas.getContext('2d', { willReadFrequently: true })!
@@ -659,7 +664,7 @@ const featureFromDataUrl = (dataUrl: string, augment = true): Promise<FeatureVec
     const image = new Image()
     image.onload = () => {
       const makeCanvas = (rotation = 0, shear = 0) => {
-        const canvas = document.createElement('canvas')
+        const canvas = glyphCanvas ??= document.createElement('canvas')
         canvas.width = OUTPUT_SIZE
         canvas.height = OUTPUT_SIZE
         const context = canvas.getContext('2d')!
@@ -802,35 +807,44 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
     ]
   })
 
-  const entries = await Promise.all(
-    selected.map(async (sample) => {
-      const standard = isStandardRecognitionSample(sample)
-      const cacheKey = `${sample.id}:${sample.labelId}:${inkFingerprint(sample)}:${sample.imageData.length}`
-      let features = featureCache.get(cacheKey)
-      if (!features) {
-        features = await featureFromDataUrl(
-          sample.imageData,
-          !standard && (labelTotals.get(sample.labelId) ?? 0) <= 4,
-        )
-        featureCache.set(cacheKey, features)
-        if (featureCache.size > 8_192) featureCache.delete(featureCache.keys().next().value!)
-      }
-      const [feature, ...augmented] = features
-      return {
-        ...feature,
-        sampleId: sample.id,
-        sessionId: sample.sessionId,
-        labelId: sample.labelId,
-        strokeCount: sample.strokeCount,
-        physicalAspect: physicalInkAspect(sample.strokes),
-        geometry: geometryFromStrokes(sample.strokes),
-        variants: (labelTotals.get(sample.labelId) ?? 0) <= 4 ? augmented : [],
-        standard,
-        trust: sampleTrust(sample),
-        createdAt: sampleTimestamp(sample),
-      }
-    }),
-  )
+  const entryOf = async (sample: Sample) => {
+    const standard = isStandardRecognitionSample(sample)
+    const cacheKey = `${sample.id}:${sample.labelId}:${inkFingerprint(sample)}:${sample.imageData.length}`
+    let features = featureCache.get(cacheKey)
+    if (!features) {
+      features = await featureFromDataUrl(
+        sample.imageData,
+        !standard && (labelTotals.get(sample.labelId) ?? 0) <= 4,
+      )
+      featureCache.set(cacheKey, features)
+      if (featureCache.size > 8_192) featureCache.delete(featureCache.keys().next().value!)
+    }
+    const [feature, ...augmented] = features
+    return {
+      ...feature,
+      sampleId: sample.id,
+      sessionId: sample.sessionId,
+      labelId: sample.labelId,
+      strokeCount: sample.strokeCount,
+      physicalAspect: physicalInkAspect(sample.strokes),
+      geometry: geometryFromStrokes(sample.strokes),
+      variants: (labelTotals.get(sample.labelId) ?? 0) <= 4 ? augmented : [],
+      standard,
+      trust: sampleTrust(sample),
+      createdAt: sampleTimestamp(sample),
+    }
+  }
+  // A few samples at a time and a hand-back to the event loop whenever a slice of work has used its share, so a big
+  // set of samples never blocks typing or the pen for more than a few milliseconds.
+  const entries: Awaited<ReturnType<typeof entryOf>>[] = []
+  let sliceStart = performance.now()
+  for (let index = 0; index < selected.length; index += 6) {
+    entries.push(...await Promise.all(selected.slice(index, index + 6).map(entryOf)))
+    if (performance.now() - sliceStart > 10) {
+      await new Promise<void>((resolve) => { setTimeout(resolve, 0) })
+      sliceStart = performance.now()
+    }
+  }
   const published = await publishRecognitionFusion(entries)
   const personalEntries = entries.filter((entry) => !entry.standard)
   const classifierGroups = new Map<string, RecognitionModelEntry[]>()
@@ -863,33 +877,8 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
   return model
 }
 
-const floatBits = (values: Float32Array) => Array.from(new Uint32Array(new Float32Array(values).buffer))
-
 const floatsFromBits = (bits: number[]) => new Float32Array(Uint32Array.from(bits).buffer)
 
-const wireFusionEntry = (entry: RecognitionModelEntry) => ({
-  sampleId: entry.sampleId,
-  sessionId: entry.sessionId,
-  labelId: entry.labelId,
-  raster: floatBits(entry.raster),
-  projectionX: floatBits(entry.projectionX),
-  projectionY: floatBits(entry.projectionY),
-  hog: floatBits(entry.hog),
-  shape: floatBits(entry.shape),
-  holes: entry.holes,
-  strokeCount: entry.strokeCount,
-  physicalAspect: entry.physicalAspect,
-  geometry: {
-    directions: floatBits(entry.geometry.directions),
-    normalizedLength: entry.geometry.normalizedLength,
-    closedness: entry.geometry.closedness,
-    cornerness: entry.geometry.cornerness,
-    trajectory: entry.geometry.trajectory.map((path) => floatBits(path)),
-  },
-  standard: entry.standard,
-  trust: entry.trust,
-  createdAt: entry.createdAt,
-})
 
 const prototypeFromFusion = (entry: {
   sampleId: string
@@ -945,8 +934,8 @@ const prototypeFromFusion = (entry: {
  */
 const publishRecognitionFusion = async (entries: RecognitionModelEntry[]) => {
   // The Rust fusion lives in the recognition wasm, which is fetched on first use, not at startup.
-  const { fuseRecogModel } = await import('../../fanotes/src/lib/recogCore')
-  const fused = await fuseRecogModel(entries.map(wireFusionEntry))
+  const { fuseRecogModelOffThread } = await import('../../fanotes/src/lib/recogFusion')
+  const fused = await fuseRecogModelOffThread(entries)
   const byId = new Map(entries.map((entry) => [entry.sampleId, entry]))
   fused.trusts.forEach((update) => {
     const entry = byId.get(update.sampleId)

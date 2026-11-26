@@ -67,6 +67,7 @@ import { clampPaperSquareMm } from '../lib/paperSquare'
 import { beautifyInk, beautifyPaperStep, blendStrokePoints, isBeautifyCandidate, normalizeBeautifyStrength } from '../lib/inkBeautify'
 import { pdfFromRgbaPages, type CanvasPdfPage } from '../lib/canvasPdf'
 import type { NoteExportOptions } from '../lib/noteExport/types'
+import type { WorksheetExportItem } from '../lib/noteExport/worksheetExport'
 import type { PdfNoteMarksSnapshot } from '../lib/noteExport/pdfNote'
 import { rasterizePaperLayers, scrollPaperTo, waitForPaperPaint } from '../lib/canvasSnapshot'
 import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
@@ -82,6 +83,7 @@ import {
 import type {
   RecognitionResources,
 } from '../lib/handwritingDb'
+import { hasTrainedSamples } from '../lib/trainedSamplesProbe'
 import { decodeInkHistory, encodeInkHistory, type EncodedInkHistory } from '../lib/inkHistory'
 import { expandPackedStroke, frameBudgetOpen, INK_OPEN_ONE_PASS_POINTS, inkPageIsHeavy, packedInkPoints } from '../lib/packedInk'
 import { inkStrokeAllowsShapeSnap, shapeSnapAllowsLiveSample, shapeSnapProfile, snapStrokeToShape } from '../lib/shapeSnap'
@@ -486,6 +488,8 @@ const INK_WINDOW_IDLE_MS = 320
  * ink soft after every zoom.
  */
 const ZOOM_SETTLE_MS = 48
+/** The page has been open this long before the trained letters are read in idle time. */
+const TRAINED_LETTERS_PREWARM_MS = 2500
 /**
  * A pinch or wheel zoom that rests this long (and two frames more) is
  * re-rastered at the zoom its preview shows, before the camera commits (150
@@ -881,7 +885,7 @@ export type DrawingBoardHandle = {
   /** Picture of the open sheet. Null when the page cannot be drawn. */
   exportOpenCanvas: (pdfTitle?: string) => Promise<Uint8Array | null>
   /** Vector PDF or DOCX of the open sheet (strokes as paths, text boxes as real text). Null when it cannot be built. */
-  exportInkDocument: (format: 'pdf' | 'docx', options: NoteExportOptions, documentTitle?: string) => Promise<Uint8Array | null>
+  exportInkDocument: (format: 'pdf' | 'docx', options: NoteExportOptions, documentTitle?: string, worksheets?: readonly WorksheetExportItem[]) => Promise<Uint8Array | null>
   /** Ink, text boxes and page boxes of a PDF note, for drawing them onto the PDF's own pages. */
   exportPdfNoteMarks: () => Promise<PdfNoteMarksSnapshot | null>
   /** Paint the restored sheet once heading folds are back. */
@@ -1771,6 +1775,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
    * committed camera.
    */
   const previewRasterZoomRef = useRef<number | null>(null)
+  /**
+   * Zoom the committed bitmap was made for when it was kept from a resting
+   * pinch at the commit (it is a little off the camera's); null once the
+   * bitmap follows the camera again.
+   */
+  const keptRasterZoomRef = useRef<number | null>(null)
   /** Box of the committed canvas the next paint puts it at, and the sheet rows (layout px) it then shows. */
   const committedPlanRef = useRef<CommittedInkPlan | null>(null)
   /**
@@ -2136,6 +2146,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const eraserAnchorRef = useRef<StrokePoint | null>(null)
   const [recognitionScope, setRecognitionScope] = useState<RecognitionScope>('page')
   const [resources, setResources] = useState<RecognitionResources | null>(null)
+  // The trained letters could not be read: the text-to-handwriting dialog stops waiting for them.
+  const [resourcesFailed, setResourcesFailed] = useState(false)
   const [trainingSampleCount, setTrainingSampleCount] = useState<number | null>(null)
   const [katexModule, setKatexModule] = useState<KatexModule | null>(null)
   const activeMode: RecognitionMode = mode === 'auto' ? recognizedMode : mode
@@ -2796,7 +2808,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const liveLayout = inline ? liveWindowLayoutRef.current : null
     const windowLayoutHeight = Math.max(1, layoutWindow ? Math.min(layoutHeight, layoutWindow.height) : layoutHeight)
     // The zoom the bitmap is made for: the preview's while a pinch rests, else the camera's.
-    const rasterZoom = previewRasterZoomRef.current ?? viewZoomRef.current
+    const rasterZoom = previewRasterZoomRef.current ?? keptRasterZoomRef.current ?? viewZoomRef.current
     const qualityKey = [
       Math.round(layoutWidth),
       Math.round(layoutHeight),
@@ -4795,8 +4807,30 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const settleZoomedInk = useCallback((repaint = false) => {
     // From here on the bitmap is the committed camera's, also for the redraw
     // after a stroke that is still under the pen.
+    const previewZoom = previewRasterZoomRef.current
     previewRasterZoomRef.current = null
     if (activeStrokeRef.current) return
+    // A pinch that rested already painted the sharp page for (nearly) the zoom
+    // the camera now commits. Planning the slice again at the committed
+    // geometry moved it by a few rows and painted all the ink a second time.
+    // The bitmap is kept when it is at most 30 % denser, or 3 % thinner, than
+    // the camera needs and still holds every visible row with its guard.
+    if (!repaint && previewZoom !== null && inline && !viewportRasterRef.current
+      && previewZoom >= viewZoomRef.current * 0.97 && previewZoom <= viewZoomRef.current * 1.3) {
+      const planned = inkWindowLayoutRef.current
+      const paper = resolvePaperElement()
+      const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+      const measured = paper && scroller ? measureInkWindow(paper, scroller, viewRotationRef.current) : null
+      const shown = committedShownRef.current
+      if (planned && paper && measured && shown
+        && !inkWindowNeedsMove(planned, measured.visible, INK_WINDOW_GUARD_VIEWPORTS * measured.viewport.height, paper.offsetHeight)
+        && inkRowsCoverVisible(shown, measured.visible, paper.offsetHeight)) {
+        inkVisibleRef.current = { top: measured.visible.top, bottom: measured.visible.bottom }
+        keptRasterZoomRef.current = previewZoom
+        return
+      }
+    }
+    keptRasterZoomRef.current = null
     planInkWindowNow(true)
     canvasQualityKeyRef.current = ''
     // The redraw repaints when the bitmap size or its rows per sheet px
@@ -4804,7 +4838,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // is still painting for it, is left alone.
     if (repaint) committedCanvasDirtyRef.current = true
     redraw(true)
-  }, [planInkWindowNow, redraw])
+  }, [inline, planInkWindowNow, redraw, resolvePaperElement])
 
   /**
    * One preview frame of a pinch or wheel zoom: the sheet is a compositor
@@ -4827,6 +4861,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const shown = committedShownRef.current
     const outgrown = Boolean(shown && !inkRowsCoverVisible(shown, measured.visible, sheetHeight))
     if (!needsMove && !outgrown) return false
+    // Zooming out, the visible sheet only grows: a slice moved near its edge now would be outgrown again a few frames
+    // later and painted a second time at the commit. While the rows on screen are still held, wait for the settle
+    // (or for the rows to run out) and plan the slice once at the zoom the gesture ends on.
+    if (!outgrown && zoom < viewZoomRef.current - 0.01
+      && paper.closest('.paper-sheet-plane')?.classList.contains('is-zoom-gesture')) return false
     if (!paper.closest('.paper-sheet-plane')?.classList.contains('is-zoom-gesture')) {
       // Not a gesture: fold a burst of camera writes, the settle paints once.
       const now = performance.now()
@@ -4903,7 +4942,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const unsubscribe = paperView.subscribe((view) => {
       const zoomed = view.zoom !== viewZoomRef.current
       // Cached pages of other notes were painted for the old zoom.
-      if (zoomed) inkBitmapCache.clear()
+      if (zoomed) {
+        inkBitmapCache.clear()
+        keptRasterZoomRef.current = null
+      }
       adopt(view)
       if (zoomed) {
         zoomInFlightUntilRef.current = performance.now() + ZOOM_SETTLE_MS
@@ -7659,6 +7701,28 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     fitPageToInk()
   }, [bumpInkRevision, clearRecognitionScope, cloneSectionStroke, closeMathCorrectionSession, closeMathSolverSelection, fitPageToInk, forEachTrackedStroke, growSheetBy, setDirty, updateHistoryState])
 
+  /** Scrolls the sheet so the rows `top`..`bottom` (0-1 of the sheet) are on screen; a block taller than the view shows its start. */
+  const revealInsertedInk = useCallback((top: number, bottom: number) => {
+    if (!inline) return
+    // Two frames: the page grow and the slice move of the insert settle first.
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const paper = resolvePaperElement()
+      const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+      if (!paper || !scroller) return
+      const paperBox = paper.getBoundingClientRect()
+      const view = scroller.getBoundingClientRect()
+      const blockTop = paperBox.top + top * paperBox.height
+      const blockBottom = paperBox.top + bottom * paperBox.height
+      const margin = Math.min(72, view.height * 0.1)
+      if (blockTop >= view.top + margin / 2 && blockBottom <= view.bottom - margin / 2) return
+      const fits = blockBottom - blockTop <= view.height - margin * 2
+      // A block that fits is centred; a longer one starts a margin below the top edge.
+      const wanted = fits ? view.top + (view.height - (blockBottom - blockTop)) / 2 : view.top + margin
+      scroller.scrollTop += blockTop - wanted
+      scroller.dispatchEvent(new Event('scroll'))
+    }))
+  }, [inline, resolvePaperElement])
+
   const insertSynthesizedHandwriting = useCallback((
     generatedStrokes: SynthesizedInkStroke[],
     result: HandwritingSynthesisResult,
@@ -7691,12 +7755,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     updateHistoryState()
     scheduleRedraw()
     setTextToHandwritingOpen(false)
+    // The text goes below the last ink: on a page zoomed in and scrolled elsewhere that is off screen. Bring it into view
+    // (the zoom stays, the text has the size of the sheet at every zoom).
+    let insertedTop = 1
+    let insertedBottom = 0
+    for (const stroke of generatedStrokes) {
+      for (const point of stroke.points) {
+        const y = point.y * result.pageHeight / nextHeight
+        if (y < insertedTop) insertedTop = y
+        if (y > insertedBottom) insertedBottom = y
+      }
+    }
+    if (insertedBottom >= insertedTop) revealInsertedInk(insertedTop, insertedBottom)
     setNotice({
       kind: 'success',
       text: `${result.glyphCount} Zeichen als persönliche Handschrift eingefügt${result.connectionCount ? ` · ${result.connectionCount} natürliche Verbindungen` : ''}.`,
     })
     fitPageToInk()
-  }, [bumpInkRevision, clearRecognitionScope, fitPageToInk, scheduleRedraw, setDirty, setPageExtent, updateHistoryState])
+  }, [bumpInkRevision, clearRecognitionScope, fitPageToInk, revealInsertedInk, scheduleRedraw, setDirty, setPageExtent, updateHistoryState])
 
   const drawingPayload = useCallback((includeImage = false): DrawingSavePayload => {
     // Refs, not state: a grow in an effect and a save in the same commit (the
@@ -8064,7 +8140,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   /** Stroke list as the screen paints it: stamps carry their path data. */
   const exportStrokes = useCallback(() => strokesRef.current.map((stroke) => ({ ...stroke, symbolPaths: placedSymbolPaths(stroke) })), [])
 
-  const exportInkDocument = useCallback((format: 'pdf' | 'docx', options: NoteExportOptions, documentTitle?: string) => runOpenSheet<Uint8Array>(title, async ({ paper, cssWidth, cssHeight }) => {
+  const exportInkDocument = useCallback((format: 'pdf' | 'docx', options: NoteExportOptions, documentTitle?: string, worksheets?: readonly WorksheetExportItem[]) => runOpenSheet<Uint8Array>(title, async ({ paper, cssWidth, cssHeight }) => {
     const { buildInkDocument } = await import('../lib/noteExport/inkDocument')
     return buildInkDocument(format, options, {
       paper,
@@ -8076,6 +8152,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       smoothing: settings.smoothing,
       paperStyle,
       squareMm: clampPaperSquareMm(settings.paperSquareMm),
+      worksheets,
     })
   }, format === 'pdf'), [exportStrokes, paperStyle, runOpenSheet, settings.paperSquareMm, settings.smoothing, title])
 
@@ -9538,7 +9615,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const openTextToHandwriting = () => {
     setTextToHandwritingOpen(true)
-    if (resourcesRef.current) return
+    if (resourcesRef.current) {
+      setResources(resourcesRef.current)
+      return
+    }
     void loadRecognitionResources()
       .then((loaded) => {
         resourcesRef.current = loaded
@@ -9546,10 +9626,38 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       })
       .catch(() => {
         if (mountedRef.current) {
+          setResourcesFailed(true)
           setNotice({ kind: 'error', text: 'Das persönliche Handschriftmodell konnte nicht geladen werden.' })
         }
       })
   }
+
+  // The trained letters are read in idle time once the page is open, so the first "Text → Handschrift" already has
+  // them (reading and checking every sample took seconds, with the dialog open and empty meanwhile).
+  useEffect(() => {
+    if (!inline) return
+    let cancelled = false
+    let idle = 0
+    const run = () => {
+      if (cancelled || resourcesRef.current) return
+      // Nothing trained: nothing to wait for, and the baseline model is not worth the CPU in the background.
+      void hasTrainedSamples().then((trained) => (trained ? loadRecognitionResources() : null)).then((loaded) => {
+        if (!loaded) return
+        if (cancelled) return
+        // Only the cache: setting state would render the whole board for nothing; the open of the dialog adopts it.
+        resourcesRef.current ??= loaded
+      }).catch(() => undefined)
+    }
+    const timer = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') idle = window.requestIdleCallback(run, { timeout: 6000 })
+      else run()
+    }, TRAINED_LETTERS_PREWARM_MS)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+      if (idle && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idle)
+    }
+  }, [inline])
 
   const commitLasso = (action: 'delete' | 'move' | 'copy' | 'recolor') => {
     if (!lassoIndexes.length) return
@@ -11089,6 +11197,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       <TextToHandwritingDialog
         open={textToHandwritingOpen}
         samples={resources?.samples ?? []}
+        samplesReady={resources !== null || resourcesFailed}
         pageWidth={sourceWidth}
         pageHeight={sourceHeight}
         // Measured only while the dialog is open: this runs on every render of

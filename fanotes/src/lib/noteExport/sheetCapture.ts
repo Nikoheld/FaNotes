@@ -5,6 +5,7 @@
  */
 import type { NoteTextField } from '../noteTextField'
 import type { SheetField, SheetImage, SheetText } from './inkPdf'
+import type { WorksheetExportItem } from './worksheetExport'
 
 /** Camera zoom of the sheet: painted height over layout height. */
 export const paperZoom = (paper: HTMLElement) => {
@@ -188,6 +189,32 @@ export const captureImages = async (paper: HTMLElement, roots: readonly Element[
     if (rect.width < 4 || rect.height < 4) continue
     const data = await bytesOf(image)
     if (data) out.push({ x: rect.left, y: rect.top, width: rect.width, height: rect.height, bytes: data.bytes, mime: data.mime })
+  }
+  return out
+}
+
+/**
+ * Pictures and PDF worksheet pages of the note at the box the sheet shows them in. The pictures come from
+ * `items` (marks painted in); only the geometry is read from the layers, so a floating picture keeps its place
+ * at any zoom and a PDF page its slot in the stack.
+ */
+export const captureWorksheetImages = (paper: HTMLElement, items: readonly WorksheetExportItem[], zoom = paperZoom(paper)): SheetImage[] => {
+  const paperRect = paper.getBoundingClientRect()
+  const out: SheetImage[] = []
+  for (const item of items) {
+    const layer = paper.querySelector<HTMLElement>(`[data-worksheet-id="${CSS.escape(item.id)}"]`)
+    if (!layer) continue
+    const boxes = item.kind === 'image'
+      ? [layer.querySelector<HTMLElement>('.sheet-image')].filter((node): node is HTMLElement => Boolean(node))
+      : item.kind === 'html'
+        ? [layer.querySelector<HTMLElement>('.worksheet-onenote-page')].filter((node): node is HTMLElement => Boolean(node))
+        : [...layer.querySelectorAll<HTMLElement>('.worksheet-page')]
+    boxes.forEach((box, index) => {
+      const page = item.pages[index]
+      const rect = relative(box.getBoundingClientRect(), paperRect, zoom)
+      if (!page || rect.width < 4 || rect.height < 4) return
+      out.push({ x: rect.left, y: rect.top, width: rect.width, height: rect.height, bytes: page.bytes, mime: page.mime })
+    })
   }
   return out
 }

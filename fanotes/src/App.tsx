@@ -5099,6 +5099,29 @@ export default function App({ startupBootstrap }: AppProps) {
     return true
   }, [])
 
+  // Removed pictures wait for their undo toast before the files go (id -> timer).
+  const pendingWorksheetDeletes = useRef(new Map<string, number>())
+  /** Deletes the files of removed pictures right now (quit): the undo time is over for a closing app. Capped, so quitting never hangs. */
+  const commitPendingWorksheetDeletes = useCallback(async () => {
+    const pending = [...pendingWorksheetDeletes.current]
+    if (!pending.length) return
+    pendingWorksheetDeletes.current.clear()
+    for (const [, timer] of pending) window.clearTimeout(timer)
+    await Promise.race([
+      Promise.all(pending.map(([id]) => window.fanotes.deleteWorksheet(id)
+        .then(() => window.fanotes.worksheetJournal?.({ op: 'remove', id, notePath: '' }))
+        .catch(() => undefined))),
+      new Promise<void>((resolve) => { window.setTimeout(resolve, 3000) }),
+    ])
+  }, [])
+
+  // Pictures removed just before the last run ended without a clean quit: their files are deleted now, unless the note
+  // they were removed from still references them.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void window.fanotes?.worksheetJournal?.({ op: 'sweep' }).catch(() => undefined) }, 1500)
+    return () => window.clearTimeout(timer)
+  }, [])
+
   useEffect(() => window.fanotes?.onBeforeClose(() => {
     if (closeInProgressRef.current) return
     // The sheet is still laid out. pagehide can run after the scroller has
@@ -5116,6 +5139,8 @@ export default function App({ startupBootstrap }: AppProps) {
           : [false, false]
         if (notesSaved && settingsSaved && documentLayersSaved) {
           drawingDirtyRef.current = false
+          // The notes are saved without the removed pictures: finish their deletion instead of leaving the files behind.
+          await commitPendingWorksheetDeletes()
           window.fanotes.confirmClose()
           return
         }
@@ -5128,7 +5153,7 @@ export default function App({ startupBootstrap }: AppProps) {
         window.fanotes.cancelClose()
         toast(error instanceof Error ? error.message : 'Beenden wurde wegen eines Speicherfehlers abgebrochen.', 'error')
       })
-  }), [flushDocumentLayers, flushPendingWrites, flushSettings, toast])
+  }), [commitPendingWorksheetDeletes, flushDocumentLayers, flushPendingWrites, flushSettings, toast])
 
   // In the browser there is no Main process to hold the window open: hand the
   // coalesced keystrokes to the app, start the writes, and let the browser ask
@@ -5799,9 +5824,12 @@ export default function App({ startupBootstrap }: AppProps) {
           return size
         }).catch(() => null)
         : null
+      // Text boxes and marks of the old picture (older builds wrote them on the picture) stay with the new one; they are
+      // fractions of the picture, so they keep their relative spot.
+      const carried = { textBoxes: previous.textBoxes, highlights: previous.highlights ?? [] }
       const saved = await window.fanotes.saveWorksheet(previous.placement && natural
-        ? { ...created, placement: previous.placement, aspect: natural }
-        : created)
+        ? { ...created, ...carried, placement: previous.placement, aspect: natural }
+        : { ...created, ...carried })
       markFreshSheetImage(saved.id)
       const tab = tabsRef.current.find((item) => item.path === notePath)
       const currentContent = noteContentFlushed(notePath)
@@ -5956,6 +5984,23 @@ export default function App({ startupBootstrap }: AppProps) {
     return { note, title: tab?.title || 'FaNotes' }
   }, [])
 
+  /**
+   * The note's pictures and PDF worksheets as export pictures (marks painted in). Layers save first, so a text box
+   * typed a moment ago is included.
+   */
+  const collectWorksheetExports = useCallback(async () => {
+    const ids = worksheetSession.documents.map((item) => item.id)
+    if (!ids.length || !window.fanotes.readWorksheet || !window.fanotes.readAssetBytes) return []
+    await Promise.all(ids.map((id) => worksheetLayerRefs.current.get(id)?.flush().catch(() => undefined)))
+    const { collectWorksheetExportItems } = await import('./lib/noteExport/worksheetExport')
+    return collectWorksheetExportItems(ids, {
+      readWorksheet: window.fanotes.readWorksheet,
+      readAssetBytes: window.fanotes.readAssetBytes,
+      readWorksheetHtml: window.fanotes.readWorksheetHtml,
+      renderNoteHtmlToPdf: (window.fanotes as { renderNoteHtmlToPdf?: Parameters<typeof collectWorksheetExportItems>[1]['renderNoteHtmlToPdf'] }).renderNoteHtmlToPdf,
+    })
+  }, [worksheetSession.documents])
+
   // ---- Non-text notes (handwriting, PDF notes) -------------------------------------------------------------
   // A handwriting note becomes a vector PDF (or a DOCX of page pictures plus its text boxes); a PDF note is its
   // original PDF with the user's ink, highlights and text boxes drawn onto the pages (or the untouched original).
@@ -5970,8 +6015,10 @@ export default function App({ startupBootstrap }: AppProps) {
     // A handwriting note is the sheet on screen, with every section open.
     const folds = kind === 'ink' ? editorRef.current?.captureFolds() ?? [] : null
     try {
+      const worksheets = kind === 'ink' ? await collectWorksheetExports() : []
       const bytes = await exportNonTextNoteBytes(kind, format, options, {
         board: drawingBoardRef.current,
+        worksheets,
         pdfPath,
         note: current.note,
         title: current.title,
@@ -5990,7 +6037,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (folds) editorRef.current?.restoreFolds(folds)
       if (kind === 'ink') drawingBoardRef.current?.finishCanvasExport()
     }
-  }, [])
+  }, [collectWorksheetExports])
 
   const [exportDialog, setExportDialog] = useState<{ kind: NoteExportKind; title: string } | null>(null)
   const openExportDialog = useCallback(() => {
@@ -6015,11 +6062,25 @@ export default function App({ startupBootstrap }: AppProps) {
       if (kind === 'text') {
         // Loaded on first use: Markdown, KaTeX, OOXML and JSZip stay off the startup path.
         const { exportTextNote, createVaultImageResolver } = await import('./lib/noteExport')
+        const sheetItems = options.format === 'pdf' || options.format === 'docx' ? await collectWorksheetExports() : []
+        let markdown = current.note
+        let resolveImage = createVaultImageResolver(notePath, (relativePath) => window.fanotes.readAssetBytes(relativePath))
+        if (sheetItems.length) {
+          const { placeWorksheetPagesInMarkdown, withWorksheetImages } = await import('./lib/noteExport/worksheetExport')
+          const { paperZoom } = await import('./lib/noteExport/sheetCapture')
+          const paper = document.querySelector<HTMLElement>('.unified-paper')
+          const zoom = paper ? paperZoom(paper) : 1
+          markdown = placeWorksheetPagesInMarkdown(markdown, sheetItems, (item) => {
+            const frame = document.querySelector<HTMLElement>(`[data-worksheet-id="${CSS.escape(item.id)}"] .sheet-image`)
+            return frame ? editorRef.current?.lineAtClientY(frame.getBoundingClientRect().top, zoom) ?? null : null
+          })
+          resolveImage = withWorksheetImages(sheetItems, resolveImage)
+        }
         file = await exportTextNote({
-          markdown: current.note,
+          markdown,
           title: current.title,
           signal,
-          resolveImage: createVaultImageResolver(notePath, (relativePath) => window.fanotes.readAssetBytes(relativePath)),
+          resolveImage,
         }, options)
         message = options.format === 'pdf' ? 'PDF gespeichert.' : options.format === 'docx' ? 'Word-Dokument gespeichert.' : options.format === 'latex' ? 'LaTeX-Code exportiert.' : 'Markdown exportiert.'
       } else {
@@ -6036,7 +6097,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (signal.aborted) throw new DOMException('Der Export wurde abgebrochen.', 'AbortError')
       throw error
     }
-  }, [exportDialog?.kind, exportNonTextNote, readExportNote, toast])
+  }, [collectWorksheetExports, exportDialog?.kind, exportNonTextNote, readExportNote, toast])
 
   const insertSimpleLatex = useCallback((button: SimpleLatexButton, operands: SimpleLatexOperands) => {
     if (!activePathRef.current || drawingOpen || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen) {
@@ -6063,7 +6124,6 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [activeEntryMutating, calendarOpen, drawingOpen, glyphenWerkOpen, homeworkOpen, overviewOpen, toast])
 
-  const pendingWorksheetDeletes = useRef(new Map<string, number>())
 
   /**
    * A picture goes at once and comes back with one click: only the note's marker and the layer disappear, the files
@@ -6081,9 +6141,13 @@ export default function App({ startupBootstrap }: AppProps) {
     worksheetDirtyIdsRef.current.delete(id)
     worksheetLayerRefs.current.delete(id)
     setWorksheetSession((current) => ({ key: current.key + 1, documents: current.documents.filter((item) => item.id !== id) }))
+    // Journaled until the files are gone: a kill or crash inside the undo window is cleaned up at the next start.
+    void window.fanotes.worksheetJournal?.({ op: 'add', id, notePath }).catch(() => undefined)
     pendingWorksheetDeletes.current.set(id, window.setTimeout(() => {
       pendingWorksheetDeletes.current.delete(id)
-      void window.fanotes.deleteWorksheet(id).catch(() => undefined)
+      void window.fanotes.deleteWorksheet(id)
+        .then(() => window.fanotes.worksheetJournal?.({ op: 'remove', id, notePath: '' }))
+        .catch(() => undefined)
     }, UNDO_TOAST_MS + 1500))
     toast('Bild entfernt', 'info', {
       label: 'Rückgängig',
@@ -6092,6 +6156,7 @@ export default function App({ startupBootstrap }: AppProps) {
         if (timer === undefined) return
         window.clearTimeout(timer)
         pendingWorksheetDeletes.current.delete(id)
+        void window.fanotes.worksheetJournal?.({ op: 'remove', id, notePath: '' }).catch(() => undefined)
         void (async () => {
           try {
             const restored = await window.fanotes.readWorksheet(id)

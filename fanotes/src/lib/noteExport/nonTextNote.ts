@@ -10,6 +10,7 @@ import { exportAnnotatedPdfNoteDetailed, type PdfNoteMarksSnapshot } from './pdf
 import { openPdfTextSource, renderPdfPagesToPng } from './pdfRaster'
 import { rendererFontLoader } from './rendererFonts'
 import type { NoteExportOptions } from './types'
+import type { WorksheetExportItem } from './worksheetExport'
 
 export type NonTextNoteContext = {
   board: Pick<DrawingBoardHandle, 'exportInkDocument' | 'exportPdfNoteMarks'> | null
@@ -18,6 +19,8 @@ export type NonTextNoteContext = {
   /** The note's markdown (carries the PDF text marks). */
   note: string
   title: string
+  /** Handwriting notes: the note's pictures and PDF worksheets, drawn at their box on the sheet. */
+  worksheets?: readonly WorksheetExportItem[]
 }
 
 const copyBytes = (bytes: Uint8Array) => {
@@ -73,7 +76,7 @@ export const exportNonTextNoteBytes = async (
   context: NonTextNoteContext,
 ): Promise<Uint8Array> => {
   if (kind === 'pdf') return exportPdfNoteBytes(format, options, context)
-  const bytes = await context.board?.exportInkDocument(format, options, context.title)
+  const bytes = await context.board?.exportInkDocument(format, options, context.title, context.worksheets)
   if (!bytes) throw new Error(format === 'docx' ? 'DOCX-Export fehlgeschlagen.' : 'PDF-Export fehlgeschlagen.')
   return bytes
 }

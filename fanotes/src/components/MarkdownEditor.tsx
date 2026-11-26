@@ -219,6 +219,8 @@ export type MarkdownEditorHandle = {
   focus: () => void
   flushChanges: () => void
   revealLine: (line: number) => boolean
+  /** 0-based line that sits at a client y (px, already divided by the sheet zoom by the caller); null without a view. */
+  lineAtClientY: (clientY: number, zoom?: number) => number | null
   foldHeading: (line: number, collapsed: boolean) => boolean
   /** Ranges CodeMirror currently hides. A canvas PDF restores these after the sections open. */
   captureFolds: () => Array<{ from: number; to: number }>
@@ -1810,6 +1812,12 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       if (!range) return false
       view.dispatch({ effects: collapsed ? foldEffect.of(range) : unfoldEffect.of(range) })
       return true
+    },
+    lineAtClientY: (clientY, zoom = 1) => {
+      const view = viewRef.current
+      if (!view) return null
+      const block = view.lineBlockAtHeight((clientY - view.documentTop) / (zoom > 0 ? zoom : 1))
+      return view.state.doc.lineAt(block.from).number - 1
     },
     captureFolds: () => {
       const view = viewRef.current

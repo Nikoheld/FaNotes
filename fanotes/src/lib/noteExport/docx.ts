@@ -5,6 +5,7 @@ import JSZip from 'jszip'
 import type { Root, RootContent, PhrasingContent, TableRow, List, ListItem } from 'mdast'
 import { collectImageSources, parseNoteMarkdown } from './ast'
 import { latexToOmml, latexToOmmlPara, M_NS } from './omml'
+import { parseSheetAlt } from './worksheetExport'
 import { prepareNoteMarkdown, resolveNoteImages } from './prepare'
 import { MARGINS_MM, PAGE_SIZES_MM, type NoteExportInput, type NoteExportOptions, type NoteImageData } from './types'
 
@@ -106,7 +107,8 @@ const addRelationship = (ctx: Ctx, type: string, target: string, external = fals
 
 const imageXml = (ctx: Ctx, source: string, alt: string, maxWidthTwips: number) => {
   const image = ctx.images.get(source)
-  if (!image) return textRuns(alt ? `[${alt}]` : '[Bild]', { i: true })
+  const sheet = parseSheetAlt(alt)
+  if (!image) return sheet ? '' : textRuns(alt ? `[${alt}]` : '[Bild]', { i: true })
   let media = ctx.media.get(source)
   if (!media) {
     const extension = image.mime === 'image/jpeg' ? 'jpeg' : image.mime.split('/')[1]
@@ -117,7 +119,10 @@ const imageXml = (ctx: Ctx, source: string, alt: string, maxWidthTwips: number) 
   // Pixels at 96 dpi -> EMU, scaled down to the page width (and a page height).
   let widthTwips = Math.max(1, image.width) * 15
   let heightTwips = Math.max(1, image.height) * 15
-  const scale = Math.min(1, maxWidthTwips / widthTwips, ctx.maxHeightTwips / heightTwips)
+  // A picture of the sheet keeps its share of the text width (a pasted picture may be wider than its pixels).
+  const scale = sheet
+    ? Math.min(sheet.width * maxWidthTwips / widthTwips, ctx.maxHeightTwips / heightTwips)
+    : Math.min(1, maxWidthTwips / widthTwips, ctx.maxHeightTwips / heightTwips)
   widthTwips *= scale
   heightTwips *= scale
   const cx = Math.max(1, Math.round(widthTwips * EMU_PER_TWIP))
@@ -195,7 +200,13 @@ function block(node: RootContent, ctx: Ctx, state: BlockState, base: ParaOptions
         return [paragraphXml(latexToOmmlPara(only.value), { ...quoteOptions(state, base), jc: 'center' })]
       }
       const alone = only?.type === 'image'
-      return [paragraphXml(inlines(node.children, ctx, {}, state.maxWidth), { ...quoteOptions(state, base), ...(alone ? { jc: 'center' as const } : {}) })]
+      // A picture placed on the sheet sits at its share of the text width instead of the centre.
+      const sheet = only?.type === 'image' ? parseSheetAlt(only.alt ?? '') : null
+      const sheetIndent = sheet ? Math.round(sheet.x * state.maxWidth) : 0
+      const quoted = quoteOptions(state, base)
+      return [paragraphXml(inlines(node.children, ctx, {}, state.maxWidth), sheet
+        ? { ...quoted, indentLeft: (quoted.indentLeft ?? 0) + sheetIndent }
+        : { ...quoted, ...(alone ? { jc: 'center' as const } : {}) })]
     }
     case 'math': return [paragraphXml(latexToOmmlPara(node.value), { ...quoteOptions(state, base), jc: 'center' })]
     case 'code': {
