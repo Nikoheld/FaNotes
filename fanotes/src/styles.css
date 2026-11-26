@@ -5655,3 +5655,58 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .work-requests-dialog .wr-timeline time { white-space: nowrap; }
 .work-requests-dialog .wr-row .wr-input { width: auto; }
 @media (pointer: coarse) { .dialog-frame input[type="text"], .dialog-frame textarea, .dialog-frame select { min-height: 42px; } }
+
+/* Handwriting math tools (solver and corrector popovers of the drawing board): the shared popover surface. */
+.math-popover { position: absolute; z-index: 9; display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100% - 24px)); max-height: min(520px, 86%); overflow: auto; padding: 12px; border: 1px solid var(--border-strong); border-radius: 10px; color: var(--text); background: var(--panel-strong); box-shadow: var(--shadow); font-size: 12.5px; line-height: 1.35; pointer-events: auto; }
+.math-correction-popover { width: min(400px, calc(100% - 24px)); }
+.math-popover__head { display: flex; align-items: center; gap: 9px; }
+.math-popover__head > div { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.math-popover__head strong { font-size: 13px; }
+.math-popover__head small, .math-popover__foot { color: var(--text-muted); font-size: 11.5px; line-height: 1.4; }
+.math-popover__icon { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border: 1px solid rgba(var(--accent-rgb), .2); border-radius: 8px; color: var(--accent-readable, var(--accent)); background: rgba(var(--accent-rgb), .1); }
+.math-popover__close { width: 26px; height: 26px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--text-muted); background: transparent; cursor: pointer; }
+.math-popover__close:hover { color: var(--text); background: var(--panel-hover); }
+.math-popover__state { display: flex; flex-direction: column; min-height: 76px; align-items: center; justify-content: center; gap: 8px; color: var(--text-muted); text-align: center; }
+.math-popover__state.is-error { color: var(--danger); }
+.math-popover__meter { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.math-popover__meter i { height: 4px; flex: 1; overflow: hidden; border-radius: 4px; background: var(--border-strong); }
+.math-popover__meter b { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.math-popover__meter strong { color: var(--text); }
+.math-popover__note { display: flex; align-items: flex-start; gap: 6px; margin: 0; padding: 6px 8px; border-radius: 6px; font-size: 12px; }
+.math-popover__note svg { flex: none; margin-top: 1px; }
+.math-popover__note.is-warning { color: var(--warning, var(--text)); background: color-mix(in srgb, var(--warning, var(--accent)) 12%, transparent); }
+.math-popover__note.is-error { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.math-popover__field { display: flex; min-width: 0; flex-direction: column; gap: 4px; color: var(--text-muted); font-size: 11.5px; }
+.math-popover__field input, .math-popover__field select { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text); background: var(--panel); font: 12.5px/1.2 var(--font-ui, inherit); }
+.math-popover__field input { font-family: var(--mono-font, ui-monospace, monospace); }
+.math-popover__preview { display: grid; min-height: 52px; place-items: center; overflow: auto; padding: 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--panel); }
+.math-popover__preview .katex-display { margin: .15em 0; }
+.math-popover__options { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
+.math-popover__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.math-popover__actions.is-two { grid-template-columns: 1fr; }
+.math-popover__actions button { min-width: 0; padding: 4px 8px; text-align: center; }
+.math-popover__actions:not(.is-two) button:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.math-popover__result { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; }
+.math-popover__result svg { flex: none; margin-top: 1px; }
+.math-popover__result span, .math-popover__result strong, .math-popover__result small { display: block; }
+.math-popover__result small { margin-top: 2px; color: var(--text-muted); font-size: 11.5px; line-height: 1.4; }
+.math-popover__result.is-correct { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, var(--border-strong)); background: color-mix(in srgb, var(--success) 9%, transparent); }
+.math-popover__result.is-incorrect, .math-popover__result.is-unreadable { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border-strong)); background: color-mix(in srgb, var(--danger) 9%, transparent); }
+.math-popover__result.is-uncertain { color: var(--warning, var(--text)); border-color: color-mix(in srgb, var(--warning, var(--accent)) 40%, var(--border-strong)); background: color-mix(in srgb, var(--warning, var(--accent)) 9%, transparent); }
+.math-popover__steps { display: flex; flex-direction: column; gap: 5px; }
+.math-popover__step { display: grid; grid-template-columns: 22px minmax(0, 1fr) 46px; align-items: center; gap: 6px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; }
+.math-popover__step.is-incorrect, .math-popover__step.is-unreadable { border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); background: color-mix(in srgb, var(--danger) 7%, transparent); }
+.math-popover__step.is-correct { border-color: color-mix(in srgb, var(--success) 35%, var(--border)); }
+.math-popover__step-number { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 6px; color: var(--text-muted); background: var(--panel-hover); font-size: 11.5px; font-weight: 700; }
+.math-popover__step-input { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.math-popover__step-input input { width: 100%; min-width: 0; padding: 4px 6px; border: 1px solid transparent; border-radius: 6px; color: var(--text); background: transparent; font: 600 12.5px/1.2 var(--mono-font, ui-monospace, monospace); }
+.math-popover__step-input input:hover, .math-popover__step-input input:focus { border-color: var(--border-strong); background: var(--panel); }
+.math-popover__step-input small { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.math-popover__step-status { overflow: hidden; color: var(--text-muted); font-size: 11.5px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.math-popover__step.is-incorrect .math-popover__step-status, .math-popover__step.is-unreadable .math-popover__step-status { color: var(--danger); }
+.math-popover__step.is-correct .math-popover__step-status { color: var(--success); }
+.math-popover__step.is-uncertain .math-popover__step-status { color: var(--warning, var(--text)); }
+.math-popover__suggestion { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 8px; background: rgba(var(--accent-rgb), .1); }
+.math-popover__suggestion span { display: flex; min-width: 0; flex-direction: column; }
+.math-popover__suggestion code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) { .math-popover { left: 8px !important; } }

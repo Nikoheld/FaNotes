@@ -103,6 +103,7 @@ import {
 } from '../lib/paperView'
 import { PaperZoomPercent, usePaperViewController } from './PaperView'
 import { getHandwritingTrainingSampleCount } from '../lib/handwritingDbSummary'
+import { MathCorrectionPopover, MathSolverPopover } from './MathPopovers'
 import { changedMathTokenRect } from '../lib/mathCorrectionLayout'
 import { groupMathInkLines, selectMathInkAtPoint } from '../lib/mathInkSelection'
 import type { MathCheckResult } from '../lib/mathChecker'
@@ -10920,103 +10921,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                   height: `${mathCorrectionErrorRect.height * 100}%`,
                 }}
               ><span>{mathCorrectionSession.result?.status === 'incorrect' ? 'Fehler hier' : 'Bitte prüfen'}</span></div>}
-              <div
-                className="lw-math-correction-popover"
-                role="dialog"
-                aria-label="Mathematischen Rechenweg korrigieren"
+              <MathCorrectionPopover
                 style={{
                   left: `${clamp(mathCorrectionSession.rect.x + mathCorrectionSession.rect.width + 0.012, 0.015, 0.57) * 100}%`,
                   top: `${clamp(mathCorrectionSession.rect.y, 0.02, 0.48) * 100}%`,
                 }}
-              >
-                <div className="lw-math-correction-head">
-                  <span><ListChecks size={15} /></span>
-                  <div><strong>Mathematik-Korrigierer</strong><small>erster sicherer Fehler · vollständig lokal</small></div>
-                  <button
-                    type="button"
-                    className="lw-draw-icon"
-                    aria-label="Mathematik-Korrigierer schließen"
-                    onClick={() => { setMathCorrectorEnabled(false); closeMathCorrectionSession() }}
-                  ><X size={15} /></button>
-                </div>
-
-                {(mathCorrectionSession.status === 'recognizing' || mathCorrectionSession.status === 'checking') && <div className="lw-math-correction-loading">
-                  <LoaderCircle className="lw-spin" size={20} />
-                  {mathCorrectionSession.status === 'recognizing'
-                    ? 'Rechenzeilen, Brüche und Indizes werden räumlich gelesen …'
-                    : 'Alle Übergänge werden symbolisch bewiesen …'}
-                </div>}
-
-                {mathCorrectionSession.status === 'error' && <div className="lw-math-correction-error">
-                  <CircleAlert size={18} />
-                  <span>{mathCorrectionSession.error}</span>
-                  {knownTrainingSampleCount === 0 && <button type="button" className="lw-draw-subtle" onClick={requestTraining}><Sparkles size={14} /> GlyphenWerk öffnen</button>}
-                </div>}
-
-                {mathCorrectionSession.lines.length > 0 && <>
-                  {mathCorrectionSession.result ? <div className={`lw-math-correction-result is-${mathCorrectionSession.result.status}`}>
-                    {mathCorrectionSession.result.status === 'correct' ? <Check size={16} /> : <CircleAlert size={16} />}
-                    <span><strong>{mathCorrectionSession.result.status === 'correct'
-                      ? 'Rechenweg konsistent'
-                      : mathCorrectionSession.result.status === 'incorrect'
-                        ? 'Fehler gefunden'
-                        : mathCorrectionSession.result.status === 'unreadable'
-                          ? 'Zeile nicht lesbar'
-                          : 'Manuelle Prüfung nötig'}</strong><small>{mathCorrectionSession.result.message}</small></span>
-                  </div> : mathCorrectionSession.status === 'editing' ? <div className="lw-math-correction-result is-editing">
-                    <ListChecks size={16} /><span><strong>Erkennung geändert</strong><small>Prüfe die Eingaben und starte die Analyse erneut.</small></span>
-                  </div> : null}
-
-                  <div className="lw-math-step-list">
-                    {mathCorrectionSession.lines.map((line, index) => {
-                      const resultLine = mathCorrectionSession.result?.lines[index]
-                      const status = resultLine?.status ?? 'unchecked'
-                      return <label key={line.id} className={`lw-math-step-row is-${status}`}>
-                        <span className="lw-math-step-number">{index + 1}</span>
-                        <span className="lw-math-step-input">
-                          <input
-                            value={line.input}
-                            spellCheck={false}
-                            aria-label={`Erkannter mathematischer Schritt ${index + 1}`}
-                            disabled={mathCorrectionSession.status === 'checking'}
-                            onChange={(event) => updateMathCorrectionLine(line.id, event.target.value)}
-                          />
-                          <small>{resultLine?.message || `${line.confidence}% Erkennungssicherheit`}</small>
-                        </span>
-                        <strong className="lw-math-step-status">{status === 'start'
-                          ? 'Start'
-                          : status === 'correct'
-                            ? 'Richtig'
-                            : status === 'incorrect'
-                              ? 'Falsch'
-                              : status === 'uncertain'
-                                ? 'Prüfen'
-                                : status === 'unreadable'
-                                  ? 'Unklar'
-                                  : '–'}</strong>
-                      </label>
-                    })}
-                  </div>
-
-                  {mathCorrectionSession.result?.suggestion && <div className="lw-math-correction-suggestion">
-                    <Sparkles size={14} /><span><strong>Mögliche korrekte Zielzeile</strong><code>{mathCorrectionSession.result.suggestion}</code></span>
-                  </div>}
-
-                  <div className="lw-math-correction-actions">
-                    <button
-                      type="button"
-                      className="lw-primary-action"
-                      disabled={mathCorrectionSession.status === 'checking' || mathCorrectionSession.lines.some((line) => !line.input.trim())}
-                      onClick={recheckMathCorrection}
-                    >
-                      {mathCorrectionSession.status === 'checking' ? <LoaderCircle className="lw-spin" size={14} /> : <ListChecks size={14} />}
-                      Eingaben bestätigen &amp; neu prüfen
-                    </button>
-                    <button type="button" className="lw-draw-subtle" onClick={beginMathCorrectionSelection}><ScanSearch size={14} /> Anderen Bereich wählen</button>
-                  </div>
-                  <small className="lw-math-correction-footnote">Rot wird nur markiert, wenn die Algebra einen echten Widerspruch beweist. Unsichere Handschrift und nicht beweisbare Mehrvariablen-Schritte bleiben gelb.</small>
-                </>}
-              </div>
+                status={mathCorrectionSession.status}
+                error={mathCorrectionSession.error}
+                lines={mathCorrectionSession.lines}
+                result={mathCorrectionSession.result}
+                onLine={updateMathCorrectionLine}
+                onRecheck={recheckMathCorrection}
+                onReselect={beginMathCorrectionSelection}
+                showTraining={knownTrainingSampleCount === 0}
+                onTraining={requestTraining}
+                onClose={() => { setMathCorrectorEnabled(false); closeMathCorrectionSession(); requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true })) }}
+              />
             </>}
             {mathSolverSelection && <>
               <div
@@ -11028,96 +10948,44 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                   height: `${mathSolverSelection.rect.height * 100}%`,
                 }}
               ><span><Calculator size={11} /> Mathe-Löser</span></div>
-              <div
-                className="lw-math-solver-popover"
-                role="dialog"
-                aria-label="Mathematischen Ausdruck bearbeiten"
+              <MathSolverPopover
                 style={{
                   left: `${clamp(mathSolverSelection.rect.x, 0.015, 0.61) * 100}%`,
                   top: `${(mathSolverSelection.rect.y + mathSolverSelection.rect.height > 0.68
                     ? Math.max(0.025, mathSolverSelection.rect.y - 0.39)
                     : mathSolverSelection.rect.y + mathSolverSelection.rect.height + 0.012) * 100}%`,
                 }}
-              >
-                <div className="lw-math-solver-head">
-                  <span><Calculator size={15} /></span>
-                  <div><strong>Lokaler Mathematik-Löser</strong><small>offline · Ergebnis als deine Handschrift</small></div>
-                  <button type="button" className="lw-draw-icon" aria-label="Mathematik-Löser schließen" onClick={closeMathSolverSelection}><X size={15} /></button>
-                </div>
-
-                {mathSolverSelection.status === 'recognizing' ? <div className="lw-math-solver-loading">
-                  <LoaderCircle className="lw-spin" size={20} /> Ausdruck und räumliches Layout werden gelesen …
-                </div> : mathSolverSelection.status === 'error' ? <div className="lw-math-solver-error">
-                  <CircleAlert size={18} />
-                  <span>{mathSolverSelection.error}</span>
-                  {knownTrainingSampleCount === 0 && <button type="button" className="lw-draw-subtle" onClick={requestTraining}><Sparkles size={14} /> GlyphenWerk öffnen</button>}
-                </div> : <>
-                  <div className="lw-math-solver-confidence">
-                    <span>Erkennung</span>
-                    <i><b style={{ width: `${mathSolverSelection.confidence}%` }} /></i>
-                    <strong>{mathSolverSelection.confidence}%</strong>
-                  </div>
-                  {mathSolverSelection.confidence < 62 && <p className="lw-math-solver-warning">Bitte prüfe den erkannten Ausdruck vor dem Rechnen.</p>}
-                  <label className="lw-math-solver-input">
-                    <span>Erkannter Ausdruck</span>
-                    <input
-                      value={mathSolverInput}
-                      spellCheck={false}
-                      inputMode="text"
-                      onChange={(event) => setMathSolverInput(event.target.value)}
-                    />
-                  </label>
-                  <div className="lw-math-solver-preview">
-                    {mathSolverPreview
-                      ? <div dangerouslySetInnerHTML={{ __html: mathSolverPreview }} />
-                      : <code>{mathSolverInput || 'Vorschau nicht verfügbar'}</code>}
-                  </div>
-                  {mathSolverInspection.error && <div className="lw-math-solver-validation"><CircleAlert size={13} /> {mathSolverInspection.error}</div>}
-                  <div className="lw-math-solver-options">
-                    {mathSolverInspection.inspection?.variables.length ? <label>
-                      <span>Variable</span>
-                      <select
-                        value={mathSolverInspection.inspection.variables.includes(mathSolverVariable)
-                          ? mathSolverVariable
-                          : mathSolverInspection.inspection.variables[0]}
-                        onChange={(event) => setMathSolverVariable(event.target.value)}
-                      >
-                        {mathSolverInspection.inspection.variables.map((variable) => <option key={variable} value={variable}>{variable}</option>)}
-                      </select>
-                    </label> : <span />}
-                    <label>
-                      <span>Fortsetzung</span>
-                      <select value={mathSolverPlacement} onChange={(event) => setMathSolverPlacement(event.target.value as MathSolverPlacement)}>
-                        <option value="auto">Automatisch gelernt</option>
-                        <option value="same-line">Rechts daneben</option>
-                        <option value="next-line">Nächste Zeile</option>
-                      </select>
-                    </label>
-                  </div>
-                  <div className="lw-math-solver-actions">
-                    {(['step', 'simplify', 'solve', 'expand', 'factor', 'calculate'] as MathSolverAction[]).map((action) => {
-                      const inspection = mathSolverInspection.inspection
-                      const disabled = !inspection
-                        || isMathSolving
-                        || (action === 'solve' && !inspection.variables.length)
-                        || (action === 'calculate' && (inspection.variables.length > 0 || inspection.isEquation))
-                      return <button
-                        type="button"
-                        key={action}
-                        disabled={disabled}
-                        className={action === 'step' || action === 'simplify' || action === 'solve' ? 'is-primary' : ''}
-                        onClick={() => void runMathSolverAction(action)}
-                      >
-                        {isMathSolving ? <LoaderCircle className="lw-spin" size={13} /> : <Calculator size={13} />}
-                        {action === 'solve' && inspection?.variables.length
-                          ? `Nach ${mathSolverVariable || inspection.variables[0]} lösen`
-                          : mathSolverActionLabel[action]}
-                      </button>
-                    })}
-                  </div>
-                  <small className="lw-math-solver-footnote">Brüche, Wurzeln und Potenzen werden symbolisch verarbeitet. Die Anordnung orientiert sich an deinen bisherigen Lösungen.</small>
-                </>}
-              </div>
+                status={mathSolverSelection.status}
+                error={mathSolverSelection.error}
+                confidence={mathSolverSelection.confidence}
+                input={mathSolverInput}
+                onInput={setMathSolverInput}
+                preview={mathSolverPreview}
+                validation={mathSolverInspection.error}
+                variables={mathSolverInspection.inspection?.variables ?? []}
+                variable={mathSolverVariable}
+                onVariable={setMathSolverVariable}
+                placement={mathSolverPlacement}
+                onPlacement={(value) => setMathSolverPlacement(value as MathSolverPlacement)}
+                solving={isMathSolving}
+                actions={(['step', 'simplify', 'solve', 'expand', 'factor', 'calculate'] as MathSolverAction[]).map((action) => {
+                  const inspection = mathSolverInspection.inspection
+                  return {
+                    action,
+                    disabled: !inspection
+                      || isMathSolving
+                      || (action === 'solve' && !inspection.variables.length)
+                      || (action === 'calculate' && (inspection.variables.length > 0 || inspection.isEquation)),
+                  }
+                })}
+                actionLabel={(action) => action === 'solve' && mathSolverInspection.inspection?.variables.length
+                  ? `Nach ${mathSolverVariable || mathSolverInspection.inspection.variables[0]} lösen`
+                  : mathSolverActionLabel[action]}
+                onRun={(action) => void runMathSolverAction(action)}
+                showTraining={knownTrainingSampleCount === 0}
+                onTraining={requestTraining}
+                onClose={() => { closeMathSolverSelection(); requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true })) }}
+              />
             </>}
           </div>
           <div className="lw-canvas-meta">
@@ -11574,12 +11442,7 @@ const drawingBoardStyles = `
 .lw-drafting-panel-foot{color:var(--text-muted,#8b8b99);font-size: 12px;line-height:1.4}
 .lw-drawing-board.is-inline:not(.is-input-active) .lw-drafting-panel{display:none!important}.lw-tablet-canvas-committed{z-index:1;pointer-events:none}.lw-tablet-canvas-live{z-index:2;pointer-events:auto}.lw-canvas-surface.tool-pen,.lw-canvas-surface.tool-art,.lw-canvas-surface.tool-laser,.lw-tablet-canvas.tool-pen,.lw-tablet-canvas.tool-art,.lw-tablet-canvas.tool-laser{cursor:none}.lw-pen-pointer{position:fixed;left:0;top:0;z-index:2147483000;width:24px;height:24px;pointer-events:none;opacity:0;overflow:visible;will-change:transform}.lw-pen-pointer svg{display:block;width:24px;height:24px;overflow:visible}.lw-tablet-canvas.tool-select,.lw-canvas-surface.tool-select{cursor:crosshair}.lw-tablet-canvas.tool-eraser,.lw-canvas-surface.tool-eraser{cursor:cell}.lw-tablet-canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--draw-accent)}.lw-selection-hint{position:absolute;z-index:3;top:18px;left:50%;display:flex;align-items:center;gap:7px;padding:8px 11px;transform:translateX(-50%);border:1px solid rgba(var(--accent-rgb),.32);border-radius:9px;color:#28233d;background:rgba(255,255,255,.92);box-shadow:0 8px 24px rgba(0,0,0,.18);font:700 12px/1.2 var(--ui-font,system-ui);pointer-events:none;white-space:nowrap}.lw-selection-rect{position:absolute;z-index:3;min-width:2px;min-height:2px;border:2px dashed var(--accent,#2a6f97);background:rgba(var(--accent-rgb),.1);box-shadow:0 0 0 9999px rgba(0,0,0,.08);pointer-events:none}.lw-selection-rect.is-editable{pointer-events:auto;cursor:grab;touch-action:none;border-radius:10px;box-shadow:0 0 0 1px rgba(255,255,255,.55),0 6px 22px rgba(var(--accent-rgb),.22);transition:box-shadow .15s}.lw-selection-rect.is-editable:active{cursor:grabbing;box-shadow:0 0 0 1px rgba(255,255,255,.6),0 12px 32px rgba(var(--accent-rgb),.32)}.lw-page-overlay{position:absolute;inset:0;z-index:4;pointer-events:none}.lw-drawing-board.is-inline .lw-page-overlay{inset:var(--paper-scroll-room,0px);width:calc(100% - 2 * var(--paper-scroll-room,0px));height:calc(100% - 2 * var(--paper-scroll-room,0px))}.lw-selection-scale{position:absolute;right:-11px;bottom:-11px;width:22px;height:22px;border-radius:50%;border:3px solid #fff;background:var(--accent,#2a6f97);box-shadow:0 2px 8px rgba(0,0,0,.3);cursor:nwse-resize;touch-action:none}.lw-selection-rect.is-selected{border-style:solid;border-width:1.5px;background:rgba(var(--accent-rgb),.06)}.lw-selection-rect span{position:absolute;bottom:calc(100% + 5px);left:-2px;padding:3px 7px;border-radius:6px;color:#fff;background:var(--accent,#2a6f97);font:700 12px/1.3 var(--ui-font,system-ui);white-space:nowrap}.lw-canvas-meta{display:flex;align-items:center;justify-content:space-between;padding:7px 3px 0;color:var(--text-muted,#9292a0);font-size: 12px}.lw-canvas-meta span{display:flex;align-items:center;gap:6px}.lw-pressure-dot{width:6px;height:6px;border-radius:50%;background:#4bd7a4;box-shadow:0 0 7px #4bd7a4}
 .lw-selection-hint.is-correction{border-color:rgba(30,142,115,.42);color:#153b32;background:rgba(242,255,250,.95)}.lw-math-correction-scope{position:absolute;z-index:3;border:1px dashed rgba(60,95,178,.5);border-radius:7px;background:rgba(67,102,190,.025);pointer-events:none}.lw-math-step-mark{position:absolute;z-index:4;min-width:5px;min-height:5px;border:2px solid rgba(91,106,151,.5);border-radius:6px;background:rgba(91,106,151,.04);pointer-events:none;transition:border-color .22s,background .22s,box-shadow .22s}.lw-math-step-mark>span{position:absolute;top:-8px;left:-8px;display:grid;width:17px;height:17px;place-items:center;border-radius:50%;color:#fff;background:#667091;font:800 12px/1 var(--ui-font,system-ui);box-shadow:0 3px 8px rgba(0,0,0,.2)}.lw-math-step-mark.is-start{border-color:var(--accent,#2a6f97);background:rgba(var(--accent-rgb),.06)}.lw-math-step-mark.is-start>span{background:var(--accent,#2a6f97)}.lw-math-step-mark.is-correct{border-color:#249671;background:rgba(36,150,113,.07);box-shadow:0 0 0 3px rgba(36,150,113,.09)}.lw-math-step-mark.is-correct>span{background:#208963}.lw-math-step-mark.is-incorrect,.lw-math-step-mark.is-unreadable{border-color:#dc3f59;background:rgba(220,63,89,.09);box-shadow:0 0 0 3px rgba(220,63,89,.12)}.lw-math-step-mark.is-incorrect>span,.lw-math-step-mark.is-unreadable>span{background:#c9354e}.lw-math-step-mark.is-uncertain{border-color:#d18b25;background:rgba(209,139,37,.09)}.lw-math-step-mark.is-uncertain>span{background:#b87518}.lw-math-error-spot{position:absolute;z-index:7;min-width:12px;min-height:12px;border:3px solid #df304d;border-radius:7px;background:rgba(238,45,75,.14);box-shadow:0 0 0 4px rgba(238,45,75,.12),0 0 25px rgba(222,39,69,.3);pointer-events:none;animation:lw-error-pulse 1.35s ease-in-out infinite}.lw-math-error-spot.is-uncertain,.lw-math-error-spot.is-unreadable{border-color:#d38b20;background:rgba(230,151,33,.12);box-shadow:0 0 0 4px rgba(230,151,33,.12)}.lw-math-error-spot>span{position:absolute;bottom:calc(100% + 5px);left:-3px;padding:3px 7px;border-radius:6px;color:#fff;background:#d9304b;font:800 12px/1.2 var(--ui-font,system-ui);white-space:nowrap}.lw-math-error-spot.is-uncertain>span,.lw-math-error-spot.is-unreadable>span{background:#b87518}@keyframes lw-error-pulse{50%{box-shadow:0 0 0 7px rgba(238,45,75,.05),0 0 30px rgba(222,39,69,.34)}}
-.lw-math-correction-popover{position:absolute;z-index:9;display:flex;width:min(390px,calc(100% - 22px));max-height:min(560px,86%);flex-direction:column;gap:9px;overflow:auto;padding:11px;border:1px solid color-mix(in srgb,var(--success,#5dcc78) 42%,var(--draw-border));border-radius:12px;color:var(--text,#f4f2fa);background:linear-gradient(150deg,color-mix(in srgb,var(--background-secondary,#1e1f23) 95%,var(--success,#5dcc78) 5%),var(--background,#191919));box-shadow:0 24px 70px rgba(15,25,23,.42),0 0 0 1px rgba(255,255,255,.03);backdrop-filter:blur(18px);pointer-events:auto}.lw-math-correction-head{display:flex;align-items:center;gap:8px}.lw-math-correction-head>span{display:grid;width:28px;height:28px;flex:0 0 auto;place-items:center;border-radius:9px;color:var(--on-danger,#191919);background:var(--success,#5dcc78)}.lw-math-correction-head>div{display:flex;min-width:0;flex:1;flex-direction:column}.lw-math-correction-head strong{font-size: 12px}.lw-math-correction-head small,.lw-math-correction-footnote{color:var(--text-muted,#aaa);font-size: 12px;line-height:1.45}.lw-math-correction-loading,.lw-math-correction-error{display:flex;min-height:82px;align-items:center;justify-content:center;gap:8px;color:var(--text-muted,#aaa);text-align:center;font-size: 12px}.lw-math-correction-error{flex-direction:column;color:var(--danger,#e16778)}.lw-math-correction-result{display:flex;align-items:flex-start;gap:8px;padding:8px 9px;border:1px solid var(--draw-border);border-radius:9px}.lw-math-correction-result>svg{flex:0 0 auto;margin-top:1px}.lw-math-correction-result>span,.lw-math-correction-result strong,.lw-math-correction-result small{display:block}.lw-math-correction-result strong{font-size: 12px}.lw-math-correction-result small{margin-top:2px;color:var(--text-muted,#aaa);font-size: 12px;line-height:1.45}.lw-math-correction-result.is-correct{color:var(--success,#4bc69d);border-color:color-mix(in srgb,var(--success,#4bc69d) 32%,var(--draw-border));background:color-mix(in srgb,var(--success,#4bc69d) 8%,transparent)}.lw-math-correction-result.is-incorrect,.lw-math-correction-result.is-unreadable{color:var(--danger,#e16778);border-color:color-mix(in srgb,var(--danger,#e16778) 34%,var(--draw-border));background:color-mix(in srgb,var(--danger,#e16778) 8%,transparent)}.lw-math-correction-result.is-uncertain,.lw-math-correction-result.is-editing{color:var(--warning,#d49a48);border-color:color-mix(in srgb,var(--warning,#d49a48) 34%,var(--draw-border));background:color-mix(in srgb,var(--warning,#d49a48) 8%,transparent)}
-.lw-math-step-list{display:flex;flex-direction:column;gap:5px}.lw-math-step-row{display:grid;grid-template-columns:22px minmax(0,1fr) 39px;align-items:center;gap:6px;padding:6px;border:1px solid var(--draw-border);border-radius:9px;background:color-mix(in srgb,var(--background,#191919) 46%,transparent)}.lw-math-step-row.is-incorrect,.lw-math-step-row.is-unreadable{border-color:color-mix(in srgb,var(--danger,#e16778) 48%,var(--draw-border));background:color-mix(in srgb,var(--danger,#e16778) 7%,transparent)}.lw-math-step-row.is-correct{border-color:color-mix(in srgb,var(--success,#4bc69d) 28%,var(--draw-border))}.lw-math-step-number{display:grid;width:20px;height:20px;place-items:center;border-radius:6px;color:var(--text-muted,#aaa);background:color-mix(in srgb,var(--background-modifier-border,#555) 42%,transparent);font:800 12px/1 var(--ui-font,system-ui)}.lw-math-step-input{display:flex;min-width:0;flex-direction:column;gap:2px}.lw-math-step-input input{width:100%;min-width:0;padding:5px 7px;border:1px solid transparent;border-radius:6px;outline:none;color:inherit;background:transparent;font:600 12px/1.2 var(--mono-font,monospace)}.lw-math-step-input input:hover,.lw-math-step-input input:focus{border-color:var(--draw-border);background:color-mix(in srgb,var(--background,#191919) 82%,transparent)}.lw-math-step-input small{overflow:hidden;color:var(--text-muted,#aaa);font-size: 12px;line-height:1.25;text-overflow:ellipsis;white-space:nowrap}.lw-math-step-status{overflow:hidden;color:var(--text-muted,#aaa);font-size: 12px;text-align:right;text-overflow:ellipsis;white-space:nowrap}.lw-math-step-row.is-incorrect .lw-math-step-status,.lw-math-step-row.is-unreadable .lw-math-step-status{color:var(--danger,#e16778)}.lw-math-step-row.is-correct .lw-math-step-status{color:var(--success,#4bc69d)}.lw-math-step-row.is-uncertain .lw-math-step-status{color:var(--warning,#d49a48)}.lw-math-correction-suggestion{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:8px;color:var(--text-normal,#ddd);background:color-mix(in srgb,var(--accent,#2a6f97) 11%,transparent);font-size: 12px}.lw-math-correction-suggestion code{overflow:hidden;color:#b9acf9;text-overflow:ellipsis;white-space:nowrap}.lw-math-correction-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.lw-math-correction-actions button{display:flex;min-height:30px;align-items:center;justify-content:center;gap:5px;border:1px solid var(--draw-border);border-radius:8px;color:inherit;background:color-mix(in srgb,var(--background-secondary,#18171f) 78%,transparent);font:700 12px/1 var(--ui-font,system-ui);cursor:pointer}.lw-math-correction-actions button:first-child{border-color:color-mix(in srgb,#35b68e 40%,var(--draw-border));background:color-mix(in srgb,#35b68e 11%,transparent)}.lw-math-correction-actions button:hover{filter:brightness(1.12)}.lw-math-correction-actions button:disabled{opacity:.55;cursor:wait}.lw-math-correction-footnote{margin:0}
 .lw-math-selection{position:absolute;z-index:4;min-width:5px;min-height:5px;border:2px solid #7259e8;border-radius:5px;background:rgba(114,89,232,.07);box-shadow:0 0 0 3px rgba(114,89,232,.13),0 0 24px rgba(90,67,194,.16);pointer-events:none}.lw-math-selection>span{position:absolute;bottom:calc(100% + 5px);left:-2px;display:flex;align-items:center;gap:4px;padding:3px 7px;border-radius:6px;color:#fff;background:#654dd4;font:700 12px/1.3 var(--ui-font,system-ui);white-space:nowrap}
-.lw-math-solver-popover{position:absolute;z-index:8;display:flex;width:min(350px,calc(100% - 24px));max-height:min(490px,78%);flex-direction:column;gap:9px;overflow:auto;padding:11px;border:1px solid color-mix(in srgb,var(--draw-accent) 40%,var(--draw-border));border-radius:12px;color:var(--text,#f4f2fa);background:linear-gradient(150deg,color-mix(in srgb,var(--background-secondary,#18171f) 95%,var(--draw-accent) 5%),var(--background,#191919));box-shadow:0 24px 70px rgba(15,12,28,.42),0 0 0 1px rgba(255,255,255,.03);backdrop-filter:blur(18px);pointer-events:auto}.lw-math-solver-head{display:flex;align-items:center;gap:8px}.lw-math-solver-head>span{display:grid;width:28px;height:28px;flex:0 0 auto;place-items:center;border-radius:9px;color:var(--on-accent,#11131a);background:var(--draw-accent)}.lw-math-solver-head>div{display:flex;min-width:0;flex:1;flex-direction:column}.lw-math-solver-head strong{font-size: 12px}.lw-math-solver-head small,.lw-math-solver-footnote{color:var(--text-muted,#aaa);font-size: 12px;line-height:1.4}.lw-math-solver-loading,.lw-math-solver-error{display:flex;min-height:82px;align-items:center;justify-content:center;gap:8px;color:var(--text-muted,#aaa);text-align:center;font-size: 12px}.lw-math-solver-error{flex-direction:column;color:var(--danger,#e16778)}
-.lw-math-solver-confidence{display:flex;align-items:center;gap:7px;color:var(--text-muted,#aaa);font-size: 12px}.lw-math-solver-confidence>i{height:4px;flex:1;overflow:hidden;border-radius:8px;background:color-mix(in srgb,var(--text,#fff) 9%,transparent)}.lw-math-solver-confidence b{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#f1ad53,#4fcda2)}.lw-math-solver-confidence strong{font-size: 12px;color:var(--text,#fff)}.lw-math-solver-warning{margin:0;padding:6px 8px;border-radius:7px;color:var(--warning,#d79a49);background:color-mix(in srgb,var(--warning,#d79a49) 10%,transparent);font-size: 12px}.lw-math-solver-input{display:flex;flex-direction:column;gap:4px;color:var(--text-muted,#aaa);font-size: 12px}.lw-math-solver-input input{height:31px;padding:0 9px;border:1px solid var(--draw-border);border-radius:8px;outline:none;color:var(--text,#fff);background:color-mix(in srgb,var(--background,#191919) 70%,transparent);font:600 12px/1.2 var(--editor-font,ui-monospace,monospace)}.lw-math-solver-input input:focus{border-color:color-mix(in srgb,var(--draw-accent) 65%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--draw-accent) 13%,transparent)}.lw-math-solver-preview{display:grid;min-height:54px;place-items:center;overflow:auto;padding:8px;border:1px solid rgba(56,62,84,.13);border-radius:9px;color:#20212a;background:#fbfcff}.lw-math-solver-preview .katex-display{margin:.15em 0}.lw-math-solver-validation{display:flex;align-items:flex-start;gap:5px;color:var(--danger,#e16778);font-size: 12px;line-height:1.4}.lw-math-solver-validation svg{flex:0 0 auto;margin-top:1px}
-.lw-math-solver-options{display:grid;grid-template-columns:1fr 1.45fr;gap:7px}.lw-math-solver-options>label{display:flex;min-width:0;flex-direction:column;gap:3px;color:var(--text-muted,#aaa);font-size: 12px}.lw-math-solver-options select{width:100%;height:28px;padding:0 7px;border:1px solid var(--draw-border);border-radius:7px;outline:none;color:var(--text,#fff);background:var(--background-secondary,#1a1921);font-size: 12px}.lw-math-solver-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.lw-math-solver-actions button{display:flex;min-height:30px;align-items:center;justify-content:center;gap:5px;padding:5px 7px;border:1px solid var(--draw-border);border-radius:8px;color:var(--text,#fff);background:color-mix(in srgb,var(--text,#fff) 6%,transparent);cursor:pointer;font-size: 12px}.lw-math-solver-actions button:hover:not(:disabled){border-color:color-mix(in srgb,var(--draw-accent) 45%,var(--draw-border));background:color-mix(in srgb,var(--draw-accent) 13%,transparent)}.lw-math-solver-actions button.is-primary{color:var(--on-accent,#11131a);border-color:transparent;background:var(--draw-accent)}.lw-math-solver-actions button:last-child{grid-column:1/-1}.lw-math-solver-footnote{display:block}
 .lw-conversion-panel{display:flex;min-width:0;min-height:0;flex-direction:column;gap:12px;overflow:auto;padding:14px;border:1px solid color-mix(in srgb,var(--draw-accent) 22%,var(--draw-border));border-radius:12px;background:linear-gradient(155deg,color-mix(in srgb,var(--background-secondary,#19191f) 94%,var(--draw-accent) 6%),var(--background-secondary,#17171d));box-shadow:0 20px 55px rgba(0,0,0,.18)}.lw-conversion-head{gap:9px}.lw-conversion-head>div:nth-child(2){display:flex;min-width:0;flex:1;flex-direction:column}.lw-spark{width:30px;height:30px;flex:0 0 auto;border-radius:9px}.lw-mode-switch{display:grid;grid-template-columns:1.25fr .8fr 1fr;padding:3px;border-radius:10px;background:color-mix(in srgb,var(--background,#191919) 65%,transparent)}.lw-mode-switch button{height:31px;padding:0 6px;font-size: 12px}.lw-auto-detection{display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px dashed color-mix(in srgb,var(--draw-accent) 32%,var(--draw-border));border-radius:10px;color:var(--text-muted,#999);background:color-mix(in srgb,var(--draw-accent) 6%,transparent)}.lw-auto-detection.has-result{border-style:solid;color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 11%,transparent)}.lw-auto-detection>svg{flex:0 0 auto;color:var(--draw-accent)}.lw-auto-detection span,.lw-auto-detection strong,.lw-auto-detection small{display:block}.lw-auto-detection strong{font-size: 12px}.lw-auto-detection small{margin-top:2px;color:var(--text-muted,#999);font-size: 12px;line-height:1.35}.lw-confidence-row{gap:8px;font-size: 12px;color:var(--text-muted,#999)}.lw-confidence-row>div{height:5px;flex:1;overflow:hidden;border-radius:9px;background:color-mix(in srgb,var(--text,#fff) 8%,transparent)}.lw-confidence-row i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#ffb453,#60d7a9);transition:width .3s ease}.lw-confidence-row strong{width:34px;text-align:right;color:var(--text,#fff);font-variant-numeric:tabular-nums}
 .lw-token-strip{display:flex;gap:7px;padding:2px 1px 8px;overflow-x:auto}.lw-token{position:relative;display:grid;min-width:47px;place-items:center;padding:7px 5px 5px;border:1px solid var(--draw-border);border-radius:10px;background:color-mix(in srgb,var(--background,#191919) 62%,transparent)}.lw-token.is-context{border-color:color-mix(in srgb,var(--draw-accent) 58%,var(--draw-border));background:color-mix(in srgb,var(--draw-accent) 10%,var(--background,#191919))}.lw-token-value{font:600 19px/1.2 var(--editor-font,serif)}.lw-token-score{font-size: 12px;color:var(--success,#3a8f6d)}.lw-token-score.is-low{color:var(--warning,#9b6414)}.lw-token-context{margin-top:2px;color:var(--accent-readable,var(--draw-accent));font-size: 12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase}.lw-token-alternatives{position:absolute;z-index:3;top:calc(100% + 4px);left:50%;display:none;gap:3px;padding:4px;transform:translateX(-50%);border:1px solid var(--draw-border);border-radius:8px;background:var(--background-secondary,#1a1a21);box-shadow:0 8px 20px rgba(0,0,0,.28)}.lw-token:hover .lw-token-alternatives,.lw-token:focus-within .lw-token-alternatives{display:flex}.lw-token-alternatives button{width:27px;height:27px;border:0;border-radius:6px;background:transparent;cursor:pointer}.lw-token-alternatives button:hover,.lw-token-alternatives button.is-active{background:color-mix(in srgb,var(--draw-accent) 24%,transparent)}
 .lw-correction-field{display:flex;flex-direction:column;gap:6px;color:var(--text-muted,#aaa);font-size: 12px}.lw-correction-field textarea{width:100%;resize:vertical;min-height:53px;padding:9px 10px;border:1px solid var(--draw-border);border-radius:10px;outline:none;color:var(--text,#fff);background:color-mix(in srgb,var(--background,#191919) 72%,transparent);font:500 13px/1.45 var(--editor-font,ui-monospace,monospace)}.lw-correction-field textarea:focus{border-color:color-mix(in srgb,var(--draw-accent) 65%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--draw-accent) 12%,transparent)}.lw-beautiful-preview{position:relative;display:grid;min-height:100px;place-items:center;overflow:auto;padding:27px 16px 14px;border:1px solid rgba(74,82,110,.12);border-radius:13px;color:#20222c;background:radial-gradient(circle at 20% 10%,rgba(118,84,214,.08),transparent 38%),linear-gradient(145deg,#fff,#f5f6fb);box-shadow:inset 0 1px rgba(255,255,255,.9),0 8px 25px rgba(0,0,0,.12)}.lw-preview-label{position:absolute;top:8px;left:10px;padding:2px 6px;border-radius:5px;color:#737788;background:rgba(100,105,130,.08);font:700 12px/1.4 var(--ui-font,system-ui);letter-spacing:.08em;text-transform:uppercase}.lw-beautiful-preview p{width:100%;margin:0;white-space:pre-wrap;font:500 16px/1.65 var(--editor-font,Georgia,serif)}.lw-math-render{max-width:100%;font-size:18px}.lw-math-render .katex-display{margin:.3em 0}.lw-preview-empty{color:#767988;font-style:italic}.lw-primary-action,.lw-convert-action{display:flex;align-items:center;justify-content:center;gap:8px;min-height:38px;padding:0 14px;border-radius:10px;color:var(--on-accent,#11131a);background:var(--draw-accent);box-shadow:0 8px 22px color-mix(in srgb,var(--draw-accent) 24%,transparent)}.lw-primary-action:hover:not(:disabled),.lw-convert-action:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.07)}
@@ -11606,7 +11469,7 @@ const drawingBoardStyles = `
 .lw-drawing-board.is-inline .lw-conversion-panel,.lw-conversion-panel.is-viewport-chrome{position:fixed;z-index:80;top:78px;right:16px;left:auto;float:none;width:min(370px,calc(100vw - 32px));max-height:calc(100vh - 175px);margin:0;overflow:auto;pointer-events:auto;box-shadow:0 22px 70px rgba(0,0,0,.34)}
 .lw-drawing-board.is-inline .lw-draw-notice,.lw-draw-notice.is-viewport-chrome{position:fixed;z-index:81;top:78px;left:50%;width:min(420px,calc(100vw - 28px));margin:0;transform:translateX(-50%);pointer-events:auto;box-shadow:0 13px 34px rgba(0,0,0,.24)}
 .lw-drawing-board.is-inline .lw-art-studio,.lw-art-studio.is-viewport-chrome{position:fixed;z-index:79;top:78px;left:14px;right:14px;width:min(900px,calc(100vw - 28px));max-width:calc(100vw - 28px);max-height:calc(100vh - 170px);margin-left:auto;margin-right:auto;transform:none;overflow:auto;background:color-mix(in srgb,var(--background-secondary,#17171d) 95%,transparent);backdrop-filter:blur(18px);pointer-events:auto}.lw-drawing-board.is-inline:not(.is-input-active) .lw-art-studio{display:none}
-@media(max-width:900px){.lw-draw-workspace.has-conversion{grid-template-columns:1fr}.lw-conversion-panel{position:absolute;z-index:5;inset:10px;box-shadow:0 24px 80px rgba(0,0,0,.45)}.lw-draw-range span{display:none}.lw-draw-toolbar{gap:7px}.lw-canvas-surface{width:100%;height:auto}.lw-draw-workspace{padding:10px}}@media(max-width:640px){.lw-math-correction-popover{left:8px!important;width:min(390px,calc(100vw - 16px));max-height:82%;}.lw-math-correction-actions{grid-template-columns:1fr}}
+@media(max-width:900px){.lw-draw-workspace.has-conversion{grid-template-columns:1fr}.lw-conversion-panel{position:absolute;z-index:5;inset:10px;box-shadow:0 24px 80px rgba(0,0,0,.45)}.lw-draw-range span{display:none}.lw-draw-toolbar{gap:7px}.lw-canvas-surface{width:100%;height:auto}.lw-draw-workspace{padding:10px}}
 @media(max-width:900px){.lw-art-studio-body{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.lw-art-control-section{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr minmax(140px,.7fr)}}
 @media(max-width:640px){.lw-draw-header{padding:0 10px}.lw-draw-header-actions .lw-draw-subtle{font-size:0}.lw-draw-toolbar{min-height:54px;padding:7px 9px}.lw-segmented button{font-size:0;padding:0 9px}.lw-draw-range{grid-template-columns:70px 38px}.lw-colors>button:nth-of-type(n+5){display:none}.lw-drawing-board:not(.is-inline) .lw-draw-footer{align-items:stretch;flex-direction:column}.lw-drawing-board:not(.is-inline) .lw-draw-footer>div:first-child{display:none}.lw-footer-actions{display:grid;grid-template-columns:1fr 1fr}.lw-footer-actions button{width:100%}.lw-footer-actions>button:first-child{grid-column:1/-1}}
 @media(max-width:640px){.lw-art-studio-body{grid-template-columns:1fr}.lw-art-control-section{grid-column:auto;display:flex}.lw-art-brushes{grid-template-columns:repeat(4,minmax(0,1fr))}.lw-art-special-inks{grid-template-columns:repeat(2,minmax(0,1fr))}.lw-art-quick-width{display:none}.lw-drawing-board.is-inline .lw-art-studio{width:min(900px,calc(100vw - 16px));margin-top:0}}

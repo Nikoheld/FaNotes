@@ -10,6 +10,8 @@ import { OneNoteImportDialog } from '../../src/components/OneNoteImportDialog'
 import { ShareWithUserDialog } from '../../src/components/ShareWithUserDialog'
 import { SharePresence } from '../../src/components/SharePresence'
 import { PenQuickMenu } from '../../src/components/PenQuickMenu'
+import { MathCorrectionPopover, MathSolverPopover } from '../../src/components/MathPopovers'
+import type { MathCheckResult } from '../../src/lib/mathChecker'
 import type { WorkRequestsClient } from '../../src/lib/workRequests'
 
 const theme = new URLSearchParams(location.search).get('theme') === 'dark' ? 'dark' : 'light'
@@ -55,11 +57,31 @@ const view = location.hash.replace('#', '')
 const tab = new URLSearchParams(location.search).get('tab')
 const toast = () => {}
 // Every view closes itself through its own close handler, so Escape and the close button can be asserted.
+// The drawing board's math popovers need handwriting recognition; here they get synthetic recognition results.
+function MathHost({ kind, state }: { kind: 'solver' | 'correction'; state: string }) {
+  const [open, setOpen] = useState(true)
+  const close = () => { setOpen(false); document.body.setAttribute('data-harness-closed', '1') }
+  const [input, setInput] = useState('2x + 3 = 11')
+  const [variable, setVariable] = useState('x')
+  const [placement, setPlacement] = useState('auto')
+  const [lines, setLines] = useState([{ id: 'a', input: '2x + 3 = 11', confidence: 94 }, { id: 'b', input: '2x = 8', confidence: 88 }, { id: 'c', input: 'x = 3', confidence: 71 }])
+  const result = { status: 'incorrect', message: 'Zwischen Zeile 2 und 3 passt die Umformung nicht.', suggestion: 'x = 4', lines: [{ status: 'start', message: '' }, { status: 'correct', message: 'Äquivalent' }, { status: 'incorrect', message: '2x = 8 ergibt x = 4' }] } as unknown as MathCheckResult
+  const status = state === 'recognizing' ? 'recognizing' : state === 'error' ? 'error' : 'ready'
+  const noop = () => {}
+  return <div id="math-stage" style={{ position: 'relative', width: 900, height: 600, margin: 16, border: '1px dashed var(--border-strong)' }}>
+    <button type="button" id="harness-opener" autoFocus>Seite</button>
+    {open && (kind === 'solver'
+      ? <MathSolverPopover style={{ left: '8%', top: '12%' }} status={status} error="Keine Handschrift erkannt." confidence={status === 'ready' ? 58 : 0} input={input} onInput={setInput} preview="" validation={input.includes('?') ? 'Der Ausdruck ist nicht gültig.' : ''} variables={['x']} variable={variable} onVariable={setVariable} placement={placement} onPlacement={setPlacement} solving={false} actions={(['step', 'simplify', 'solve', 'expand', 'factor', 'calculate'] as const).map((action) => ({ action, disabled: action === 'calculate' }))} actionLabel={(action) => ({ step: 'Nächster Schritt', simplify: 'Term vereinfachen', solve: 'Nach x lösen', expand: 'Ausmultiplizieren', factor: 'Faktorisieren', calculate: 'Ausrechnen' })[action]} onRun={noop} showTraining onTraining={noop} onClose={close} />
+      : <MathCorrectionPopover style={{ left: '30%', top: '6%' }} status={status === 'ready' ? 'ready' : status} error="Keine Handschrift erkannt." lines={status === 'ready' ? lines : []} result={status === 'ready' ? result : undefined} onLine={(id, value) => setLines((all) => all.map((line) => (line.id === id ? { ...line, input: value } : line)))} onRecheck={noop} onReselect={noop} showTraining onTraining={noop} onClose={close} />)}
+  </div>
+}
+
 function Host() {
   const [open, setOpen] = useState(true)
   const close = () => { setOpen(false); document.body.setAttribute('data-harness-closed', '1') }
   if (!open) return <button type="button" id="harness-opener">opener</button>
   if (view === 'addon-prompt') return <AddonPromptDialog request={{ title: 'Name der Vorlage', message: 'Wie soll die neue Vorlage heissen?\nSie erscheint danach im Menü.', placeholder: 'Vorlage', value: '', resolve: () => {} }} />
+  if (view === 'math-solver' || view === 'math-correction') return <MathHost kind={view === 'math-solver' ? 'solver' : 'correction'} state={tab ?? 'ready'} />
   if (view === 'onenote') return <OneNoteImportDialog folders={['Biologie', 'Chemie/Labor']} onClose={close} onImported={() => {}} />
   if (view === 'share-user') return <ShareWithUserDialog target={{ path: 'Biologie/Zelle.md', kind: 'note', name: 'Zelle' }} signedIn={false} onClose={close} onOpenAccountSettings={() => {}} toast={toast} />
   if (view === 'share-presence') return <div style={{ position: 'fixed', top: 12, right: 24 }}><SharePresence people={{ self: 'Ich', present: ['Ich', 'Anna', 'Ben'], editors: ['Ich', 'Anna', 'Ben', 'Clara'] }} /></div>

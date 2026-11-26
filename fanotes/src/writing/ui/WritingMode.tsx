@@ -88,6 +88,7 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
     try { return { ...defaultAutocorrectSettings(), ...JSON.parse(localStorage.getItem('fanotes.writing.autocorrect.v1') ?? '{}') } } catch { return defaultAutocorrectSettings() }
   })
   const [popover, setPopover] = useState<PopoverTarget | null>(null)
+  const [popoverFocus, setPopoverFocus] = useState(0)
   const [lexiconReady, setLexiconReady] = useState(false)
   /** The spelling worker engine (Rust wasm off the main thread); null until it is ready. */
   const spellingEngine = useRef<import('../../lib/spellingEngine').SpellingEngine | null>(null)
@@ -593,9 +594,14 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
         case 'Backspace': if (!undoAutocorrect()) run(commands.deleteBackward(st), 'delete'); return true
         case 'Delete': run(commands.deleteForward(st), 'delete'); return true
         case 'Enter': run(event.shiftKey ? commands.insertLineBreak(st) : commands.splitParagraph(st), 'structure'); return true
-        case 'Tab': return true
+        case 'Tab':
+          // With the suggestion popover open, Tab hands focus to it (typing keeps the editor focus until then).
+          if (popover) setPopoverFocus((value) => value + 1)
+          return true
         case 'F7':
-          if (event.shiftKey && caretGeometry) {
+          if (event.shiftKey && popover) {
+            setPopoverFocus((value) => value + 1)
+          } else if (event.shiftKey && caretGeometry) {
             openPopover(st.selection.head, false, caretGeometry.page, caretGeometry.x, caretGeometry.y + caretGeometry.height - 14)
           } else {
             setInspectorOpen(true)
@@ -1210,6 +1216,7 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
           {popover && (
             <AssistPopover
               target={popover}
+              focusRequest={popoverFocus}
               onClose={() => { setPopover(null); refocus() }}
               onReplace={(from, to, text) => { run(commands.replaceInBlockRange(controller.state, popover.block, from, to, text), 'format'); setPopover(null); refocus() }}
               onIgnore={(issue) => {
