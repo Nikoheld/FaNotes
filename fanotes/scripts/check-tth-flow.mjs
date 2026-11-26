@@ -52,7 +52,7 @@ const seedNote = (profile, y) => {
 }
 
 /** Trained letters straight into the handwriting database (valid label ids, strokes with pressureEnabled). */
-const seedLetters = (page, chars) => page.evaluate(async (letters) => {
+const seedLetters = (page, chars, variants = 3) => page.evaluate(async ({ letters, variants }) => {
   const db = await new Promise((resolve, reject) => { const request = indexedDB.open('fanotes-handwriting'); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error) })
   const canvas = document.createElement('canvas')
   canvas.width = 64; canvas.height = 64
@@ -65,7 +65,7 @@ const seedLetters = (page, chars) => page.evaluate(async (letters) => {
   const store = transaction.objectStore('samples')
   for (const char of letters) {
     const upper = char.toUpperCase() === char && char.toLowerCase() !== char
-    for (let variant = 0; variant < 3; variant += 1) {
+    for (let variant = 0; variant < variants; variant += 1) {
       const points = Array.from({ length: 14 }, (_, k) => ({ x: 0.1 + k * 0.006 + variant * 0.001, y: 0.2 - Math.sin((k / 13) * Math.PI * (1 + (char.charCodeAt(0) % 3) * 0.5)) * 0.07, t: k * 8, pressure: 0.5, tiltX: 0, tiltY: 0, pointerType: 'pen' }))
       store.put({
         id: `s-${char.charCodeAt(0)}-${variant}`, labelId: umlauts[char] ?? (upper ? `latin_upper_${char}` : `latin_lower_${char}`), label: char, labelName: char, latex: char,
@@ -77,7 +77,7 @@ const seedLetters = (page, chars) => page.evaluate(async (letters) => {
   }
   await new Promise((resolve, reject) => { transaction.oncomplete = resolve; transaction.onerror = () => reject(transaction.error) })
   db.close()
-}, chars)
+}, { letters: chars, variants })
 
 const session = async (theme, inkY, body) => {
   const profile = createProfile(`tth-flow-${theme}-`, { theme })
@@ -186,6 +186,8 @@ try {
     await typeText(page, '')
     let state = await dialogState(page)
     ok('empty text: insert is disabled and the hint says what to do', state.insertDisabled === true && /Text/u.test(state.hint), state.hint)
+    await page.waitForFunction(() => document.querySelector('[data-tth-letters]')?.getAttribute('data-tth-letters') !== 'loading', null, { timeout: 15_000 })
+    state = await dialogState(page)
     ok('no letters trained: an empty state with a train button', state.letters === 'none' && await page.locator('.tth-letters button', { hasText: 'Buchstaben trainieren' }).count() === 1)
     await page.screenshot({ path: path.join(shots, 'dark-empty.png') })
     await typeText(page, '   \n  ')
@@ -286,6 +288,100 @@ try {
     ok('ink at the bottom of the sheet: the text still lands below it', after.count > before.count && after.newTop > after.oldBottom - 1, JSON.stringify(after))
     ok('the sheet grew to hold it', after.newBottom <= after.height + 1, `${after.newBottom} <= ${after.height}`)
   })
+
+  // ---- The first open right after a note loads, with a big set of trained letters ---------------------------------------
+  // Reading and checking 1,500 samples used to take seconds after the click, with the dialog open and claiming that no
+  // letters were trained. They are read in idle time once the page is open; whoever clicks sooner sees a loading note.
+  await session('dark', 0.2, async ({ page, profile }) => {
+    const letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZäöüÄÖÜ0123456789.,'.split('')
+    await seedLetters(page, letters, 20)
+    await page.reload()
+    await page.waitForSelector('.file-tree__row', { timeout: 60_000 })
+    await dismissNotices(page)
+    const openedAt = Date.now()
+    await page.locator('.file-tree__row', { hasText: 'Hand' }).first().click()
+    await page.waitForFunction(() => [...document.querySelectorAll('.lw-drawing-board canvas')].some((canvas) => canvas.width > 0), null, { timeout: 60_000 })
+    const noteMs = Date.now() - openedAt
+    await sleep(1200)
+    await page.locator('button[title^="Mit dem Stift schreiben"]').first().click().catch(() => {})
+    await page.waitForSelector(OPEN, { timeout: 20_000 })
+    // At once: no waiting for the prewarm.
+    const early = Date.now()
+    await page.locator(OPEN).first().click()
+    await page.waitForSelector('.lw-tth-dialog')
+    const shownMs = Date.now() - early
+    const first = await dialogState(page)
+    ok('the first open is immediate even before the letters are read', shownMs < 1500, `${shownMs} ms`)
+    ok('while the letters load the dialog says so and does not claim there are none', first.letters === 'loading' || first.letters === 'trained', first.letters)
+    await typeText(page, 'Hallo Welt')
+    await settled(page, (value) => value.letters === 'trained' && value.glyphs > 0 && value.insertDisabled === false, 'big set preview', 40_000)
+    ok('the preview comes in the trained letters once they are loaded', true, `${Date.now() - early} ms after the click`)
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('.lw-tth-dialog'), null, { timeout: 5000 })
+    // Opened later: the letters were read in idle time, the dialog has them at once.
+    await page.reload()
+    await page.waitForSelector('.file-tree__row', { timeout: 60_000 })
+    await dismissNotices(page)
+    await page.evaluate(() => { window.__long = []; new PerformanceObserver((list) => { for (const entry of list.getEntries()) window.__long.push(Math.round(entry.duration)) }).observe({ entryTypes: ['longtask'] }) })
+    await page.locator('.file-tree__row', { hasText: 'Hand' }).first().click()
+    await page.waitForFunction(() => [...document.querySelectorAll('.lw-drawing-board canvas')].some((canvas) => canvas.width > 0), null, { timeout: 60_000 })
+    await sleep(1200)
+    await page.locator('button[title^="Mit dem Stift schreiben"]').first().click().catch(() => {})
+    await page.waitForSelector(OPEN, { timeout: 20_000 })
+    await sleep(Number(process.env.FANOTES_TTH_PREWARM_WAIT_MS || 14_000))
+    const warm = Date.now()
+    await page.locator(OPEN).first().click()
+    await page.waitForSelector('.lw-tth-dialog')
+    const warmState = await settled(page, (value) => value.letters === 'trained', 'prewarmed letters', 10_000).catch(() => null)
+    const warmMs = Date.now() - warm
+    ok('after the page was open a while the dialog has the letters at once (prewarmed in idle time)', warmState !== null && warmMs < 800, `${warmMs} ms`)
+    const long = await page.evaluate(() => window.__long)
+    console.log(`tth open: note ${noteMs} ms, dialog shown ${shownMs} ms, prewarmed letters ${warmMs} ms, long tasks ${JSON.stringify(long)}`)
+    ok('opening the note stays fast with a big set of trained letters', noteMs < 4000, `${noteMs} ms`)
+  })
+
+  // ---- A zoomed and scrolled page ---------------------------------------------------------------------------------
+  // The text is written in sheet units: it has the same size at every zoom, and after the insert it is on screen,
+  // wherever the view was scrolled to.
+  const zoomedInsert = {}
+  for (const zoom of [1, 2.5]) {
+    await session('dark', 0.6, async ({ page, openNote, disk }) => {
+      await openNote()
+      const pane = await page.evaluate(() => { const box = document.querySelector('.paper-view').getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 } })
+      await page.mouse.move(pane.x, pane.y)
+      const cdp = await page.context().newCDPSession(page)
+      const zoomNow = () => page.evaluate(() => { const paper = document.querySelector('.paper-view .unified-paper'); return paper.getBoundingClientRect().width / paper.offsetWidth })
+      if (zoom !== 1) {
+        const steps = 14
+        const delta = (-100 * Math.log(zoom / await zoomNow())) / steps
+        for (let step = 0; step < steps; step += 1) { await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: pane.x, y: pane.y, deltaX: 0, deltaY: delta + 0.013, modifiers: 2 }); await sleep(16) }
+        await sleep(1200)
+      }
+      // Scrolled to the top of the sheet: the end of the ink (60 % down) is off screen at a high zoom.
+      await page.evaluate(() => { const view = document.querySelector('.unified-note-view'); view.scrollTop = 0; view.dispatchEvent(new Event('scroll')) })
+      await sleep(500)
+      const zoomed = await zoomNow()
+      await page.locator(OPEN).first().click()
+      await page.waitForSelector('.lw-tth-dialog')
+      await typeText(page, 'Hallo Welt, das ist ein Test')
+      await settled(page, (value) => value.glyphs > 0 && value.insertDisabled === false, 'zoomed insert')
+      await page.locator('.lw-tth-insert').click()
+      await page.waitForFunction(() => !document.querySelector('.lw-tth-dialog'), null, { timeout: 5000 })
+      await sleep(1500)
+      const after = await disk()
+      const view = await page.evaluate(({ sourceHeight, newTop, newBottom }) => {
+        const paper = document.querySelector('.paper-view .unified-paper').getBoundingClientRect()
+        const scroller = document.querySelector('.unified-note-view').getBoundingClientRect()
+        const top = paper.top + (newTop / sourceHeight) * paper.height
+        const bottom = paper.top + (newBottom / sourceHeight) * paper.height
+        return { top, bottom, viewTop: scroller.top, viewBottom: scroller.bottom, zoom: paper.width / document.querySelector('.paper-view .unified-paper').offsetWidth }
+      }, { sourceHeight: after.height, newTop: after.newTop, newBottom: after.newBottom })
+      zoomedInsert[zoom] = after.newBottom - after.newTop
+      const label = `zoom ${Math.round(zoomed * 100)} %`
+      ok(`${label}, scrolled to the top: the inserted text is on screen`, view.top >= view.viewTop - 2 && view.bottom <= view.viewBottom + 2, JSON.stringify(view))
+    })
+  }
+  ok('the inserted text has the same size at 100 % and at 250 % (sheet units)', zoomedInsert[1] > 0 && Math.abs(zoomedInsert[2.5] / zoomedInsert[1] - 1) < 0.05, JSON.stringify(zoomedInsert))
 
   // ---- Light: tokens and contrast -------------------------------------------------------------------------------
   await session('light', 0.2, async ({ page, openNote }) => {

@@ -486,6 +486,8 @@ const INK_WINDOW_IDLE_MS = 320
  * ink soft after every zoom.
  */
 const ZOOM_SETTLE_MS = 48
+/** The page has been open this long before the trained letters are read in idle time. */
+const TRAINED_LETTERS_PREWARM_MS = 2500
 /**
  * A pinch or wheel zoom that rests this long (and two frames more) is
  * re-rastered at the zoom its preview shows, before the camera commits (150
@@ -2142,6 +2144,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const eraserAnchorRef = useRef<StrokePoint | null>(null)
   const [recognitionScope, setRecognitionScope] = useState<RecognitionScope>('page')
   const [resources, setResources] = useState<RecognitionResources | null>(null)
+  // The trained letters could not be read: the text-to-handwriting dialog stops waiting for them.
+  const [resourcesFailed, setResourcesFailed] = useState(false)
   const [trainingSampleCount, setTrainingSampleCount] = useState<number | null>(null)
   const [katexModule, setKatexModule] = useState<KatexModule | null>(null)
   const activeMode: RecognitionMode = mode === 'auto' ? recognizedMode : mode
@@ -7690,6 +7694,28 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     fitPageToInk()
   }, [bumpInkRevision, clearRecognitionScope, cloneSectionStroke, closeMathCorrectionSession, closeMathSolverSelection, fitPageToInk, forEachTrackedStroke, growSheetBy, setDirty, updateHistoryState])
 
+  /** Scrolls the sheet so the rows `top`..`bottom` (0-1 of the sheet) are on screen; a block taller than the view shows its start. */
+  const revealInsertedInk = useCallback((top: number, bottom: number) => {
+    if (!inline) return
+    // Two frames: the page grow and the slice move of the insert settle first.
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const paper = resolvePaperElement()
+      const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+      if (!paper || !scroller) return
+      const paperBox = paper.getBoundingClientRect()
+      const view = scroller.getBoundingClientRect()
+      const blockTop = paperBox.top + top * paperBox.height
+      const blockBottom = paperBox.top + bottom * paperBox.height
+      const margin = Math.min(72, view.height * 0.1)
+      if (blockTop >= view.top + margin / 2 && blockBottom <= view.bottom - margin / 2) return
+      const fits = blockBottom - blockTop <= view.height - margin * 2
+      // A block that fits is centred; a longer one starts a margin below the top edge.
+      const wanted = fits ? view.top + (view.height - (blockBottom - blockTop)) / 2 : view.top + margin
+      scroller.scrollTop += blockTop - wanted
+      scroller.dispatchEvent(new Event('scroll'))
+    }))
+  }, [inline, resolvePaperElement])
+
   const insertSynthesizedHandwriting = useCallback((
     generatedStrokes: SynthesizedInkStroke[],
     result: HandwritingSynthesisResult,
@@ -7722,12 +7748,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     updateHistoryState()
     scheduleRedraw()
     setTextToHandwritingOpen(false)
+    // The text goes below the last ink: on a page zoomed in and scrolled elsewhere that is off screen. Bring it into view
+    // (the zoom stays, the text has the size of the sheet at every zoom).
+    let insertedTop = 1
+    let insertedBottom = 0
+    for (const stroke of generatedStrokes) {
+      for (const point of stroke.points) {
+        const y = point.y * result.pageHeight / nextHeight
+        if (y < insertedTop) insertedTop = y
+        if (y > insertedBottom) insertedBottom = y
+      }
+    }
+    if (insertedBottom >= insertedTop) revealInsertedInk(insertedTop, insertedBottom)
     setNotice({
       kind: 'success',
       text: `${result.glyphCount} Zeichen als persönliche Handschrift eingefügt${result.connectionCount ? ` · ${result.connectionCount} natürliche Verbindungen` : ''}.`,
     })
     fitPageToInk()
-  }, [bumpInkRevision, clearRecognitionScope, fitPageToInk, scheduleRedraw, setDirty, setPageExtent, updateHistoryState])
+  }, [bumpInkRevision, clearRecognitionScope, fitPageToInk, revealInsertedInk, scheduleRedraw, setDirty, setPageExtent, updateHistoryState])
 
   const drawingPayload = useCallback((includeImage = false): DrawingSavePayload => {
     // Refs, not state: a grow in an effect and a save in the same commit (the
@@ -9578,10 +9616,36 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       })
       .catch(() => {
         if (mountedRef.current) {
+          setResourcesFailed(true)
           setNotice({ kind: 'error', text: 'Das persönliche Handschriftmodell konnte nicht geladen werden.' })
         }
       })
   }
+
+  // The trained letters are read in idle time once the page is open, so the first "Text → Handschrift" already has
+  // them (reading and checking every sample took seconds, with the dialog open and empty meanwhile).
+  useEffect(() => {
+    if (!inline) return
+    let cancelled = false
+    let idle = 0
+    const run = () => {
+      if (cancelled || resourcesRef.current) return
+      void loadRecognitionResources().then((loaded) => {
+        if (cancelled) return
+        resourcesRef.current ??= loaded
+        setResources(resourcesRef.current)
+      }).catch(() => undefined)
+    }
+    const timer = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') idle = window.requestIdleCallback(run, { timeout: 6000 })
+      else run()
+    }, TRAINED_LETTERS_PREWARM_MS)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+      if (idle && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idle)
+    }
+  }, [inline])
 
   const commitLasso = (action: 'delete' | 'move' | 'copy' | 'recolor') => {
     if (!lassoIndexes.length) return
@@ -11254,6 +11318,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       <TextToHandwritingDialog
         open={textToHandwritingOpen}
         samples={resources?.samples ?? []}
+        samplesReady={resources !== null || resourcesFailed}
         pageWidth={sourceWidth}
         pageHeight={sourceHeight}
         // Measured only while the dialog is open: this runs on every render of

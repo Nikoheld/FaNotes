@@ -1285,16 +1285,27 @@ export const loadRecognitionResources = async (force = false): Promise<Recogniti
       .filter((entry) => supportedLabelIds.has(entry.anchorLabelId) && (
         entry.childLabelId === '*' || supportedLabelIds.has(entry.childLabelId)
       ))
-    const isolated = await buildModelWithIsolation(structurallyValidSamples)
-    const rejectedIds = [...new Set([...structurallyRejectedIds, ...isolated.rejectedIds])]
+    const baselineSamples = await createStandardRecognitionSamples(BASE_CATALOG)
+    // One build over everything. Only when it fails is the bad sample searched for (that probe builds the model
+    // again and again): the old order always built the model twice, which was half of the seconds the first
+    // text-to-handwriting open waited.
+    let samples = structurallyValidSamples
+    let model: RecognitionModel
+    let isolatedRejectedIds: string[] = []
+    try {
+      model = await buildRecognitionModel([...structurallyValidSamples, ...baselineSamples])
+    } catch {
+      const isolated = await buildModelWithIsolation(structurallyValidSamples)
+      samples = isolated.samples
+      isolatedRejectedIds = isolated.rejectedIds
+      model = await buildRecognitionModel([...samples, ...baselineSamples])
+    }
+    const rejectedIds = [...new Set([...structurallyRejectedIds, ...isolatedRejectedIds])]
     if (rejectedIds.length) {
       await deleteSamples(rejectedIds).catch((error) => {
         console.warn('Beschädigte Handschriftbeispiele wurden ignoriert, konnten aber nicht gelöscht werden.', error)
       })
     }
-    const samples = isolated.samples
-    const baselineSamples = await createStandardRecognitionSamples(BASE_CATALOG)
-    const model = await buildRecognitionModel([...samples, ...baselineSamples])
     const resources = {
       model,
       samples,
