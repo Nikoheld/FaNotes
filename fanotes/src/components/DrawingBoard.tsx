@@ -4860,6 +4860,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const shown = committedShownRef.current
     const outgrown = Boolean(shown && !inkRowsCoverVisible(shown, measured.visible, sheetHeight))
     if (!needsMove && !outgrown) return false
+    // Zooming out, the visible sheet only grows: a slice moved near its edge now would be outgrown again a few frames
+    // later and painted a second time at the commit. While the rows on screen are still held, wait for the settle
+    // (or for the rows to run out) and plan the slice once at the zoom the gesture ends on.
+    if (!outgrown && zoom < viewZoomRef.current - 0.01
+      && paper.closest('.paper-sheet-plane')?.classList.contains('is-zoom-gesture')) return false
     if (!paper.closest('.paper-sheet-plane')?.classList.contains('is-zoom-gesture')) {
       // Not a gesture: fold a burst of camera writes, the settle paints once.
       const now = performance.now()
@@ -9609,7 +9614,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const openTextToHandwriting = () => {
     setTextToHandwritingOpen(true)
-    if (resourcesRef.current) return
+    if (resourcesRef.current) {
+      setResources(resourcesRef.current)
+      return
+    }
     void loadRecognitionResources()
       .then((loaded) => {
         resourcesRef.current = loaded
@@ -9633,8 +9641,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (cancelled || resourcesRef.current) return
       void loadRecognitionResources().then((loaded) => {
         if (cancelled) return
+        // Only the cache: setting state would render the whole board for nothing; the open of the dialog adopts it.
         resourcesRef.current ??= loaded
-        setResources(resourcesRef.current)
       }).catch(() => undefined)
     }
     const timer = window.setTimeout(() => {

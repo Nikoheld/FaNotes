@@ -150,6 +150,58 @@ export const exportPdfWorksheetPages = async (
   return pages
 }
 
+const A4_WIDTH_CSS_PX = 793.7
+const HTML_DPI = 150
+
+const escapeAttribute = (value: string) => value.replace(/&/gu, '&amp;').replace(/"/gu, '&quot;')
+
+/**
+ * An imported OneNote page as one tall picture. The page (already verified and guarded by the main process) is
+ * printed by the hidden export window inside a sandboxed, script-free frame, scaled to the A4 width; the PDF pages
+ * are rendered and stacked, cut to the height of the page. Needs the desktop app's export window.
+ */
+export const exportHtmlWorksheetPage = async (
+  document: WorksheetDocument,
+  pageHtml: string,
+  displayWidth: number,
+  render: (payload: { id: string; html: string; title: string; pageSize: 'A4'; margins: { top: number; bottom: number; left: number; right: number }; pageNumbers: boolean }) => Promise<Uint8Array>,
+): Promise<WorksheetExportPage | null> => {
+  const width = Math.max(100, document.pageWidth ?? 900)
+  const height = Math.max(100, document.pageHeight ?? 1200)
+  const zoom = A4_WIDTH_CSS_PX / width
+  const wrapper = `<!doctype html><html><head><meta charset="utf-8">`
+    + `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'">`
+    + `<style>@page{margin:0}html,body{margin:0;background:#fff}iframe{display:block;border:0;width:${width}px;height:${height}px;zoom:${zoom}}</style></head>`
+    + `<body><iframe sandbox="" srcdoc="${escapeAttribute(pageHtml)}"></iframe></body></html>`
+  const id = `onenote-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const pdf = await render({ id, html: wrapper, title: document.title, pageSize: 'A4', margins: { top: 0, bottom: 0, left: 0, right: 0 }, pageNumbers: false })
+  const rendered = await renderPdfPagesToPng(pdf instanceof Uint8Array ? pdf : new Uint8Array(pdf as ArrayLike<number>), HTML_DPI)
+  if (!rendered.length) return null
+  const canvasWidth = rendered[0].widthPx
+  const wanted = Math.round(height * zoom * HTML_DPI / 96)
+  const canvas = window.document.createElement('canvas')
+  canvas.width = canvasWidth
+  canvas.height = Math.min(wanted, rendered.reduce((sum, page) => sum + page.heightPx, 0))
+  const context = canvas.getContext('2d')
+  if (!context) return null
+  context.fillStyle = '#ffffff'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  let top = 0
+  for (const page of rendered) {
+    if (top >= canvas.height) break
+    const bitmap = await createImageBitmap(new Blob([page.png as BlobPart]))
+    context.drawImage(bitmap, 0, top)
+    bitmap.close()
+    top += page.heightPx
+  }
+  paintWorksheetMarks(canvas, document, 1, displayWidth)
+  const bytes = await toBytes(canvas)
+  const out: WorksheetExportPage = { bytes, mime: 'image/png', width: canvas.width, height: canvas.height }
+  canvas.width = 0
+  canvas.height = 0
+  return out
+}
+
 /**
  * Every picture and PDF worksheet of the open note as export pictures. Layers are asked to save first, so a text box
  * typed a moment ago is included. A worksheet that cannot be read is left out; the export still runs.
@@ -159,6 +211,8 @@ export const collectWorksheetExportItems = async (
   api: {
     readWorksheet: (id: string) => Promise<WorksheetDocument>
     readAssetBytes: (relativePath: string) => Promise<Uint8Array>
+    readWorksheetHtml?: (id: string) => Promise<string>
+    renderNoteHtmlToPdf?: Parameters<typeof exportHtmlWorksheetPage>[3]
   },
   root: ParentNode = window.document,
 ): Promise<WorksheetExportItem[]> => {
@@ -166,7 +220,13 @@ export const collectWorksheetExportItems = async (
   for (const id of ids) {
     try {
       const document = await api.readWorksheet(id)
-      if (document.kind === 'html') continue
+      if (document.kind === 'html') {
+        if (!api.readWorksheetHtml || !api.renderNoteHtmlToPdf) continue
+        const layer = root.querySelector<HTMLElement>(`[data-worksheet-id="${CSS.escape(id)}"] .worksheet-onenote-page`)
+        const page = await exportHtmlWorksheetPage(document, await api.readWorksheetHtml(id), layer?.offsetWidth || document.pageWidth || 900, api.renderNoteHtmlToPdf)
+        if (page) items.push({ id, kind: 'html', pages: [page] })
+        continue
+      }
       const raw = await api.readAssetBytes(document.sourceRelativePath)
       const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayLike<number>)
       const layer = root.querySelector<HTMLElement>(`[data-worksheet-id="${CSS.escape(id)}"]`)

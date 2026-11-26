@@ -144,7 +144,6 @@ try {
     const detail = `${before}% -> ${after}%, painted ${JSON.stringify(counts)}`
     ok(`${name}: the zoom changed`, Math.abs(after - before) >= 15, detail)
     // A pinch that rests in the middle is two zooms: its first sharp page is painted for the rest, its second for the end.
-    // A zoom out by a factor of 3 outgrows the slice on the way (the rows must be painted then), so it may paint twice.
     ok(`${name}: the ink was painted once per zoom (total strokes <= ${allowed} x the biggest page)`, biggest > 0 && total <= biggest * allowed, `${total} vs ${biggest}; ${detail}`)
     const { committed, live, other } = state.layers
     ok(`${name}: only the committed canvas holds ink, the live canvas is empty`, committed?.ink > 0 && live?.ink === 0 && !other, JSON.stringify(state.layers))
@@ -154,7 +153,7 @@ try {
   await run('pinch in', 2.0, 14)
   await run('pinch out', 0.6, 14)
   await run('pinch in a lot', 3.2, 18)
-  await run('pinch out a lot', 0.35, 18, 0, 2.2)
+  await run('pinch out a lot', 0.35, 18)
   await run('pinch in with a rest in the middle', 2.6, 16, 260)
   await page.keyboard.press('Control+d')
   await sleep(600)

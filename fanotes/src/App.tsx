@@ -5108,9 +5108,18 @@ export default function App({ startupBootstrap }: AppProps) {
     pendingWorksheetDeletes.current.clear()
     for (const [, timer] of pending) window.clearTimeout(timer)
     await Promise.race([
-      Promise.all(pending.map(([id]) => window.fanotes.deleteWorksheet(id).catch(() => undefined))),
+      Promise.all(pending.map(([id]) => window.fanotes.deleteWorksheet(id)
+        .then(() => window.fanotes.worksheetJournal?.({ op: 'remove', id, notePath: '' }))
+        .catch(() => undefined))),
       new Promise<void>((resolve) => { window.setTimeout(resolve, 3000) }),
     ])
+  }, [])
+
+  // Pictures removed just before the last run ended without a clean quit: their files are deleted now, unless the note
+  // they were removed from still references them.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void window.fanotes?.worksheetJournal?.({ op: 'sweep' }).catch(() => undefined) }, 1500)
+    return () => window.clearTimeout(timer)
   }, [])
 
   useEffect(() => window.fanotes?.onBeforeClose(() => {
@@ -5980,11 +5989,16 @@ export default function App({ startupBootstrap }: AppProps) {
    * typed a moment ago is included.
    */
   const collectWorksheetExports = useCallback(async () => {
-    const ids = worksheetSession.documents.filter((item) => item.kind !== 'html').map((item) => item.id)
+    const ids = worksheetSession.documents.map((item) => item.id)
     if (!ids.length || !window.fanotes.readWorksheet || !window.fanotes.readAssetBytes) return []
     await Promise.all(ids.map((id) => worksheetLayerRefs.current.get(id)?.flush().catch(() => undefined)))
     const { collectWorksheetExportItems } = await import('./lib/noteExport/worksheetExport')
-    return collectWorksheetExportItems(ids, { readWorksheet: window.fanotes.readWorksheet, readAssetBytes: window.fanotes.readAssetBytes })
+    return collectWorksheetExportItems(ids, {
+      readWorksheet: window.fanotes.readWorksheet,
+      readAssetBytes: window.fanotes.readAssetBytes,
+      readWorksheetHtml: window.fanotes.readWorksheetHtml,
+      renderNoteHtmlToPdf: (window.fanotes as { renderNoteHtmlToPdf?: Parameters<typeof collectWorksheetExportItems>[1]['renderNoteHtmlToPdf'] }).renderNoteHtmlToPdf,
+    })
   }, [worksheetSession.documents])
 
   // ---- Non-text notes (handwriting, PDF notes) -------------------------------------------------------------
@@ -6127,9 +6141,13 @@ export default function App({ startupBootstrap }: AppProps) {
     worksheetDirtyIdsRef.current.delete(id)
     worksheetLayerRefs.current.delete(id)
     setWorksheetSession((current) => ({ key: current.key + 1, documents: current.documents.filter((item) => item.id !== id) }))
+    // Journaled until the files are gone: a kill or crash inside the undo window is cleaned up at the next start.
+    void window.fanotes.worksheetJournal?.({ op: 'add', id, notePath }).catch(() => undefined)
     pendingWorksheetDeletes.current.set(id, window.setTimeout(() => {
       pendingWorksheetDeletes.current.delete(id)
-      void window.fanotes.deleteWorksheet(id).catch(() => undefined)
+      void window.fanotes.deleteWorksheet(id)
+        .then(() => window.fanotes.worksheetJournal?.({ op: 'remove', id, notePath: '' }))
+        .catch(() => undefined)
     }, UNDO_TOAST_MS + 1500))
     toast('Bild entfernt', 'info', {
       label: 'Rückgängig',
@@ -6138,6 +6156,7 @@ export default function App({ startupBootstrap }: AppProps) {
         if (timer === undefined) return
         window.clearTimeout(timer)
         pendingWorksheetDeletes.current.delete(id)
+        void window.fanotes.worksheetJournal?.({ op: 'remove', id, notePath: '' }).catch(() => undefined)
         void (async () => {
           try {
             const restored = await window.fanotes.readWorksheet(id)

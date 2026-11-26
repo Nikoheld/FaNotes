@@ -27,6 +27,7 @@ try { await import(process.env.PLAYWRIGHT_CORE || 'playwright-core') } catch {
   process.exit(0)
 }
 const { serializeFamd, emptyFamdPayload } = require('../electron/famd.cjs')
+const guard = require('../electron/onenote-page-guard.cjs')
 const JSZip = require('jszip')
 const pdfjs = await import(path.join(root, 'node_modules/pdfjs-dist/legacy/build/pdf.mjs'))
 const { ok, failed, count } = createReporter()
@@ -144,6 +145,15 @@ const exportSession = async () => {
   writeWorksheet(profile, 'ink-image-1', 'image', { placement: { x: 0.2, y: 0.15, width: 0.4 }, aspect: 0.75 })
   writeWorksheet(profile, 'legacy-image-1', 'image', { ...MARKS })
   fs.writeFileSync(path.join(profile.vault, 'Text.md'), `# Text\n\n${paragraphs.join('\n\n')}\n\n<!-- fanotes-worksheet:float-image-1 -->\n<!-- fanotes-worksheet:pdf-sheet-1 -->\n`)
+  // An imported OneNote page: a yellow block with a line of text, 900 x 600.
+  const oneNoteHtml = `<!doctype html><html><head>${guard.ONENOTE_PAGE_MARKER}${guard.ONENOTE_PAGE_POLICY_META}</head><body style="margin:0;background:#fff"><div style="background:#ffcc00;width:600px;height:300px;margin:40px;font:28px sans-serif">Hallo OneNote</div></body></html>`
+  fs.mkdirSync(worksheetsDirectory(profile), { recursive: true })
+  fs.writeFileSync(path.join(worksheetsDirectory(profile), 'onenote-1.html'), oneNoteHtml)
+  fs.writeFileSync(path.join(worksheetsDirectory(profile), 'onenote-1.json'), JSON.stringify({
+    schemaVersion: 1, id: 'onenote-1', title: 'OneNote-Seite', kind: 'html', mimeType: 'text/html', sourceRelativePath: '.fanotes/worksheets/onenote-1.html',
+    dataRelativePath: '.fanotes/worksheets/onenote-1.json', createdAt: NOW, updatedAt: NOW, pageWidth: 900, pageHeight: 600, htmlSha256: guard.pageSha256(oneNoteHtml), textBoxes: [], highlights: [],
+  }))
+  fs.writeFileSync(path.join(profile.vault, 'OneNote.md'), '# OneNote\n\nText davor.\n\n<!-- fanotes-worksheet:onenote-1 -->\n')
   fs.writeFileSync(path.join(profile.vault, 'Alt.md'), '# Alt\n\nText davor.\n\n<!-- fanotes-worksheet:legacy-image-1 -->\n')
   const at = NOW
   const ink = {
@@ -194,6 +204,26 @@ const exportSession = async () => {
       const original = makePng(400, 300)
       const embeddedMarks = (await Promise.all(media.map((name) => zip.file(name).async('nodebuffer')))).some((bytes) => bytes.length > 0 && !bytes.equals(original) && bytes.subarray(1, 4).toString() === 'PNG' && bytes.readUInt32BE(16) === 400)
       ok('typed note Word: the text box and mark of the picture are painted into it', embeddedMarks)
+
+      // --- An imported OneNote page (HTML worksheet) ---
+      await openFile(page, 'OneNote')
+      await until(() => page.locator('.worksheet-onenote-frame').count().then((n) => n > 0), 'onenote page shown').catch(async (error) => { console.log('DEBUG', await page.locator('.worksheet-error, .worksheet-layer').allInnerTexts()); throw error })
+      await sleep(1200)
+      const onePdf = await openPdf(await exportVia(page, profile, 'pdf'))
+      const oneBoxes = []
+      let yellow = false
+      for (let number = 1; number <= onePdf.numPages; number += 1) {
+        const sheet = await onePdf.getPage(number)
+        const list = await sheet.getOperatorList()
+        for (let index = 0; index < list.fnArray.length; index += 1) {
+          if (list.fnArray[index] !== pdfjs.OPS.paintImageXObject) continue
+          const image = await new Promise((resolve) => sheet.objs.get(list.argsArray[index][0], resolve))
+          oneBoxes.push([image.width, image.height])
+          for (let at = 0; at < image.data.length && !yellow; at += 4 * 7) if (image.data[at] > 230 && image.data[at + 1] > 170 && image.data[at + 2] < 80) yellow = true
+        }
+      }
+      ok('OneNote page PDF: the page is in the export as one picture with the aspect of the page (900 x 600)', oneBoxes.length === 1 && Math.abs(oneBoxes[0][1] / oneBoxes[0][0] - 600 / 900) < 0.02, JSON.stringify(oneBoxes))
+      ok('OneNote page PDF: the picture shows the page (its yellow block)', yellow)
 
       // --- Handwriting note ---
       await openFile(page, 'Tinte')
@@ -268,9 +298,71 @@ const quitSession = async () => {
   }
 }
 
+// ---- 3b: killed inside the undo window ---------------------------------------------------------------------------
+// The removed picture is journaled; the next start deletes its files, unless the note still references them.
+const killSession = async () => {
+  const profile = createProfile('worksheet-kill-')
+  writeWorksheet(profile, 'killed-1', 'image', { placement: { x: 0.1, y: 0.2, width: 0.4 }, aspect: 0.75 })
+  writeWorksheet(profile, 'shared-1', 'image', { placement: { x: 0.5, y: 0.2, width: 0.3 }, aspect: 0.75 })
+  writeWorksheet(profile, 'unsaved-1', 'image', { placement: { x: 0.5, y: 0.5, width: 0.3 }, aspect: 0.75 })
+  fs.writeFileSync(path.join(profile.vault, 'Eins.md'), '# Eins\n\nText.\n\n<!-- fanotes-worksheet:killed-1 -->\n')
+  fs.writeFileSync(path.join(profile.vault, 'Zwei.md'), '# Zwei\n\nText.\n\n<!-- fanotes-worksheet:shared-1 -->\n')
+  // A journal entry of an earlier run whose note still carries the marker (the removal never reached the disk).
+  const journal = path.join(profile.userData, 'pending-worksheet-deletes.json')
+  fs.writeFileSync(journal, JSON.stringify({ version: 1, entries: [
+    { vault: profile.vault, id: 'unsaved-1', notePath: 'Drei.md', at: Date.now() },
+    { vault: profile.vault, id: 'shared-1', notePath: 'Zwei.md', at: Date.now() },
+  ] }))
+  fs.writeFileSync(path.join(profile.vault, 'Drei.md'), '# Drei\n\n<!-- fanotes-worksheet:unsaved-1 -->\n')
+  try {
+    let app = launch(profile)
+    let browser = null
+    try {
+      const connected = await connect(app)
+      browser = connected.browser
+      const { page } = connected
+      await dismissNotices(page)
+      await openFile(page, 'Eins')
+      await until(() => page.locator('.sheet-image img').first().evaluate((img) => img.complete && img.naturalWidth > 0).catch(() => false), 'image loaded')
+      await page.locator('.sheet-image').click()
+      await page.locator('.sheet-image.is-selected').waitFor({ timeout: 5000 })
+      await page.locator('.sheet-image-bar button[aria-label="Bild entfernen"]').click()
+      await until(() => page.locator('.sheet-image').count().then((n) => n === 0), 'image removed')
+      await until(() => fs.existsSync(journal) && fs.readFileSync(journal, 'utf8').includes('killed-1'), 'journal written', 8000)
+      ok('kill: the removal is journaled (ids and note only)', /"id":"killed-1"/u.test(fs.readFileSync(journal, 'utf8')))
+      await page.keyboard.press('Control+s')
+      await until(() => !fs.readFileSync(path.join(profile.vault, 'Eins.md'), 'utf8').includes('killed-1'), 'marker removal saved', 8000)
+      try { process.kill(-app.child.pid, 'SIGKILL') } catch { /* gone */ }
+      await sleep(1500)
+    } finally {
+      await browser?.close().catch(() => {})
+    }
+    if (process.env.WS_DEBUG) console.log('journal before restart', fs.readFileSync(journal, 'utf8'), fs.readFileSync(path.join(profile.vault, 'Eins.md'), 'utf8'))
+    ok('kill: the files are still there right after the kill', worksheetFiles(profile).includes('killed-1.png'))
+    app = launch(profile)
+    browser = null
+    try {
+      const connected = await connect(app)
+      browser = connected.browser
+      await until(() => !worksheetFiles(profile).includes('killed-1.png'), 'swept at the next start', 20_000).catch(() => {})
+    } finally {
+      await stop(app, browser)
+    }
+    const files = worksheetFiles(profile)
+    if (process.env.WS_DEBUG) console.log('journal', fs.readFileSync(journal, 'utf8'), 'vault', profile.vault)
+    ok('kill: the next start deletes the files of the removed picture', !files.some((name) => name.startsWith('killed-1')), files.join(','))
+    ok('kill: a picture its note still references survives', files.includes('shared-1.png') && files.includes('shared-1.json'), files.join(','))
+    ok('kill: a picture whose removal was never saved survives too', files.includes('unsaved-1.png') && files.includes('unsaved-1.json'), files.join(','))
+    ok('kill: the journal is empty afterwards', !/"id"/u.test(fs.readFileSync(journal, 'utf8')), fs.readFileSync(journal, 'utf8'))
+  } finally {
+    profile.dispose()
+  }
+}
+
 try {
   await exportSession()
   await quitSession()
+  await killSession()
 } catch (error) {
   ok('worksheet follow-up flow ran to the end', false, error instanceof Error ? error.stack ?? error.message : String(error))
 }

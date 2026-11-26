@@ -918,6 +918,34 @@ export const getHandwritingSamples = async (): Promise<Sample[]> => {
   ))
 }
 
+/**
+ * The same list in batches of 64 with a hand-back to the event loop between them: reading (and cloning) a big
+ * set of samples in one request is a task of tens of milliseconds, which the idle prewarm must not cause.
+ */
+const getHandwritingSamplesInBatches = async (): Promise<Sample[]> => {
+  const database = await openDatabase()
+  const samples: Sample[] = []
+  try {
+  let after: IDBValidKey | null = null
+  for (;;) {
+    const range: IDBKeyRange | undefined = after === null ? undefined : IDBKeyRange.lowerBound(after, true)
+    const transaction = database.transaction(SAMPLE_STORE, 'readonly')
+    const batch = await requestResult(transaction.objectStore(SAMPLE_STORE).getAll(range, 64)) as Sample[]
+    if (!batch.length) break
+    samples.push(...batch)
+    after = batch[batch.length - 1].id
+    if (batch.length < 64) break
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0))
+  }
+  } finally {
+    database.close()
+  }
+  return samples.sort((first, second) => (
+    limitedString((second as Partial<Sample>)?.createdAt, 64)
+      .localeCompare(limitedString((first as Partial<Sample>)?.createdAt, 64))
+  ))
+}
+
 export const getMathLayoutExamples = async (): Promise<MathLayoutExample[]> => {
   const examples = await withStore<MathLayoutExample[]>(LAYOUT_STORE, 'readonly', (store) => store.getAll())
   return examples.sort((first, second) => (
@@ -1245,7 +1273,7 @@ export const loadRecognitionResources = async (force = false): Promise<Recogniti
 
   pendingResources = (async () => {
     const [storedSamples, importedLabels, storedLayoutExamples] = await Promise.all([
-      getHandwritingSamples(),
+      getHandwritingSamplesInBatches(),
       getImportedLabels(),
       getMathLayoutExamples(),
     ])
@@ -1253,6 +1281,7 @@ export const loadRecognitionResources = async (force = false): Promise<Recogniti
     const structurallyRejectedIds: string[] = []
     const fingerprints = new Set<string>()
     const structurallyValidSamples: Sample[] = []
+    let validationSlice = performance.now()
     for (let index = 0; index < storedSamples.length; index += 1) {
       const sample = storedSamples[index]
       if (!isSupportedRecognitionLabel(sample.label, sample.labelId)) continue
@@ -1274,8 +1303,9 @@ export const loadRecognitionResources = async (force = false): Promise<Recogniti
       } catch {
         structurallyRejectedIds.push(sample.id)
       }
-      if ((index + 1) % 32 === 0) {
+      if (performance.now() - validationSlice > 10) {
         await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0))
+        validationSlice = performance.now()
       }
     }
     const supportedLabelIds = new Set(labels.map((label) => label.id))

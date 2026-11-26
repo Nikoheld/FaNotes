@@ -322,13 +322,15 @@ try {
     await page.reload()
     await page.waitForSelector('.file-tree__row', { timeout: 60_000 })
     await dismissNotices(page)
-    await page.evaluate(() => { window.__long = []; new PerformanceObserver((list) => { for (const entry of list.getEntries()) window.__long.push(Math.round(entry.duration)) }).observe({ entryTypes: ['longtask'] }) })
     await page.locator('.file-tree__row', { hasText: 'Hand' }).first().click()
     await page.waitForFunction(() => [...document.querySelectorAll('.lw-drawing-board canvas')].some((canvas) => canvas.width > 0), null, { timeout: 60_000 })
     await sleep(1200)
     await page.locator('button[title^="Mit dem Stift schreiben"]').first().click().catch(() => {})
     await page.waitForSelector(OPEN, { timeout: 20_000 })
+    await page.evaluate(() => { window.__long = []; new PerformanceObserver((list) => { for (const entry of list.getEntries()) window.__long.push(Math.round(entry.duration)) }).observe({ entryTypes: ['longtask'] }) })
     await sleep(Number(process.env.FANOTES_TTH_PREWARM_WAIT_MS || 14_000))
+    // Tasks of the idle phase only: the click (dialog, worker, first preview) is measured separately.
+    const idleLong = await page.evaluate(() => [...window.__long])
     const warm = Date.now()
     await page.locator(OPEN).first().click()
     await page.waitForSelector('.lw-tth-dialog')
@@ -336,8 +338,9 @@ try {
     const warmMs = Date.now() - warm
     ok('after the page was open a while the dialog has the letters at once (prewarmed in idle time)', warmState !== null && warmMs < 800, `${warmMs} ms`)
     const long = await page.evaluate(() => window.__long)
-    console.log(`tth open: note ${noteMs} ms, dialog shown ${shownMs} ms, prewarmed letters ${warmMs} ms, long tasks ${JSON.stringify(long)}`)
+    console.log(`tth open: note ${noteMs} ms, dialog shown ${shownMs} ms, prewarmed letters ${warmMs} ms, long tasks idle ${JSON.stringify(idleLong)}, with the open ${JSON.stringify(long)}`)
     ok('opening the note stays fast with a big set of trained letters', noteMs < 4000, `${noteMs} ms`)
+    ok('reading the trained letters in idle time causes no main-thread task over 50 ms', Math.max(0, ...idleLong) <= 50, JSON.stringify(idleLong))
   })
 
   // ---- A zoomed and scrolled page ---------------------------------------------------------------------------------

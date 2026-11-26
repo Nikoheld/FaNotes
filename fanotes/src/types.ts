@@ -817,6 +817,8 @@ export type FaNotesApi = {
   readWorksheetHtml: (id: string) => Promise<string>
   saveWorksheet: (document: WorksheetDocument) => Promise<WorksheetDocument>
   deleteWorksheet: (id: string) => Promise<{ id: string }>
+  /** Desktop only: journal of pictures removed with an undo toast (add / remove an id, sweep leftovers at start). */
+  worksheetJournal?: (request: { op: 'add' | 'remove'; id: string; notePath: string } | { op: 'sweep' }) => Promise<{ count: number; deleted?: string[] }>
   listNoteHistory?: (relativePath: string) => Promise<NoteHistorySnapshot[]>
   readNoteHistory?: (relativePath: string, snapshotId: string) => Promise<{ id: string; createdAt: string; content: string; companion?: string }>
   exportNotePdf?: () => Promise<{ filePath: string } | null>

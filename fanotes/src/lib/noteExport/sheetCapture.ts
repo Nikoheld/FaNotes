@@ -206,7 +206,9 @@ export const captureWorksheetImages = (paper: HTMLElement, items: readonly Works
     if (!layer) continue
     const boxes = item.kind === 'image'
       ? [layer.querySelector<HTMLElement>('.sheet-image')].filter((node): node is HTMLElement => Boolean(node))
-      : [...layer.querySelectorAll<HTMLElement>('.worksheet-page')]
+      : item.kind === 'html'
+        ? [layer.querySelector<HTMLElement>('.worksheet-onenote-page')].filter((node): node is HTMLElement => Boolean(node))
+        : [...layer.querySelectorAll<HTMLElement>('.worksheet-page')]
     boxes.forEach((box, index) => {
       const page = item.pages[index]
       const rect = relative(box.getBoundingClientRect(), paperRect, zoom)

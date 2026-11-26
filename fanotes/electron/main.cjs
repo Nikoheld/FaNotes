@@ -372,6 +372,7 @@ const IPC = Object.freeze({
   readWorksheetHtml: 'fanotes:read-worksheet-html',
   saveWorksheet: 'fanotes:save-worksheet',
   deleteWorksheet: 'fanotes:delete-worksheet',
+  worksheetJournal: 'fanotes:worksheet-journal',
   listNoteHistory: 'fanotes:list-note-history',
   readNoteHistory: 'fanotes:read-note-history',
   exportNotePdf: 'fanotes:export-note-pdf',
@@ -3215,6 +3216,108 @@ async function rewritePageTextSidecars(root, fromPath, toPath) {
       console.warn('FaNotes: Seitentext konnte nicht mitgezogen werden:', error?.message ?? error)
     }
   }
+}
+
+async function deleteWorksheetFiles(rawId) {
+    const id = assertWorksheetId(rawId)
+    const { worksheetsDirectory } = await ensureInternalWorksheetsDirectory()
+    const dataPath = path.join(worksheetsDirectory, `${id}.json`)
+    let sourceName = ''
+    try {
+      const raw = (await readRegularFileNoFollow(dataPath, MAX_WORKSHEET_JSON_BYTES)).toString('utf8')
+      const document = validateWorksheetDocument(JSON.parse(raw), id)
+      sourceName = path.basename(document.sourceRelativePath)
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        throw new Error(error instanceof SyntaxError ? 'Die Arbeitsblattdaten sind beschädigt.' : error?.message ?? 'Das Arbeitsblatt konnte nicht gelesen werden.')
+      }
+    }
+    const unlinkRegular = async (target) => {
+      try {
+        const info = await fsp.lstat(target)
+        if (!info.isFile() || info.isSymbolicLink()) throw new Error('Die Arbeitsblattdatei ist unsicher.')
+        await fsp.unlink(target)
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error
+      }
+    }
+    if (sourceName && sourceName.startsWith(`${id}.`)) {
+      await unlinkRegular(path.join(worksheetsDirectory, sourceName))
+    }
+    await unlinkRegular(dataPath)
+    return { id }
+}
+
+const worksheetJournalPath = () => path.join(app.getPath('userData'), 'pending-worksheet-deletes.json')
+let worksheetJournalQueue = Promise.resolve()
+
+async function readWorksheetJournal() {
+  try {
+    const parsed = JSON.parse(await fsp.readFile(worksheetJournalPath(), 'utf8'))
+    return Array.isArray(parsed?.entries)
+      ? parsed.entries.filter((entry) => typeof entry?.vault === 'string' && typeof entry?.id === 'string' && /^[a-zA-Z0-9_-]{1,96}$/u.test(entry.id))
+      : []
+  } catch {
+    return []
+  }
+}
+
+/** Serialised read-modify-write of the journal (ids only, in the profile, never in the vault). */
+function mutateWorksheetJournal(change) {
+  const run = worksheetJournalQueue.then(async () => {
+    const entries = change(await readWorksheetJournal())
+    await atomicWrite(worksheetJournalPath(), `${JSON.stringify({ version: 1, entries })}\n`, { encoding: 'utf8', mode: 0o600 })
+    return { count: entries.length }
+  })
+  worksheetJournalQueue = run.catch(() => undefined)
+  return run
+}
+
+/** Whether a note (or its .famd companion) still carries the marker of this worksheet. Unreadable counts as referenced. */
+async function noteStillReferencesWorksheet(notePath, id) {
+  if (!notePath) return null
+  let found = false
+  let readAny = false
+  const candidates = [notePath]
+  const companion = companionNotePath(noteMarkdownSourcePath(notePath), '.famd')
+  if (companion && companion !== notePath) candidates.push(companion)
+  for (const candidate of candidates) {
+    let text
+    try {
+      text = await readOptionalNoteFile(candidate, noteByteLimit(candidate))
+    } catch {
+      return true
+    }
+    if (text === null) continue
+    readAny = true
+    if (worksheetIdsFromMarkdown(stripFamdPayload(text)).includes(id)) found = true
+  }
+  return readAny ? found : null
+}
+
+async function sweepWorksheetJournal() {
+  const entries = await readWorksheetJournal()
+  const mine = entries.filter((entry) => entry.vault === currentVaultPath)
+  const deleted = []
+  const kept = []
+  for (const entry of mine) {
+    // A note that is gone or was moved cannot vouch for the files: keep them, forget the entry.
+    const referenced = await noteStillReferencesWorksheet(entry.notePath, entry.id)
+    if (referenced === false) {
+      try {
+        await deleteWorksheetFiles(entry.id)
+        deleted.push(entry.id)
+      } catch {
+        kept.push(entry.id)
+      }
+    }
+  }
+  if (mine.length) {
+    // Only what this sweep looked at: a picture removed while it ran has its entry added meanwhile.
+    const handled = new Set(mine.map((entry) => entry.id).filter((id) => !kept.includes(id)))
+    await mutateWorksheetJournal((current) => current.filter((entry) => entry.vault !== currentVaultPath || !handled.has(entry.id)))
+  }
+  return { deleted, count: mine.length }
 }
 
 function assertWorksheetId(value) {
@@ -6067,33 +6170,27 @@ function registerIpcHandlers() {
 
   handle(IPC.deleteWorksheet, async (_event, rawId) => {
     await ensureBootstrap()
-    const id = assertWorksheetId(rawId)
-    const { worksheetsDirectory } = await ensureInternalWorksheetsDirectory()
-    const dataPath = path.join(worksheetsDirectory, `${id}.json`)
-    let sourceName = ''
-    try {
-      const raw = (await readRegularFileNoFollow(dataPath, MAX_WORKSHEET_JSON_BYTES)).toString('utf8')
-      const document = validateWorksheetDocument(JSON.parse(raw), id)
-      sourceName = path.basename(document.sourceRelativePath)
-    } catch (error) {
-      if (error?.code !== 'ENOENT') {
-        throw new Error(error instanceof SyntaxError ? 'Die Arbeitsblattdaten sind beschädigt.' : error?.message ?? 'Das Arbeitsblatt konnte nicht gelesen werden.')
-      }
+    return deleteWorksheetFiles(rawId)
+  })
+
+  /**
+   * Pictures removed with an undo toast: their ids are journaled until the files are deleted, so a kill or crash inside
+   * the undo window cannot leave them behind. `sweep` (once per start) deletes the journaled files of the open vault
+   * unless the note they were removed from still references them.
+   */
+  handle(IPC.worksheetJournal, async (_event, request) => {
+    await ensureBootstrap()
+    const op = request?.op
+    if (op === 'add' || op === 'remove') {
+      const id = assertWorksheetId(request.id)
+      const notePath = typeof request.notePath === 'string' ? request.notePath : ''
+      return mutateWorksheetJournal((entries) => {
+        const rest = entries.filter((entry) => !(entry.vault === currentVaultPath && entry.id === id))
+        return op === 'add' ? [...rest, { vault: currentVaultPath, id, notePath, at: Date.now() }] : rest
+      })
     }
-    const unlinkRegular = async (target) => {
-      try {
-        const info = await fsp.lstat(target)
-        if (!info.isFile() || info.isSymbolicLink()) throw new Error('Die Arbeitsblattdatei ist unsicher.')
-        await fsp.unlink(target)
-      } catch (error) {
-        if (error?.code !== 'ENOENT') throw error
-      }
-    }
-    if (sourceName && sourceName.startsWith(`${id}.`)) {
-      await unlinkRegular(path.join(worksheetsDirectory, sourceName))
-    }
-    await unlinkRegular(dataPath)
-    return { id }
+    if (op === 'sweep') return sweepWorksheetJournal()
+    throw new Error('Ungültige Anfrage.')
   })
 
   handle(IPC.readAssetDataUrl, async (_event, relativePath) => {
