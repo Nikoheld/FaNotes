@@ -60,6 +60,7 @@
     "check:note-export": "node scripts/check-note-export.mjs",
     "check:ink-export": "node scripts/check-ink-export.mjs",
     "check:sheet-images": "node scripts/check-sheet-images.mjs",
+    "check:ink-double-raster": "node scripts/check-ink-double-raster.mjs",
     "check:worksheet-followups": "node scripts/check-worksheet-followups.mjs",
     "check:tth-flow": "node scripts/check-tth-flow.mjs",
     "check:ink-vector-export": "node scripts/check-ink-vector-export.mjs",

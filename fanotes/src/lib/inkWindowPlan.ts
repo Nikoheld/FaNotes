@@ -17,6 +17,9 @@ export type InkVisibleRange = { top: number; bottom: number }
 export const INK_WINDOW_VIEWPORTS = 3
 /** Move the slice once the visible sheet gets this close (in viewports) to its edge. */
 export const INK_WINDOW_GUARD_VIEWPORTS = 0.5
+/** A slice keeps its height while it is within this share of the three viewports the zoom now asks for. */
+export const INK_WINDOW_KEEP_MIN = 0.85
+export const INK_WINDOW_KEEP_MAX = 1.4
 /** A sheet within 2 % of the slice height paints as one full bitmap. */
 export const INK_WINDOW_FULL_RATIO = 0.98
 
@@ -94,9 +97,16 @@ export const planInkWindow = (input: {
 }): InkWindowPlan => {
   const paperHeight = Math.max(1, finite(input.paperHeight, 1))
   const viewportHeight = Math.max(1, finite(input.viewportHeight, 1))
-  const height = inkWindowHeightFor(paperHeight, viewportHeight)
+  const needed = inkWindowHeightFor(paperHeight, viewportHeight)
   const current = input.current
-  if (inkWindowIsFull(paperHeight, height)) return { window: null, changed: current !== null }
+  if (inkWindowIsFull(paperHeight, needed)) return { window: null, changed: current !== null }
+  // A zoom changes the viewport in layout px by a few percent between the preview a pinch rests at and the camera it
+  // commits. A slice of the old height that still holds three viewports (and is not much more) is kept: the bitmap
+  // keeps its size, so the move is a shift that paints only the new rows, not the whole page a second time.
+  const height = current && !inkWindowIsFull(paperHeight, current.height)
+    && current.height >= needed * INK_WINDOW_KEEP_MIN && current.height <= needed * INK_WINDOW_KEEP_MAX
+    ? current.height
+    : needed
   const sameHeight = current !== null && Math.abs(current.height - height) < 0.5
   if (current && sameHeight && !input.force) {
     const guard = INK_WINDOW_GUARD_VIEWPORTS * viewportHeight

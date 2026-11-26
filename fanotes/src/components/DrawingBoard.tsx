@@ -1771,6 +1771,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
    * committed camera.
    */
   const previewRasterZoomRef = useRef<number | null>(null)
+  /**
+   * Zoom the committed bitmap was made for when it was kept from a resting
+   * pinch at the commit (it is a little off the camera's); null once the
+   * bitmap follows the camera again.
+   */
+  const keptRasterZoomRef = useRef<number | null>(null)
   /** Box of the committed canvas the next paint puts it at, and the sheet rows (layout px) it then shows. */
   const committedPlanRef = useRef<CommittedInkPlan | null>(null)
   /**
@@ -2796,7 +2802,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const liveLayout = inline ? liveWindowLayoutRef.current : null
     const windowLayoutHeight = Math.max(1, layoutWindow ? Math.min(layoutHeight, layoutWindow.height) : layoutHeight)
     // The zoom the bitmap is made for: the preview's while a pinch rests, else the camera's.
-    const rasterZoom = previewRasterZoomRef.current ?? viewZoomRef.current
+    const rasterZoom = previewRasterZoomRef.current ?? keptRasterZoomRef.current ?? viewZoomRef.current
     const qualityKey = [
       Math.round(layoutWidth),
       Math.round(layoutHeight),
@@ -4795,8 +4801,30 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const settleZoomedInk = useCallback((repaint = false) => {
     // From here on the bitmap is the committed camera's, also for the redraw
     // after a stroke that is still under the pen.
+    const previewZoom = previewRasterZoomRef.current
     previewRasterZoomRef.current = null
     if (activeStrokeRef.current) return
+    // A pinch that rested already painted the sharp page for (nearly) the zoom
+    // the camera now commits. Planning the slice again at the committed
+    // geometry moved it by a few rows and painted all the ink a second time.
+    // The bitmap is kept when it is at most 30 % denser, or 3 % thinner, than
+    // the camera needs and still holds every visible row with its guard.
+    if (!repaint && previewZoom !== null && inline && !viewportRasterRef.current
+      && previewZoom >= viewZoomRef.current * 0.97 && previewZoom <= viewZoomRef.current * 1.3) {
+      const planned = inkWindowLayoutRef.current
+      const paper = resolvePaperElement()
+      const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+      const measured = paper && scroller ? measureInkWindow(paper, scroller, viewRotationRef.current) : null
+      const shown = committedShownRef.current
+      if (planned && paper && measured && shown
+        && !inkWindowNeedsMove(planned, measured.visible, INK_WINDOW_GUARD_VIEWPORTS * measured.viewport.height, paper.offsetHeight)
+        && inkRowsCoverVisible(shown, measured.visible, paper.offsetHeight)) {
+        inkVisibleRef.current = { top: measured.visible.top, bottom: measured.visible.bottom }
+        keptRasterZoomRef.current = previewZoom
+        return
+      }
+    }
+    keptRasterZoomRef.current = null
     planInkWindowNow(true)
     canvasQualityKeyRef.current = ''
     // The redraw repaints when the bitmap size or its rows per sheet px
@@ -4804,7 +4832,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // is still painting for it, is left alone.
     if (repaint) committedCanvasDirtyRef.current = true
     redraw(true)
-  }, [planInkWindowNow, redraw])
+  }, [inline, planInkWindowNow, redraw, resolvePaperElement])
 
   /**
    * One preview frame of a pinch or wheel zoom: the sheet is a compositor
@@ -4903,7 +4931,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const unsubscribe = paperView.subscribe((view) => {
       const zoomed = view.zoom !== viewZoomRef.current
       // Cached pages of other notes were painted for the old zoom.
-      if (zoomed) inkBitmapCache.clear()
+      if (zoomed) {
+        inkBitmapCache.clear()
+        keptRasterZoomRef.current = null
+      }
       adopt(view)
       if (zoomed) {
         zoomInFlightUntilRef.current = performance.now() + ZOOM_SETTLE_MS
