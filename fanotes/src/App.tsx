@@ -479,7 +479,7 @@ const NoteTabButton = memo(function NoteTabButton({
         {hold && <span className="tab-hold-mark" title={hold === 'deleted' ? uiText('Datei wurde ausserhalb von FaNotes gelöscht', 'File was deleted outside FaNotes') : uiText('Datei wurde ausserhalb von FaNotes geändert', 'File was changed outside FaNotes')}><CircleAlert aria-hidden="true" size={12} /></span>}
         {dirty && <i className="dirty-dot" title={uiText('Noch nicht gespeichert', 'Not saved yet')} />}
       </button>
-      {!pinned && <button className="tab-close" type="button" aria-label={`${title} ${uiText('schließen', 'close')}`} title="Tab schließen (Strg+W)" onClick={() => { void onClose(path) }}><X aria-hidden="true" size={12} /></button>}
+      {!pinned && <button className="tab-close" type="button" aria-label={`${title} ${uiText('schließen', 'close')}`} title={uiText('Tab schließen (Strg+W)', 'Close tab (Ctrl+W)')} onClick={() => { void onClose(path) }}><X aria-hidden="true" size={12} /></button>}
     </div>
   )
 })

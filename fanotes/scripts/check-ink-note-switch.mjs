@@ -114,8 +114,9 @@ assert.match(board, /useEffect\(\(\) => \(\) => \{\s*(?:if \(saveRetryTimerRef\.
 const reader = section(app, 'const readNoteInk = async (path: string, content: string)', '\n}\n', 'readNoteInk')
 assert.ok(reader.indexOf('readFamdInk(path)') < reader.indexOf('readDrawing(markerId)'), 'FAMD companion is read before the library record')
 assert.match(reader, /noteInkDocument\(embedded, markerId\)/)
-const openDrawing = section(app, 'const openDrawing = useCallback(() => {', '}, [activeTab, noteDrawingSession.key, toast])', 'openDrawing')
-assert.match(openDrawing, /if \(noteDrawingSession\.key > 0\) return/, 'a mounted session is reused — no remount when Stift turns on')
+const openDrawing = section(app, 'const openDrawing = useCallback(() => {', '}, [activeTab, noteDrawingKey, toast])', 'openDrawing')
+// #1458 hoisted the session key into noteDrawingKey so the closure does not capture the whole session.
+assert.match(openDrawing, /if \(noteDrawingKey > 0\) return/, 'a mounted session is reused — no remount when Stift turns on')
 assert.match(openDrawing, /readNoteInk\(path, content\)/)
 assert.match(openDrawing, /setDrawingSession\(\{ \.\.\.drawingSessionFromLoad\(requestId, document\), path \}\)/)
 assert.doesNotMatch(openDrawing, /window\.fanotes\.readDrawing\(/, 'Stift-on must not resume from the library record alone')

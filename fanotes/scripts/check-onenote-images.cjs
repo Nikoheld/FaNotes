@@ -64,8 +64,10 @@ void (async () => {
     // The editor draws a whole-line vault image with the same pattern the importer writes.
     const editor = await fsp.readFile(path.join(__dirname, '..', 'src', 'components', 'MarkdownEditor.tsx'), 'utf8')
     assert.match(editor, /class ImageWidget extends WidgetType/u)
-    assert.match(editor, /imageCandidates\(relative, this\.notePath\)/u)
-    assert.match(editor, /readAssetDataUrl\(candidates\[index\]\)/u)
+    // The widget reads through readVaultImageUrl (since #1457), which tries every imageCandidates() path.
+    assert.match(editor, /readVaultImageUrl\(this\.source, this\.notePath\)/u)
+    assert.match(editor, /imageCandidates\(relative, notePath\)/u)
+    assert.match(editor, /readAssetDataUrl\(candidate\)/u)
     const pattern = /^\s*!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)\s*$/u
     assert.ok(pattern.test(references[0][0]))
   } finally {

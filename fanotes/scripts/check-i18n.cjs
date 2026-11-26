@@ -208,8 +208,8 @@ void (async () => {
     await cdp.evaluate(`document.querySelector('.search-panel button[aria-label="Close search"]')?.click()`)
 
     await cdp.evaluate(`document.querySelector('button[aria-label="Show extra tools"]')?.click() || document.querySelector('button[aria-label="Zusätzliche Werkzeuge ausklappen"]')?.click()`)
-    await waitFor(cdp, `Boolean(document.querySelector('button[aria-label="Open Command Palette"]') || document.querySelector('button[aria-label="Befehlspalette öffnen"]'))`, 'English extra tools')
-    await cdp.evaluate(`document.querySelector('button[aria-label="Open Command Palette"]')?.click()`)
+    await waitFor(cdp, `Boolean(document.querySelector('button[aria-label="Commands: open command palette"]'))`, 'English extra tools')
+    await cdp.evaluate(`document.querySelector('button[aria-label="Commands: open command palette"]')?.click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.command-palette'))`, 'English command palette')
     await audit(cdp, 'Command palette')
     await capture(cdp, 'command-palette')
