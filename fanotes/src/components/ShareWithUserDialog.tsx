@@ -1,7 +1,7 @@
-import { useModalFocus } from '../lib/useModalFocus'
-import { Eye, LoaderCircle, Pencil, Share2, TriangleAlert, X } from 'lucide-react'
+import { DialogFrame } from './DialogFrame'
+import { Eye, LoaderCircle, Pencil, Share2, TriangleAlert } from 'lucide-react'
 import { uiText } from '../i18n'
-import { useEffect, useState, useSyncExternalStore, useRef } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { usernameProblem } from '../lib/sync/crypto'
 import type { SharePermission } from '../lib/sync/api'
 import { userShares } from '../lib/sync/userShares'
@@ -24,8 +24,6 @@ type Found = { username: string; fingerprint: string }
  */
 export function ShareWithUserDialog({ target, signedIn, onClose, onOpenAccountSettings, toast }: Props) {
   const state = useSyncExternalStore(userShares.subscribe, userShares.getState, userShares.getState)
-  const dialogRef = useRef<HTMLElement>(null)
-  useModalFocus(dialogRef)
   const [name, setName] = useState('')
   const [permission, setPermission] = useState<SharePermission>('read')
   const [found, setFound] = useState<Found | null>(null)
@@ -55,12 +53,6 @@ export function ShareWithUserDialog({ target, signedIn, onClose, onOpenAccountSe
     return () => { cancelled = true; window.clearTimeout(timer) }
   }, [name])
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const existing = state.shares.filter((share) => share.role === 'owner' && share.sourcePath === target.path)
 
   const submit = async () => {
@@ -81,14 +73,21 @@ export function ShareWithUserDialog({ target, signedIn, onClose, onOpenAccountSe
 
   const ready = signedIn && state.ready
   return (
-    <div className="modal-backdrop confirm-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section ref={dialogRef} className="confirm-dialog share-user-dialog" role="dialog" aria-modal="true" aria-labelledby="fanotes-share-user-title" onPointerDown={(event) => event.stopPropagation()}>
-        <header className="confirm-dialog-header">
-          <span className="confirm-dialog-icon"><Share2 size={16} /></span>
-          <div><h3 id="fanotes-share-user-title" data-i18n-ignore>{uiText(`„${target.name}“ mit einem Benutzer teilen`, `Share “${target.name}” with a user`)}</h3></div>
-          <button type="button" className="icon-button" aria-label="Schließen" onClick={onClose}><X size={16} /></button>
-        </header>
-        <div className="confirm-dialog-body">
+    <DialogFrame
+      icon={<Share2 size={18} />}
+      eyebrow="Teilen"
+      title={uiText(`„${target.name}“ mit einem Benutzer teilen`, `Share “${target.name}” with a user`)}
+      dynamicTitle
+      titleId="fanotes-share-user-title"
+      className="share-user-dialog"
+      onClose={onClose}
+      footer={(
+        <>
+          <button type="button" className="secondary-button" onClick={onClose}>Schließen</button>
+          {ready && <button type="button" className="primary-button" disabled={busy || !found} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" size={14} /> : <Share2 size={14} />} Teilen</button>}
+        </>
+      )}
+    >
           {!ready && (
             <p className="share-user-hint">
               {!signedIn ? 'Dafür brauchst du ein FaNotes-Konto. Es geht ohne E-Mail und ohne Passwort.' : 'Dafür braucht dein Konto einen Benutzernamen.'}{' '}
@@ -128,12 +127,6 @@ export function ShareWithUserDialog({ target, signedIn, onClose, onOpenAccountSe
               )}
             </>
           )}
-        </div>
-        <div className="confirm-dialog-actions">
-          <button type="button" className="secondary-button" onClick={onClose}>Schließen</button>
-          {ready && <button type="button" className="primary-button" disabled={busy || !found} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" size={14} /> : <Share2 size={14} />} Teilen</button>}
-        </div>
-      </section>
-    </div>
+    </DialogFrame>
   )
 }

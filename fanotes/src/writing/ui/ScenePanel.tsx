@@ -1,7 +1,8 @@
 // Inspector tab for the scene at the caret: synopsis, status, label, point of
 // view, characters and places, linked notes, goal, export, and snapshots.
 import { colorSwatchName } from '../../lib/colorNames'
-import { Camera, ExternalLink, Link2, LoaderCircle, Plus, RotateCcw, X } from 'lucide-react'
+import { Camera, ExternalLink, GitCompare, Link2, LoaderCircle, Plus, RotateCcw, X } from 'lucide-react'
+import { DialogFrame } from '../../components/DialogFrame'
 import { useEffect, useMemo, useState } from 'react'
 import type { BibleEntry } from '../model/bible'
 import type { Snapshot } from '../model/snapshots'
@@ -138,36 +139,43 @@ export function SnapshotCompare({ snapshot, rows, onRestore, onClose }: {
 }) {
   const changed = rows.filter((row) => row.kind !== 'same').length
   return (
-    <div className="wm-dialog-backdrop" onMouseDown={onClose}>
-      <div className="wm-compare" role="dialog" aria-label={L('Version vergleichen', 'Compare version')} onMouseDown={(event) => event.stopPropagation()}>
-        <header>
-          <div>
-            <strong data-i18n-ignore>{snapshot.title}</strong>
-            <small>{stampLabel(snapshot.stamp)}{snapshot.note ? ` · ${snapshot.note}` : ''} · {L(`${changed} Absätze anders`, `${changed} paragraphs differ`)}</small>
-          </div>
+    <DialogFrame
+      icon={<GitCompare size={18} />}
+      eyebrow={L('Versionen', 'Versions')}
+      title={snapshot.title}
+      dynamicTitle
+      titleId="wm-compare-title"
+      closeLabel={L('Schliessen', 'Close')}
+      size="xl"
+      className="wm-compare"
+      onClose={onClose}
+      subheader={<p className="wm-compare-sub" data-i18n-ignore>{stampLabel(snapshot.stamp)}{snapshot.note ? ` · ${snapshot.note}` : ''} · {L(`${changed} Absätze anders`, `${changed} paragraphs differ`)}</p>}
+      footer={(
+        <>
+          <small className="wm-compare-note">{L('Beim Wiederherstellen wird der jetzige Stand zuerst als Version gesichert.', 'Restoring saves the current state as a version first.')}</small>
+          <button type="button" className="secondary-button" onClick={onClose}>{L('Schliessen', 'Close')}</button>
           <button type="button" className="primary-button" onClick={onRestore} disabled={!changed}><RotateCcw size={14} /> {L('Diese Version wiederherstellen', 'Restore this version')}</button>
-          <button type="button" className="wm-icon" aria-label={L('Schliessen', 'Close')} onClick={onClose}><X size={16} /></button>
-        </header>
-        <div className="wm-compare-head"><span>{L('Gesicherte Version', 'Saved version')}</span><span>{L('Jetzt', 'Now')}</span></div>
-        <div className="wm-compare-body" data-i18n-ignore>
-          {rows.map((row) => (
-            <div key={row.id} className={`wm-compare-row is-${row.kind}`}>
-              {row.kind === 'changed' ? (
-                <>
-                  <p>{row.pieces.filter((piece) => piece.kind !== 'added').map((piece, index) => <span key={index} className={piece.kind === 'removed' ? 'is-removed' : ''}>{piece.text}</span>)}</p>
-                  <p>{row.pieces.filter((piece) => piece.kind !== 'removed').map((piece, index) => <span key={index} className={piece.kind === 'added' ? 'is-added' : ''}>{piece.text}</span>)}</p>
-                </>
-              ) : (
-                <>
-                  <p className={row.kind === 'removed' ? 'is-removed' : ''}>{row.kind === 'added' ? '' : row.text}</p>
-                  <p className={row.kind === 'added' ? 'is-added' : ''}>{row.kind === 'removed' ? '' : row.text}</p>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-        <p className="wm-hint">{L('Beim Wiederherstellen wird der jetzige Stand zuerst als Version gesichert.', 'Restoring saves the current state as a version first.')}</p>
+        </>
+      )}
+    >
+      <div className="wm-compare-head"><span>{L('Gesicherte Version', 'Saved version')}</span><span>{L('Jetzt', 'Now')}</span></div>
+      <div className="wm-compare-body" data-i18n-ignore>
+        {rows.map((row) => (
+          <div key={row.id} className={`wm-compare-row is-${row.kind}`}>
+            {row.kind === 'changed' ? (
+              <>
+                <p>{row.pieces.filter((piece) => piece.kind !== 'added').map((piece, index) => <span key={index} className={piece.kind === 'removed' ? 'is-removed' : ''}>{piece.text}</span>)}</p>
+                <p>{row.pieces.filter((piece) => piece.kind !== 'removed').map((piece, index) => <span key={index} className={piece.kind === 'added' ? 'is-added' : ''}>{piece.text}</span>)}</p>
+              </>
+            ) : (
+              <>
+                <p className={row.kind === 'removed' ? 'is-removed' : ''}>{row.kind === 'added' ? '' : row.text}</p>
+                <p className={row.kind === 'added' ? 'is-added' : ''}>{row.kind === 'removed' ? '' : row.text}</p>
+              </>
+            )}
+          </div>
+        ))}
       </div>
-    </div>
+    </DialogFrame>
   )
 }

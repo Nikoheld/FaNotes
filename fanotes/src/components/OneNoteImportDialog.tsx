@@ -1,7 +1,7 @@
-import { useModalFocus } from '../lib/useModalFocus'
+import { DialogFrame } from './DialogFrame'
 import { uiText } from '../i18n'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, FolderPlus, ImageIcon, LoaderCircle, NotebookTabs, PenLine, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, FolderPlus, ImageIcon, LoaderCircle, NotebookTabs, PenLine } from 'lucide-react'
 import type { OneNoteImportProgress, OneNoteImportResult, OneNoteScan } from '../types'
 
 type Stage = 'opening' | 'pick' | 'importing' | 'done' | 'error'
@@ -25,8 +25,6 @@ const safeFolderName = (value: string) => value
   .slice(0, 120)
 
 export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
-  const dialogRef = useRef<HTMLElement>(null)
-  useModalFocus(dialogRef)
   const [stage, setStage] = useState<Stage>('opening')
   const [scan, setScan] = useState<OneNoteScan | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -81,17 +79,6 @@ export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
   useEffect(() => window.fanotes.onOneNoteProgress((value) => setProgress(value)), [])
   useEffect(() => () => { closeSession() }, [closeSession])
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || stageRef.current === 'importing') return
-      event.preventDefault()
-      event.stopPropagation()
-      close()
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [close])
-
   const toggle = (ids: string[], on: boolean) => setSelected((current) => {
     const next = new Set(current)
     for (const id of ids) { if (on) next.add(id); else next.delete(id) }
@@ -129,20 +116,37 @@ export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
 
   const folderOptions = useMemo(() => [...new Set(folders)].sort((left, right) => left.localeCompare(right, 'de', { numeric: true })), [folders])
 
-  return (
-    <div className="modal-backdrop onenote-dialog-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget && stage !== 'importing') close() }}>
-      <section ref={dialogRef} className="onenote-dialog" role="dialog" aria-modal="true" aria-label="Microsoft OneNote importieren">
-        <header>
-          <div>
-            <span><NotebookTabs size={19} /></span>
-            <div>
-              <small>Microsoft OneNote</small>
-              <h2>{scan ? scan.notebookName : 'Notizbuch importieren'}</h2>
-            </div>
-          </div>
-          <button type="button" className="icon-button" aria-label="Schließen" disabled={stage === 'importing'} onClick={close}><X size={16} /></button>
-        </header>
+  const target = <small className="onenote-dialog-target">{destination ? <>Ziel: {destination}</> : 'Ziel: oberste Ebene des Vaults'}</small>
+  const footer = stage === 'pick' && scan ? (
+    <>
+      {target}
+      <button type="button" className="secondary-button" onClick={close}>Abbrechen</button>
+      <button type="button" className="primary-button" disabled={!selected.size || destinationInvalid} onClick={() => void start()}>Importieren ({selected.size})</button>
+    </>
+  ) : stage === 'importing' ? (
+    <>
+      <small className="onenote-dialog-target">Bereits geschriebene Seiten bleiben erhalten.</small>
+      <button type="button" className="secondary-button" disabled={cancelling} onClick={cancel}>Abbrechen</button>
+    </>
+  ) : stage === 'done' && result ? (
+    <>
+      {target}
+      <button type="button" className="primary-button" onClick={close}>Fertig</button>
+    </>
+  ) : stage === 'error' ? <button type="button" className="primary-button" onClick={close}>Schließen</button> : undefined
 
+  return (
+    <DialogFrame
+      icon={<NotebookTabs size={18} />}
+      eyebrow="Microsoft OneNote"
+      title={scan ? scan.notebookName : 'Notizbuch importieren'}
+      dynamicTitle={Boolean(scan)}
+      titleId="onenote-import-title"
+      className="onenote-dialog"
+      locked={stage === 'importing'}
+      onClose={close}
+      footer={footer}
+    >
         {stage === 'opening' && <div className="onenote-dialog-state"><LoaderCircle className="spin" size={22} /><strong>Notizbuch wird gelesen …</strong><small>Wähle zuerst die Datei. Große Notizbücher brauchen einen Moment.</small></div>}
 
         {stage === 'error' && <div className="onenote-dialog-state is-error" role="alert"><AlertTriangle size={22} /><strong>Das hat nicht geklappt</strong><small>{error}</small></div>}
@@ -208,13 +212,6 @@ export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
               </label>
             </div>
           </div>
-          <footer>
-            <small>{destination ? <>Ziel: {destination}</> : 'Ziel: oberste Ebene des Vaults'}</small>
-            <div>
-              <button type="button" className="secondary-button" onClick={close}>Abbrechen</button>
-              <button type="button" className="primary-button" disabled={!selected.size || destinationInvalid} onClick={() => void start()}>Importieren ({selected.size})</button>
-            </div>
-          </footer>
         </>}
 
         {stage === 'importing' && <>
@@ -224,7 +221,6 @@ export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
             <div className="onenote-dialog-progress" aria-hidden><i style={{ width: `${progress && progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }} /></div>
             <small data-i18n-ignore>{progress ? `${progress.done} ${uiText('von', 'of')} ${progress.total}${progress.title && progress.status === 'working' ? ` · ${progress.title}` : ''}` : ''}</small>
           </div>
-          <footer><small>Bereits geschriebene Seiten bleiben erhalten.</small><div><button type="button" className="secondary-button" disabled={cancelling} onClick={cancel}>Abbrechen</button></div></footer>
         </>}
 
         {stage === 'done' && result && <>
@@ -245,11 +241,8 @@ export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
             {result.failed.length > 0 && <div className="onenote-dialog-errors" role="alert"><strong>Fehler pro Seite</strong><ul>{result.failed.map((item) => <li key={item.id}><b data-i18n-ignore>{item.title}</b>: {item.error}</li>)}</ul></div>}
             {result.warnings.length > 0 && <details><summary>{result.warnings.length} Hinweise</summary><ul>{result.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
           </div>
-          <footer><small>{destination ? <>Ziel: {destination}</> : 'Ziel: oberste Ebene des Vaults'}</small><div><button type="button" className="primary-button" onClick={close}>Fertig</button></div></footer>
         </>}
 
-        {stage === 'error' && <footer><small /><div><button type="button" className="primary-button" onClick={close}>Schließen</button></div></footer>}
-      </section>
-    </div>
+    </DialogFrame>
   )
 }

@@ -1,5 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useMenuKeyboard } from '../lib/useMenuKeyboard'
+
+// Items of a popover: actions, inputs and the one tabbable cell of a roving grid.
+const POPOVER_ITEMS = '[role="menuitem"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), input:not(:disabled), select:not(:disabled)'
 
 type ToolbarMenuProps = {
   /** Tooltip and accessible name of the trigger. */
@@ -48,6 +52,10 @@ export function ToolbarMenu({ label, icon, children, disabled = false, defaultOp
     return () => window.removeEventListener('resize', update)
   }, [open, children])
 
+  const closePanel = useCallback(() => setOpen(false), [])
+  // Focus enters the popover, the arrow keys walk its controls, Escape and leaving it close it and focus returns to the button.
+  const onPanelKeyDown = useMenuKeyboard(panelRef, open, closePanel, { selector: POPOVER_ITEMS, tab: 'edge' })
+
   useEffect(() => {
     if (!open) return undefined
     const close = (event: PointerEvent) => {
@@ -67,6 +75,7 @@ export function ToolbarMenu({ label, icon, children, disabled = false, defaultOp
       className="ftb-popover"
       role="menu"
       aria-label={panelLabel ?? label}
+      onKeyDown={onPanelKeyDown}
       style={place ? { left: place.left, top: place.top, maxHeight: place.maxHeight } : { left: 0, top: 0, visibility: 'hidden' }}
       onClick={(event) => {
         // A plain action button closes the menu; controls inside keep it open.

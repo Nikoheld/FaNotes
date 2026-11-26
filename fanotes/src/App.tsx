@@ -967,6 +967,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const [tagDraft, setTagDraft] = useState('')
   const [tagMenuOpen, setTagMenuOpen] = useState(false)
   const tagMenuRef = useRef<HTMLDivElement>(null)
+  const tagPopoverRef = useRef<HTMLDivElement>(null)
+  const closeTagMenu = useCallback(() => setTagMenuOpen(false), [])
+  const onTagMenuKeyDown = useMenuKeyboard(tagPopoverRef, tagMenuOpen, closeTagMenu, { selector: 'button:not(:disabled), input:not(:disabled)', tab: 'edge', initial: 'input' })
   const [splitPath, setSplitPath] = useState<string | null>(null)
   const [splitLayout, setSplitLayout] = useState<SplitLayout>(() => loadSplitLayout())
   const [splitDragging, setSplitDragging] = useState(false)
@@ -7185,7 +7188,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 <div className="note-tags-menu" ref={tagMenuRef}>
                   <button type="button" className={`toolbar-button ${tagMenuOpen ? 'active' : ''}`} aria-expanded={tagMenuOpen} title="Schlagwörter" onClick={() => setTagMenuOpen((open) => !open)}><Tag aria-hidden="true" size={14} /><span className="sr-only">Schlagwörter</span>{activeTags.length > 0 && <span>{activeTags.length}</span>}</button>
                   {tagMenuOpen && (
-                    <div className="note-tags-popover" role="dialog" aria-label="Schlagwörter">
+                    <div className="note-tags-popover" role="dialog" aria-label="Schlagwörter" ref={tagPopoverRef} onKeyDown={onTagMenuKeyDown}>
                       <div className="note-tags">
                         {activeTags.map((tag) => (
                           <button key={tag} type="button" className="note-tag" onClick={() => applyTagsToNote(activeTags.filter((item) => item !== tag))} title="Tag entfernen">#{tag}<X size={10} /></button>

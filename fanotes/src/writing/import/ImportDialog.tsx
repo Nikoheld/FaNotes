@@ -1,6 +1,8 @@
 // Import dialog: pick or drop a DOCX, Markdown or text file, see what it
 // contains, then create a new story from it (`onImport`; the caller saves it).
+import { FileUp } from 'lucide-react'
 import { useState } from 'react'
+import { DialogFrame } from '../../components/DialogFrame'
 import { runsText } from '../model/runs'
 import type { BinderNode } from '../model/types'
 import { L, formatNumber } from '../ui/i18n'
@@ -49,9 +51,23 @@ export function ImportDialog(props: ImportDialogProps) {
   }
   const words = story ? story.value.scenes.reduce((sum, scene) => sum + scene.paragraphs.reduce((total, paragraph) => total + (runsText(paragraph.runs).match(/[\p{L}\p{N}]+/gu)?.length ?? 0), 0), 0) : 0
   return (
-    <div className="wm-dialog-backdrop" onMouseDown={props.onClose}>
-      <form className="wm-dialog wm-export" role="dialog" aria-label={L('Importieren', 'Import')} onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); if (!busy) void confirm() }} onKeyDown={(event) => { if (event.key === 'Escape') props.onClose() }}>
-        <h2>{L('Geschichte importieren', 'Import story')}</h2>
+    <DialogFrame
+      icon={<FileUp size={18} />}
+      eyebrow={L('Importieren', 'Import')}
+      title={L('Geschichte importieren', 'Import story')}
+      titleId="wm-import-title"
+      closeLabel={L('Schliessen', 'Close')}
+      size="md"
+      className="wm-export"
+      onClose={props.onClose}
+      footer={(
+        <>
+          <button type="button" className="secondary-button" onClick={props.onClose}>{L('Abbrechen', 'Cancel')}</button>
+          <button type="submit" form="wm-import-form" className="primary-button" disabled={busy || !story}>{L('Als neue Geschichte anlegen', 'Create new story')}</button>
+        </>
+      )}
+    >
+      <form id="wm-import-form" className="wm-export-form" onSubmit={(event) => { event.preventDefault(); if (!busy) void confirm() }}>
         <label className={`wm-import-drop${over ? ' is-over' : ''}`} onDragOver={(event) => { event.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)} onDrop={(event) => { event.preventDefault(); setOver(false); void read(event.dataTransfer.files[0]) }}>
           <input type="file" accept={IMPORT_ACCEPT} disabled={busy} onChange={(event) => void read(event.target.files?.[0])} />
           <strong>{story ? story.fileName : L('Datei wählen oder hierher ziehen', 'Choose a file or drop it here')}</strong>
@@ -66,12 +82,8 @@ export function ImportDialog(props: ImportDialogProps) {
             {count(story.value.manifest.binder, 'chapter')} {L('Kapitel', 'chapters')}, {count(story.value.manifest.binder, 'scene')} {L('Szenen', 'scenes')}, {formatNumber(words)} {L('Wörter', 'words')} · {story.value.manifest.language}
           </p>
         )}
-        {error && <p className="wm-export-error" role="alert">{error}</p>}
-        <div>
-          <button type="button" className="secondary-button" onClick={props.onClose}>{L('Abbrechen', 'Cancel')}</button>
-          <button type="submit" className="primary-button" disabled={busy || !story}>{L('Als neue Geschichte anlegen', 'Create new story')}</button>
-        </div>
+        {error && <p className="dialog-frame__error" role="alert">{error}</p>}
       </form>
-    </div>
+    </DialogFrame>
   )
 }
