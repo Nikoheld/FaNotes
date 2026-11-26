@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'vite'
+import { measureHostContention } from './fixtures/host-contention.mjs'
 import { singleEntryPlugin } from './fixtures/single-entry-plugin.mjs'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -12,10 +13,36 @@ const workspaceRoot = path.resolve(appRoot, '..')
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-connected-recognition-'))
 const output = path.join(temporary, 'dist')
 const profile = path.join(temporary, 'chromium')
+// The guard exists to catch a hang, not to time the recognition: the test legitimately takes about a minute on an
+// idle host and several on a busy one (it ran 200 s beside other builds). So it fails when the Chromium process
+// tree burns no CPU for STALL_MS, and the absolute wall limit is the idle budget stretched by how busy the host
+// is and then by a safety factor. Without /proc (Windows) only the wall limit applies.
 const parsedWallTimeout = Number.parseInt(process.env.FANOTES_TEST_WALL_TIMEOUT_MS ?? '90000', 10)
-const chromiumWallTimeout = Number.isFinite(parsedWallTimeout)
-  ? Math.min(180_000, Math.max(15_000, parsedWallTimeout))
-  : 90_000
+const contention = await measureHostContention()
+const baseWallTimeout = Number.isFinite(parsedWallTimeout) ? Math.min(180_000, Math.max(15_000, parsedWallTimeout)) : 90_000
+const chromiumWallTimeout = Math.round(baseWallTimeout * Math.max(3, contention * 2))
+const STALL_MS = 45_000
+
+const treeCpuTicks = (rootPid) => {
+  const parents = new Map()
+  const ticks = new Map()
+  for (const name of fs.readdirSync('/proc')) {
+    if (!/^\d+$/u.test(name)) continue
+    try {
+      const fields = fs.readFileSync(`/proc/${name}/stat`, 'utf8').split(')').pop().trim().split(' ')
+      parents.set(Number(name), Number(fields[1]))
+      ticks.set(Number(name), Number(fields[11]) + Number(fields[12]))
+    } catch { /* gone */ }
+  }
+  const tree = new Set([rootPid])
+  for (let grew = true; grew;) {
+    grew = false
+    for (const [pid, parent] of parents) if (tree.has(parent) && !tree.has(pid)) { tree.add(pid); grew = true }
+  }
+  let total = 0
+  for (const pid of tree) total += ticks.get(pid) ?? 0
+  return total
+}
 let chromium
 
 const terminateChromiumTree = (signal) => {
@@ -42,12 +69,30 @@ const waitForChromium = () => new Promise((resolve, reject) => {
       reject(new Error(`Chromium-Erkennungstest überschritt das Wall-Clock-Limit von ${chromiumWallTimeout} ms.`))
     }, 2_000)
   }, chromiumWallTimeout)
+  let lastTicks = -1
+  let lastProgress = Date.now()
+  const stallTimer = process.platform === 'win32' ? null : setInterval(() => {
+    let ticks
+    try { ticks = treeCpuTicks(chromium.pid) } catch { return }
+    if (ticks !== lastTicks && ticks - lastTicks > 2) { lastTicks = ticks; lastProgress = Date.now(); return }
+    if (Date.now() - lastProgress < STALL_MS || timedOut) return
+    timedOut = true
+    terminateChromiumTree('SIGKILL')
+    chromium.stdout.destroy()
+    chromium.stderr.destroy()
+    chromium.unref()
+    clearTimeout(wallTimer)
+    clearTimeout(forceKillTimer)
+    reject(new Error(`Chromium-Erkennungstest verbrauchte seit ${STALL_MS} ms keine CPU-Zeit mehr (hängt).`))
+  }, 5_000)
   chromium.once('error', (error) => {
+    clearInterval(stallTimer)
     clearTimeout(wallTimer)
     clearTimeout(forceKillTimer)
     reject(error)
   })
   chromium.once('close', (code) => {
+    clearInterval(stallTimer)
     clearTimeout(wallTimer)
     clearTimeout(forceKillTimer)
     if (timedOut) {
