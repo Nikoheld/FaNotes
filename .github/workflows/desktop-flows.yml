@@ -66,5 +66,7 @@ jobs:
         run: npm run check:ink-vector-export && (npm run check:ink-export || { echo "::warning::ink export check failed once; retrying"; npm run check:ink-export; })
       - name: Pictures and documents on the sheet (no worksheet bar)
         run: npm run check:sheet-images || { echo "::warning::sheet images check failed once; retrying"; npm run check:sheet-images; }
+      - name: Worksheet follow-ups (export, replace keeps marks, removal on quit)
+        run: npm run check:worksheet-followups || { echo "::warning::worksheet follow-ups check failed once; retrying"; npm run check:worksheet-followups; }
       - name: Text in deine Handschrift (dialog, empty state, insert, undo)
         run: npm run check:tth-flow || { echo "::warning::tth flow check failed once; retrying"; npm run check:tth-flow; }

@@ -93,6 +93,8 @@ jobs:
         run: npm run check:text-field-toolbar
       - name: Zooming keeps the handwriting on the paper in every frame
         run: npm run check:zoom-ink-registration
+      - name: A pinch paints the handwriting once, not twice
+        run: npm run check:ink-double-raster
       - name: Zooming a note with many sections and handwriting stays light
         run: npm run check:zoom-sections-perf
         env:
