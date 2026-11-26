@@ -94,6 +94,7 @@ import {
   tickPaperViewportEditorScrollHold,
 } from '../lib/paperCaretScroll'
 import { buildTextMotionDiagnosticEvent, recordTextMotionDiagnostic } from '../lib/bugReport'
+import { uiText } from '../i18n'
 
 export type PaperViewApi = PaperViewSnapshot & {
   zoomBy: (delta: number, originClient?: { x: number; y: number }) => void
@@ -1430,7 +1431,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
             <button
               type="button"
               className="paper-view-hud-reset"
-              aria-label={`${Math.round(view.zoom * 100)}%${view.rotation ? ` · ${view.rotation}°` : ''}, Ansicht zurücksetzen`}
+              aria-label={`${Math.round(view.zoom * 100)}%${view.rotation ? ` · ${view.rotation}°` : ''}, ${uiText('Ansicht zurücksetzen', 'Reset view')}`}
               title="Zoom und Drehung zurücksetzen (Strg+0)"
               onClick={resetView}
               disabled={!active}

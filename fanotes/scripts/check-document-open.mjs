@@ -144,6 +144,10 @@ const settle = (ms) => page.waitForTimeout(ms)
 const startRecorder = () => page.evaluate(() => {
   const frames = []
   let on = true
+  // Sampled right after a frame is committed (a message task posted from the rAF runs after that frame's
+  // rAF callbacks and paint). Sampling inside the rAF itself ran before the open camera's own rAF
+  // correction and reported an intermediate state that is never painted.
+  const channel = new MessageChannel()
   const sample = () => {
     const paper = document.querySelector('.unified-paper')
     const rect = paper?.getBoundingClientRect()
@@ -161,9 +165,10 @@ const startRecorder = () => page.evaluate(() => {
       text: document.querySelector('.cm-content')?.textContent?.length ?? -1,
       ink: [...(paper?.querySelectorAll('canvas') ?? [])].filter((canvas) => !canvas.closest('.pdf-note-canvas-host') && canvas.width > 0).length,
     })
-    if (on) requestAnimationFrame(sample)
+    if (on) requestAnimationFrame(() => channel.port2.postMessage(0))
   }
-  requestAnimationFrame(sample)
+  channel.port1.onmessage = sample
+  requestAnimationFrame(() => channel.port2.postMessage(0))
   window.__stopOpenRecorder = () => { on = false; return frames }
 })
 const stopRecorder = () => page.evaluate(() => window.__stopOpenRecorder())

@@ -197,7 +197,7 @@ const revealSource = app.slice(app.indexOf('const revealOpenedNote = useCallback
 assert.match(revealSource, /setActivePath\(path\)/u)
 assert.match(revealSource, /void loadNoteCompanion\(path\)/u)
 assert.doesNotMatch(revealSource, /await /u)
-const openSource = app.slice(app.indexOf('const openNote = useCallback'), app.indexOf('const restoreWorkspace = useCallback'))
+const openSource = app.slice(app.indexOf('const openNoteUntracked = useCallback'), app.indexOf('const restoreWorkspace = useCallback'))
 assert.equal(openSource.match(/revealOpenedNote\(/g).length, 2)
 assert.doesNotMatch(openSource, /await preparePageStats/u)
 assert.doesNotMatch(openSource, /await loadNoteCompanion/u)

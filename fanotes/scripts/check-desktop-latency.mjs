@@ -181,7 +181,7 @@ for (const title of ['Handschrift schreiben', 'Handschrift einrahmen', 'Lineal e
   await act(`pen tool: ${title}`, async () => { await page.locator(`[title^="${title}"]`).first().click({ timeout: 5000 }) })
 }
 await act('pen mode off (Ctrl+D)', async () => { await page.keyboard.press('Control+d') }, 1500)
-await act('open Aufgaben', ribbon('Hausaufgaben und Termine öffnen'), 2000)
+await act('open Aufgaben', ribbon('Aufgaben: Hausaufgaben und Termine öffnen'), 2000)
 await act('close Aufgaben', async () => { await page.locator('.homework-close').click({ timeout: 8000 }) })
 
 // --- QA-032: memory ------------------------------------------------------------

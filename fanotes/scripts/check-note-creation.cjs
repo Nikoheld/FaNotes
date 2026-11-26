@@ -275,8 +275,10 @@ void (async () => {
     socket?.close()
     if (child.exitCode === null) {
       try { process.kill(-child.pid, 'SIGTERM') } catch {}
+      // Electron keeps writing its profile until it exits; removing the directory too early fails with ENOTEMPTY.
+      for (let waited = 0; child.exitCode === null && child.signalCode === null && waited < 100; waited += 1) await new Promise((resolve) => setTimeout(resolve, 100))
     }
-    fs.rmSync(temporary, { recursive: true, force: true })
+    fs.rmSync(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
   }
 })().catch((error) => {
   console.error(error)
