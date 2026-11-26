@@ -1,5 +1,6 @@
 import { BookPlus, EyeOff, LoaderCircle, Replace, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useMenuKeyboard } from '../../lib/useMenuKeyboard'
 import type { Issue } from '../assist/rules'
 import { loadThesaurus, synonyms, type SynonymGroup } from '../assist/thesaurus'
 import { L, uiEnglish } from './i18n'
@@ -18,8 +19,10 @@ export type PopoverTarget = {
 
 const keepCase = (template: string, word: string) => (/^\p{Lu}/u.test(template) ? word[0].toLocaleUpperCase() + word.slice(1) : word)
 
-export function AssistPopover({ target, onReplace, onIgnore, onAddWord, onDisableRule, onClose }: {
+export function AssistPopover({ target, focusRequest, onReplace, onIgnore, onAddWord, onDisableRule, onClose }: {
   target: PopoverTarget
+  /** The editor keeps focus while typing. Raising this number (Tab or Shift+F7 in the editor) moves focus into the popover. */
+  focusRequest: number
   onReplace: (from: number, to: number, text: string) => void
   onIgnore: (issue: Issue) => void
   onAddWord: (word: string) => void
@@ -36,9 +39,26 @@ export function AssistPopover({ target, onReplace, onIgnore, onAddWord, onDisabl
     loadThesaurus(target.language).then((data) => { if (alive) setGroups(synonyms(data, word.text, target.language)) }).catch(() => { if (alive) { setThesaurusError(true); setGroups([]) } })
     return () => { alive = false }
   }, [word, target.synonyms, target.language])
+  const ref = useRef<HTMLDivElement>(null)
+  const firstRequest = useRef(focusRequest)
+  const [entered, setEntered] = useState(false)
+  useEffect(() => { if (focusRequest !== firstRequest.current) setEntered(true) }, [focusRequest])
+  // Only after the writer asked for it: arrows walk the suggestions, focus goes back to the editor on exit.
+  const onArrows = useMenuKeyboard(ref, entered, onClose, { selector: 'button' })
   const issue = target.issue
   return (
-    <div className="wm-assist" role="dialog" aria-label={L('Vorschläge', 'Suggestions')} style={{ left: target.left, top: target.top }} onMouseDown={(event) => event.preventDefault()}>
+    <div
+      ref={ref}
+      className="wm-assist"
+      role="dialog"
+      aria-label={L('Vorschläge', 'Suggestions')}
+      style={{ left: target.left, top: target.top }}
+      onMouseDown={(event) => event.preventDefault()}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' || event.key === 'Tab') { event.preventDefault(); event.stopPropagation(); onClose(); return }
+        onArrows(event)
+      }}
+    >
       <button type="button" className="wm-assist-close" aria-label={L('Schliessen', 'Close')} onClick={onClose}><X size={13} /></button>
       {issue && (
         <section>
@@ -76,6 +96,7 @@ export function AssistPopover({ target, onReplace, onIgnore, onAddWord, onDisabl
           ))}
         </section>
       )}
+      <p className="wm-assist-keys"><kbd>Tab</kbd> {L('Vorschläge wählen', 'choose')} · <kbd>Esc</kbd> {L('schließen', 'close')}</p>
     </div>
   )
 }

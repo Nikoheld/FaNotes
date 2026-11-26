@@ -1,4 +1,4 @@
-import { Check, MessageSquare, RotateCcw, Trash2 } from 'lucide-react'
+import { Check, MessageSquare, RotateCcw, Trash2, X } from 'lucide-react'
 import { memo, useMemo, useState } from 'react'
 import * as commands from '../editor/commands'
 import type { WritingController } from '../editor/controller'
@@ -91,7 +91,7 @@ export const Inspector = memo(function Inspector({ controller, manifest, footnot
         {([['scene', L('Szene', 'Scene')], ['check', L('Prüfen', 'Check')], ['page', L('Seite', 'Page')], ['styles', L('Formate', 'Styles')], ['notes', L('Notizen', 'Notes')]] as Array<[Tab, string]>).map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'is-on' : ''} onClick={() => setTab(id)}>{label}</button>
         ))}
-        <button type="button" className="wm-icon" onClick={onClose} aria-label={L('Schliessen', 'Close')}>×</button>
+        <button type="button" className="wm-icon" onClick={onClose} aria-label={L('Schliessen', 'Close')}><X size={14} /></button>
       </div>
 
       {tab === 'scene' && scene}

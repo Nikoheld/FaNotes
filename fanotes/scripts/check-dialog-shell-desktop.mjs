@@ -320,9 +320,86 @@ const runExtra = async (theme) => {
       if (size === 'normal') await shot(page, `wm-footnote-${theme}`)
       await verifyDialog(page, `writing footnote ${theme} ${size}`)
     }
+    await writingPanels(page, theme)
   } finally {
     await stop(app, browser)
     profile.dispose()
+  }
+}
+
+/** Writing mode: the Assist popover (keeps the editor focus, Tab enters it, Escape returns) and the Scene panel. */
+const writingPanels = async (page, theme) => {
+  await page.setViewportSize({ width: 1440, height: 940 })
+  await sleep(400)
+  await page.locator('.wm-page').first().click({ position: { x: 160, y: 200 }, force: true })
+  await page.keyboard.press('Control+End')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('Das ist ein Tset und es ist sehr schoen.')
+  await sleep(1500)
+  for (let i = 0; i < 30; i += 1) await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('Shift+F7')
+  await sleep(500)
+  const label = `writing assist ${theme}`
+  const state = () => page.evaluate(() => {
+    const pop = document.querySelector('.wm-assist')
+    if (!pop) return null
+    const r = pop.getBoundingClientRect()
+    const active = document.activeElement
+    return { inEditor: Boolean(active?.matches('textarea.wm-input')), inside: pop.contains(active), fits: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight, buttons: pop.querySelectorAll('button').length }
+  })
+  checked.push(label)
+  let st = await state()
+  if (!st) fail(`${label}: Shift+F7 does not open the popover`)
+  else {
+    if (!st.inEditor) fail(`${label}: opening it took the focus away from the editor`)
+    if (!st.fits) fail(`${label}: leaves the window`)
+    await shot(page, `wm-assist-${theme}`, '.wm-assist')
+    await page.keyboard.press('Tab')
+    await sleep(300)
+    st = await state()
+    if (!st?.inside) fail(`${label}: Tab does not move focus into the popover`)
+    const before = await page.evaluate(() => document.activeElement?.textContent)
+    await page.keyboard.press('ArrowDown')
+    const after = await page.evaluate(() => ({ text: document.activeElement?.textContent, inside: Boolean(document.activeElement?.closest('.wm-assist')) }))
+    if (!after.inside) fail(`${label}: ArrowDown leaves the popover`)
+    else if (st.buttons > 3 && after.text === before) fail(`${label}: ArrowDown does not move between the suggestions`)
+    await page.keyboard.press('Escape')
+    await sleep(300)
+    if (await state()) fail(`${label}: Escape does not close the popover`)
+    else if (!(await page.evaluate(() => document.activeElement?.matches('textarea.wm-input')))) fail(`${label}: focus did not return to the editor`)
+  }
+  // Typing is never interrupted: open it again and type a letter, the editor still takes it.
+  await page.keyboard.press('Shift+F7')
+  await sleep(300)
+  await page.keyboard.type('x')
+  const typed = await page.evaluate(() => document.querySelector('.wm-page')?.textContent?.includes('x'))
+  if (!typed) fail(`${label}: typing while the popover is open does not reach the editor`)
+  await page.keyboard.press('Escape')
+
+  // Scene panel
+  await page.keyboard.press('F7')
+  await sleep(400)
+  await page.locator('.wm-tabs button[role="tab"]', { hasText: 'Szene' }).click()
+  await sleep(400)
+  for (const [size, viewport] of [['normal', { width: 1440, height: 940 }], ['small', { width: 940, height: 620 }]]) {
+    await page.setViewportSize(viewport)
+    await sleep(400)
+    const panel = await page.evaluate(() => {
+      const inspector = document.querySelector('.wm-inspector')
+      if (!inspector) return null
+      const box = inspector.getBoundingClientRect()
+      const close = inspector.querySelector('.wm-tabs .wm-icon')?.getBoundingClientRect()
+      const wide = [...inspector.querySelectorAll('.wm-inspector-body *')].filter((node) => node.getBoundingClientRect().right > box.right + 1).length
+      const unnamed = [...inspector.querySelectorAll('.wm-inspector-body input, .wm-inspector-body select, .wm-inspector-body textarea, .wm-inspector-body button')].filter((node) => !(node.getAttribute('aria-label') || node.closest('label') || node.textContent?.trim() || node.getAttribute('title'))).length
+      return { overflowX: inspector.scrollWidth > inspector.clientWidth + 1, closeVisible: Boolean(close && close.right <= box.right + 1 && close.left >= box.left), wide, unnamed }
+    })
+    const name = `writing scene panel ${theme} ${size}`
+    checked.push(name)
+    if (!panel) { fail(`${name}: panel missing`); continue }
+    if (panel.overflowX || panel.wide) fail(`${name}: horizontal overflow (${JSON.stringify(panel)})`)
+    if (!panel.closeVisible) fail(`${name}: the close button is clipped`)
+    if (panel.unnamed) fail(`${name}: ${panel.unnamed} controls without a name`)
+    if (size === 'normal') await shot(page, `wm-scene-${theme}`, '.wm-inspector')
   }
 }
 
@@ -343,7 +420,7 @@ const runHarness = async () => {
     const css = fs.readdirSync(output).find((name) => name.endsWith('.css'))
     fs.writeFileSync(path.join(output, 'index.html'), `<!doctype html><html><head>${css ? `<link rel="stylesheet" href="./${css}">` : ''}</head><body><div id="root"></div><script type="module" src="./harness.js"></script></body></html>`)
     for (const theme of ['light', 'dark']) {
-      for (const [name, hash, query] of [['workrequests', 'work-requests', ''], ['workrequests-list', 'work-requests', '&tab=mine'], ['addon-prompt', 'addon-prompt', ''], ['onenote', 'onenote', ''], ['share-user', 'share-user', ''], ['share-presence', 'share-presence', ''], ['pen-quick', 'pen-quick', '']]) {
+      for (const [name, hash, query] of [['workrequests', 'work-requests', ''], ['workrequests-list', 'work-requests', '&tab=mine'], ['addon-prompt', 'addon-prompt', ''], ['onenote', 'onenote', ''], ['share-user', 'share-user', ''], ['share-presence', 'share-presence', ''], ['pen-quick', 'pen-quick', ''], ['math-solver', 'math-solver', ''], ['math-solver-loading', 'math-solver', '&tab=recognizing'], ['math-solver-error', 'math-solver', '&tab=error'], ['math-correction', 'math-correction', ''], ['math-correction-loading', 'math-correction', '&tab=recognizing']]) {
         const port = 19_900 + Math.floor(Math.random() * 90)
         const url = `file://${path.join(output, 'index.html')}?theme=${theme}${query}#${hash}`
         const child = spawn('xvfb-run', ['-a', '-s', '-screen 0 1440x1000x24', electronBinary, path.join(appRoot, 'scripts/fixtures/harness-main.cjs'), `--remote-debugging-port=${port}`, '--no-sandbox', '--harness', url], { stdio: ['ignore', 'pipe', 'pipe'], detached: true })
@@ -361,6 +438,46 @@ const runHarness = async () => {
             checked.push(`pen quick menu ${theme}`)
             if (!fits) fail(`pen quick menu ${theme}: leaves the window`)
             await shot(page, `pen-quick-${theme}`, '.lw-pqm-disc')
+            continue
+          }
+          // The drawing board's math popovers (synthetic recognition results): fit the stage, focus in, arrows, Escape returns focus.
+          if (name.startsWith('math-')) {
+            await page.waitForSelector('.math-popover', { timeout: 20_000 })
+            await sleep(400)
+            const label = `${name} ${theme}`
+            const geometry = () => page.evaluate(() => {
+              const pop = document.querySelector('.math-popover')
+              const stage = document.querySelector('#math-stage')
+              if (!pop || !stage) return null
+              const r = pop.getBoundingClientRect()
+              const s = stage.getBoundingClientRect()
+              const active = document.activeElement
+              return {
+                inside: pop.contains(active), onClose: Boolean(active?.matches('.math-popover__close')), onInput: Boolean(active?.matches('input[data-autofocus]')),
+                fits: r.left >= s.left - 1 && r.right <= s.right + 1 && r.top >= s.top - 1 && r.bottom <= s.bottom + 1,
+                overflowX: pop.scrollWidth > pop.clientWidth + 1, background: getComputedStyle(pop).backgroundColor, active: active?.tagName,
+              }
+            })
+            const g = await geometry()
+            checked.push(label)
+            if (!g?.inside) fail(`${label}: focus did not move into the popover`)
+            else if (name.endsWith('loading') ? !g.onClose : !(g.onInput || g.active === 'BUTTON')) fail(`${label}: focus is on the wrong control (${g.active})`)
+            if (g && !g.fits) fail(`${label}: leaves its stage`)
+            if (g?.overflowX) fail(`${label}: horizontal overflow`)
+            await shot(page, label, '.math-popover')
+            if (!name.endsWith('loading')) {
+              const before = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))
+              await page.keyboard.press('ArrowDown')
+              const after = await page.evaluate(() => ({ html: document.activeElement?.outerHTML.slice(0, 80), inside: Boolean(document.activeElement?.closest('.math-popover')) }))
+              if (!after.inside || after.html === before) fail(`${label}: ArrowDown does not move between the controls`)
+              await page.keyboard.press('End')
+              const last = await page.evaluate(() => ({ inside: Boolean(document.activeElement?.closest('.math-popover')), tag: document.activeElement?.tagName }))
+              if (!last.inside) fail(`${label}: End leaves the popover`)
+            }
+            await page.keyboard.press('Escape')
+            await sleep(400)
+            if (await page.locator('.math-popover').count()) fail(`${label}: Escape does not close the popover`)
+            else if (!(await page.evaluate(() => document.activeElement?.id === 'harness-opener'))) fail(`${label}: focus did not return to the page`)
             continue
           }
           if (name === 'share-presence') {

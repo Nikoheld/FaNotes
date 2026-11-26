@@ -60,34 +60,34 @@ export function ScenePanel({ node, words, characters, places, stamps, onPatch, o
       <section>
         <h4>{L('Szene', 'Scene')}</h4>
         <input className="wm-input-text" value={node.title} aria-label={L('Titel', 'Title')} data-i18n-ignore onChange={(event) => onPatch({ title: event.target.value })} />
-        <textarea className="wm-input-text" rows={4} value={node.synopsis ?? ''} placeholder={L('Zusammenfassung', 'Synopsis')} data-i18n-ignore onChange={(event) => onPatch({ synopsis: event.target.value || undefined })} />
+        <textarea className="wm-input-text" rows={4} value={node.synopsis ?? ''} aria-label={L('Zusammenfassung', 'Synopsis')} placeholder={L('Zusammenfassung', 'Synopsis')} data-i18n-ignore onChange={(event) => onPatch({ synopsis: event.target.value || undefined })} />
         <div className="wm-inline">
           <StatusSelect value={node.status} onChange={(status) => onPatch({ status })} />
           <PovSelect value={node.pov} characters={characters} onChange={(pov) => onPatch({ pov })} />
         </div>
         <div className="wm-swatches" role="group" aria-label={L('Label-Farbe', 'Label colour')}>
-          {LABEL_COLORS.map((color) => <button key={color} type="button" className={node.label === color ? 'is-on' : ''} style={{ background: color }} aria-label={colorSwatchName(color)} onClick={() => onPatch({ label: color })} />)}
+          {LABEL_COLORS.map((color) => <button key={color} type="button" className={node.label === color ? 'is-on' : ''} aria-pressed={node.label === color} style={{ background: color }} aria-label={colorSwatchName(color)} onClick={() => onPatch({ label: color })} />)}
           <button type="button" className="wm-swatch-clear" aria-label={L('Keine Farbe', 'No colour')} onClick={() => onPatch({ label: undefined })}><X size={12} /></button>
         </div>
         <label className="wm-inline">{L('Wortziel', 'Word goal')}
           <input className="wm-goal-input" type="number" min={0} step={100} value={node.goal ?? ''} placeholder="–" onChange={(event) => onPatch({ goal: Number(event.target.value) > 0 ? Math.round(Number(event.target.value)) : undefined })} />
-          <small>{formatNumber(words)}{node.goal ? ` / ${formatNumber(node.goal)}` : ''}</small>
+          <small>{L(`${formatNumber(words)}${node.goal ? ` / ${formatNumber(node.goal)}` : ''} Wörter`, `${formatNumber(words)}${node.goal ? ` / ${formatNumber(node.goal)}` : ''} words`)}</small>
         </label>
         <label className="wm-toggle"><input type="checkbox" checked={!node.exclude} onChange={(event) => onPatch({ exclude: event.target.checked ? undefined : true })} /> <span>{L('Im Manuskript und in Exporten', 'In the manuscript and exports')}</span></label>
       </section>
       <section>
         <h4>{L('Figuren', 'Characters')}</h4>
         <div className="wm-chips">
-          {(node.characters ?? []).map((id) => <span key={id} className="wm-chip" data-i18n-ignore>{characterById.get(id)?.name ?? '?'}<button type="button" aria-label={L('Entfernen', 'Remove')} onClick={() => toggle('characters', id)}><X size={10} /></button></span>)}
-          <select className="wm-select wm-small-select" value="" onChange={(event) => { if (event.target.value) toggle('characters', event.target.value) }}>
+          {(node.characters ?? []).map((id) => <span key={id} className="wm-chip" data-i18n-ignore>{characterById.get(id)?.name ?? '?'}<button type="button" aria-label={`${L('Entfernen', 'Remove')}: ${characterById.get(id)?.name ?? ''}`} onClick={() => toggle('characters', id)}><X size={10} /></button></span>)}
+          <select className="wm-select wm-small-select" aria-label={L('Figur hinzufügen', 'Add character')} value="" onChange={(event) => { if (event.target.value) toggle('characters', event.target.value) }}>
             <option value="">{L('+ Figur', '+ Character')}</option>
             {characters.filter((entry) => !(node.characters ?? []).includes(entry.id)).map((entry) => <option key={entry.id} value={entry.id} data-i18n-ignore>{entry.name}</option>)}
           </select>
         </div>
         <h4>{L('Orte', 'Places')}</h4>
         <div className="wm-chips">
-          {(node.places ?? []).map((id) => <span key={id} className="wm-chip" data-i18n-ignore>{placeById.get(id)?.name ?? '?'}<button type="button" aria-label={L('Entfernen', 'Remove')} onClick={() => toggle('places', id)}><X size={10} /></button></span>)}
-          <select className="wm-select wm-small-select" value="" onChange={(event) => { if (event.target.value) toggle('places', event.target.value) }}>
+          {(node.places ?? []).map((id) => <span key={id} className="wm-chip" data-i18n-ignore>{placeById.get(id)?.name ?? '?'}<button type="button" aria-label={`${L('Entfernen', 'Remove')}: ${placeById.get(id)?.name ?? ''}`} onClick={() => toggle('places', id)}><X size={10} /></button></span>)}
+          <select className="wm-select wm-small-select" aria-label={L('Ort hinzufügen', 'Add place')} value="" onChange={(event) => { if (event.target.value) toggle('places', event.target.value) }}>
             <option value="">{L('+ Ort', '+ Place')}</option>
             {places.filter((entry) => !(node.places ?? []).includes(entry.id)).map((entry) => <option key={entry.id} value={entry.id} data-i18n-ignore>{entry.name}</option>)}
           </select>
@@ -101,9 +101,29 @@ export function ScenePanel({ node, words, characters, places, stamps, onPatch, o
             <button type="button" className="wm-icon" aria-label={L('Verknüpfung lösen', 'Unlink')} onClick={() => onPatch({ links: (node.links ?? []).filter((value) => value !== path) })}><X size={12} /></button>
           </div>
         ))}
-        <input className="wm-input-text" value={linkQuery} placeholder={L('Notiz suchen und verknüpfen …', 'Find a note to link …')} data-i18n-ignore onChange={(event) => setLinkQuery(event.target.value)} />
+        <input
+          className="wm-input-text"
+          value={linkQuery}
+          aria-label={L('Notiz suchen und verknüpfen', 'Find a note to link')}
+          placeholder={L('Notiz suchen und verknüpfen …', 'Find a note to link …')}
+          data-i18n-ignore
+          onChange={(event) => setLinkQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && linkQuery) { event.preventDefault(); event.stopPropagation(); setLinkQuery('') }
+            if (event.key === 'ArrowDown') { event.preventDefault(); event.currentTarget.parentElement?.querySelector<HTMLElement>('.wm-link-results button')?.focus() }
+          }}
+        />
         {linkQuery && (
-          <div className="wm-link-results">
+          <div
+            className="wm-link-results"
+            onKeyDown={(event) => {
+              const buttons = [...event.currentTarget.querySelectorAll<HTMLElement>('button')]
+              const at = buttons.indexOf(document.activeElement as HTMLElement)
+              if (event.key === 'ArrowDown') { event.preventDefault(); buttons[Math.min(buttons.length - 1, at + 1)]?.focus() }
+              if (event.key === 'ArrowUp') { event.preventDefault(); if (at <= 0) event.currentTarget.parentElement?.querySelector<HTMLElement>('input.wm-input-text')?.focus(); else buttons[at - 1]?.focus() }
+              if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setLinkQuery('') }
+            }}
+          >
             {notes === null && <p className="wm-hint"><LoaderCircle className="spin" size={12} /></p>}
             {matches.map((note) => (
               <button key={note.path} type="button" onClick={() => { onPatch({ links: [...new Set([...(node.links ?? []), note.path])] }); setLinkQuery('') }} data-i18n-ignore>
@@ -117,7 +137,7 @@ export function ScenePanel({ node, words, characters, places, stamps, onPatch, o
       <section>
         <h4>{L('Versionen dieser Szene', 'Versions of this scene')}</h4>
         <div className="wm-inline">
-          <input className="wm-input-text" value={snapshotNote} placeholder={L('Notiz (optional)', 'Note (optional)')} data-i18n-ignore onChange={(event) => setSnapshotNote(event.target.value)} />
+          <input className="wm-input-text" value={snapshotNote} aria-label={L('Notiz zur Version', 'Version note')} placeholder={L('Notiz (optional)', 'Note (optional)')} data-i18n-ignore onChange={(event) => setSnapshotNote(event.target.value)} />
           <button type="button" className="secondary-button wm-small" disabled={taking} onClick={() => { setTaking(true); void onTakeSnapshot(snapshotNote).finally(() => { setTaking(false); setSnapshotNote('') }) }}><Camera size={13} /> {L('Sichern', 'Save version')}</button>
         </div>
         {stamps.map((stamp) => (

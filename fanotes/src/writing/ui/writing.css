@@ -111,9 +111,9 @@
   .wm-line.is-dimmed, .wm-root.is-focus .wm-toolbar, .wm-root.is-focus .wm-status { transition: none; }
 }
 
-.wm-inspector { flex: none; width: 300px; overflow: auto; border-left: 1px solid var(--border); background: var(--panel); font-size: 13px; }
+.wm-inspector { flex: none; width: 300px; overflow-x: hidden; overflow-y: auto; border-left: 1px solid var(--border); background: var(--panel); font-size: 13px; }
 .wm-tabs { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 6px; border-bottom: 1px solid var(--border); background: var(--panel); }
-.wm-tabs button[role="tab"] { flex: 1; height: 28px; border: 0; border-radius: 7px; color: var(--text-soft); background: transparent; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.wm-tabs button[role="tab"] { flex: 1 1 auto; min-width: 0; height: 28px; padding: 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; border-radius: 7px; color: var(--text-soft); background: transparent; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
 .wm-tabs button[role="tab"].is-on { color: var(--text); background: var(--panel-active); }
 .wm-inspector-body { display: grid; gap: 4px; padding: 10px 12px 24px; }
 .wm-inspector-body section { display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
@@ -140,7 +140,7 @@
 .wm-note-actions small { flex: 1; color: var(--text-muted); font-size: 11px; }
 @media (max-width: 1000px) { .wm-inspector { position: absolute; z-index: 6; top: 0; right: 0; bottom: 0; box-shadow: var(--shadow); } }
 
-.wm-assist { position: absolute; z-index: 30; display: grid; gap: 8px; width: 300px; max-height: 360px; overflow: auto; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 12px; color: var(--text); background: var(--panel-strong); box-shadow: var(--shadow); font-size: 13px; }
+.wm-assist { position: absolute; z-index: 30; display: grid; gap: 8px; width: 300px; max-height: 360px; overflow: auto; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 10px; color: var(--text); background: var(--panel-strong); box-shadow: var(--shadow); font-size: 12.5px; }
 .wm-assist section { display: grid; gap: 6px; }
 .wm-assist h5 { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--text-muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .wm-assist-close { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; color: var(--text-muted); background: transparent; cursor: pointer; }
@@ -155,6 +155,10 @@
 .wm-assist-group { display: grid; gap: 3px; }
 .wm-assist-group small { color: var(--text-muted); font-size: 11px; }
 .wm-assist-group > div { display: flex; flex-wrap: wrap; gap: 4px; }
+.wm-assist-keys { margin: 0; padding-top: 6px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 11px; }
+.wm-assist-keys kbd { padding: 0 4px; border: 1px solid var(--border-strong); border-radius: 4px; font: inherit; }
+.wm-assist-close:hover { color: var(--text); background: var(--panel-hover); }
+.wm-assist button:focus-visible { outline: var(--focus-ring, 2px solid var(--accent)); outline-offset: 1px; }
 .wm-assist-hint { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-muted); font-size: 12px; }
 .wm-finding { display: grid; gap: 4px; padding: 7px 8px; border: 1px solid var(--border); border-left: 3px solid #2563eb; border-radius: 8px; background: var(--bg-elevated); }
 .wm-finding.is-spelling { border-left-color: #dc2626; }
@@ -173,7 +177,7 @@
 .wm-area { flex: 1; min-width: 0; overflow: auto; padding: 20px 24px 40px; background: var(--bg); }
 .wm-empty { margin: 40px auto; max-width: 420px; color: var(--text-muted); text-align: center; }
 .wm-hint { margin: 4px 0; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
-.wm-link { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; color: var(--accent); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.wm-link { display: inline-flex; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; align-items: center; gap: 4px; padding: 0; border: 0; color: var(--accent); background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .wm-link:hover { text-decoration: underline; }
 .wm-label-dot { flex: none; display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 50%; }
 .wm-small-select { height: 26px; max-width: 150px; padding: 0 4px; font-size: 12px; }
@@ -184,6 +188,7 @@
 .wm-goal-bar { display: inline-block; width: 70px; height: 6px; overflow: hidden; border-radius: 99px; background: var(--border); }
 .wm-goal-bar.is-large { display: block; width: 100%; height: 8px; margin: 6px 0; }
 .wm-goal-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.wm-swatches button:focus-visible { outline: 2px solid var(--accent-readable, var(--accent)); outline-offset: 2px; }
 .wm-swatches button.is-on, .wm-swatches button[aria-pressed="true"] { outline: 2px solid var(--text); outline-offset: 1px; }
 
 /* Binder drag and drop, menu */
@@ -304,6 +309,8 @@
 .wm-link-results { display: grid; gap: 2px; max-height: 220px; overflow: auto; }
 .wm-link-results button { display: flex; align-items: center; gap: 5px; padding: 4px 6px; border: 0; border-radius: 6px; color: var(--text); background: transparent; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
 .wm-link-results button:hover { background: var(--panel-hover); }
+.wm-link-results button { min-width: 0; }
+.wm-link-results button:focus-visible { outline: 2px solid var(--accent-readable, var(--accent)); outline-offset: -2px; }
 .wm-link-results small { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .wm-version { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 6px; border: 0; border-radius: 6px; color: var(--text); background: transparent; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
 .wm-version:hover { background: var(--panel-hover); }
@@ -351,3 +358,5 @@
 .wm-sheet .wm-sheet-name:hover { border-color: var(--border); }
 .wm-sheet .wm-sheet-name:focus { border-color: var(--accent); outline: none; }
 .wm-card { grid-template-columns: minmax(0, 1fr); }
+@media (pointer: coarse) { .wm-assist-keys { display: none; } }
+.wm-tabs { gap: 1px; padding: 6px 4px; } .wm-tabs .wm-icon { min-width: 26px; height: 28px; padding: 0; }

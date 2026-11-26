@@ -34,7 +34,7 @@ const groups = (binder: BinderNode[]) => {
 }
 
 export const StatusSelect = ({ value, onChange }: { value: SceneStatus | undefined; onChange: (status: SceneStatus | undefined) => void }) => (
-  <select className="wm-select wm-small-select" value={value ?? ''} onChange={(event) => onChange((event.target.value || undefined) as SceneStatus | undefined)}>
+  <select className="wm-select wm-small-select" aria-label={L('Status', 'Status')} value={value ?? ''} onChange={(event) => onChange((event.target.value || undefined) as SceneStatus | undefined)}>
     <option value="">{L('Status', 'Status')}</option>
     {(Object.keys(STATUS_LABEL) as SceneStatus[]).map((status) => <option key={status} value={status}>{L(...STATUS_LABEL[status])}</option>)}
   </select>
