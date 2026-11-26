@@ -939,6 +939,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
   return (
     <section
       ref={layerRef}
+      data-worksheet-id={document.id}
       className={layerClass}
       aria-label={`Arbeitsblatt ${document.title}`}
       onPointerEnter={isImage ? undefined : () => setChromeActive(true)}
