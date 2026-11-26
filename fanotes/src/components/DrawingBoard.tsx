@@ -83,6 +83,7 @@ import {
 import type {
   RecognitionResources,
 } from '../lib/handwritingDb'
+import { hasTrainedSamples } from '../lib/trainedSamplesProbe'
 import { decodeInkHistory, encodeInkHistory, type EncodedInkHistory } from '../lib/inkHistory'
 import { expandPackedStroke, frameBudgetOpen, INK_OPEN_ONE_PASS_POINTS, inkPageIsHeavy, packedInkPoints } from '../lib/packedInk'
 import { inkStrokeAllowsShapeSnap, shapeSnapAllowsLiveSample, shapeSnapProfile, snapStrokeToShape } from '../lib/shapeSnap'
@@ -9639,7 +9640,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     let idle = 0
     const run = () => {
       if (cancelled || resourcesRef.current) return
-      void loadRecognitionResources().then((loaded) => {
+      // Nothing trained: nothing to wait for, and the baseline model is not worth the CPU in the background.
+      void hasTrainedSamples().then((trained) => (trained ? loadRecognitionResources() : null)).then((loaded) => {
+        if (!loaded) return
         if (cancelled) return
         // Only the cache: setting state would render the whole board for nothing; the open of the dialog adopts it.
         resourcesRef.current ??= loaded
