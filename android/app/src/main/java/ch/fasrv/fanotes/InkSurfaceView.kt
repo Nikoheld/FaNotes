@@ -143,6 +143,9 @@ class InkSurfaceView @JvmOverloads constructor(
         set(value) {
             field = value
             invalidateTiles()
+            // The slices arrive after the first frame (they are decoded off the main thread); without a redraw
+            // the worksheet stays invisible until something else, such as a scroll, repaints the view.
+            invalidate()
         }
     var onChanged: () -> Unit = {}
     var onStroke: (ch.fasrv.fanotes.ink.InkStroke) -> Unit = {}
