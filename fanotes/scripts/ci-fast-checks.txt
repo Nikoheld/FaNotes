@@ -143,7 +143,6 @@ check-wacom-buttons.mjs
 check-toolbar-unified.mjs
 check-welcome-note.cjs
 check-first-run-onboarding.cjs
-check-glyphenwerk-integration.cjs
 check-enhanced-math.cjs
 check-startup-preflight.cjs
 check-i18n-translate.mjs
