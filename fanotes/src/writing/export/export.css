@@ -1,8 +1,11 @@
-/* Export and import dialogs (writing mode). Built on .wm-dialog from writing.css. */
-.wm-export { width: min(480px, calc(100vw - 32px)); }
-.wm-export h2 { margin: 0; font-size: 15px; }
+/* Export and import dialogs (writing mode).  */
+/* The dialogs sit in the shared DialogFrame (styles.css); this file only styles what is inside the body. */
+.wm-export-form { display: grid; gap: 12px; min-width: 0; }
+.wm-export-field { display: grid; gap: 4px; min-width: 0; color: var(--text-soft); font-size: 12px; font-weight: 600; }
+.wm-export-field select { font-weight: 500; }
 .wm-export-formats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
-.wm-export-formats button { display: grid; gap: 2px; place-items: center; min-height: 48px; padding: 6px 4px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-soft); background: var(--bg-elevated); font: inherit; font-size: 12px; cursor: pointer; }
+.wm-export-formats button { display: grid; gap: 2px; place-items: center; min-height: 48px; padding: 6px 4px; border: 1px solid var(--border); border-radius: var(--radius-md, 8px); color: var(--text-soft); background: var(--panel-strong); font: inherit; font-size: 12px; cursor: pointer; }
+.wm-export-formats button:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
 .wm-export-formats button strong { color: var(--text); font-size: 13px; }
 .wm-export-formats button.is-on { border-color: var(--accent); color: var(--accent-readable); background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated)); }
 .wm-export-formats button.is-on strong { color: var(--accent-readable); }
@@ -10,9 +13,9 @@
 .wm-export-hint { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.4; }
 .wm-export-progress { height: 4px; overflow: hidden; border-radius: 2px; background: var(--border); }
 .wm-export-progress > span { display: block; height: 100%; background: var(--accent); transition: width .15s ease; }
-.wm-export-error { margin: 0; color: var(--danger, #b91c1c); font-size: 12.5px; }
-.wm-import-drop { display: grid; place-items: center; gap: 4px; min-height: 96px; padding: 12px; border: 1px dashed var(--border-strong); border-radius: 10px; color: var(--text-soft); background: var(--bg-elevated); font-size: 12.5px; text-align: center; cursor: pointer; }
+.wm-import-drop { display: grid; place-items: center; gap: 4px; min-height: 96px; padding: 12px; border: 1px dashed var(--border-strong); border-radius: var(--radius-card, 10px); color: var(--text-soft); background: var(--panel-strong); font-size: 12.5px; text-align: center; cursor: pointer; }
+.wm-import-drop:focus-within { outline: var(--focus-ring); outline-offset: 1px; }
 .wm-import-drop.is-over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-elevated)); }
 .wm-import-drop input { display: none; }
-.wm-import-summary { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--bg-elevated); font-size: 12.5px; line-height: 1.5; }
-@media (max-width: 520px) { .wm-export-formats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.wm-import-summary { margin: 0; padding: 8px 10px; border-radius: var(--radius-md, 8px); background: var(--panel-strong); font-size: 12.5px; line-height: 1.5; }
+@media (max-width: 560px) { .wm-export-formats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

@@ -139,10 +139,6 @@
 .wm-note-actions { display: flex; align-items: center; gap: 2px; }
 .wm-note-actions small { flex: 1; color: var(--text-muted); font-size: 11px; }
 @media (max-width: 1000px) { .wm-inspector { position: absolute; z-index: 6; top: 0; right: 0; bottom: 0; box-shadow: var(--shadow); } }
-.wm-dialog-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: rgba(0, 0, 0, .28); }
-.wm-dialog { display: grid; gap: 10px; width: min(440px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--panel-strong); box-shadow: var(--shadow); }
-.wm-dialog textarea { min-height: 90px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-elevated); font: inherit; resize: vertical; }
-.wm-dialog > div { display: flex; justify-content: flex-end; gap: 8px; }
 
 .wm-assist { position: absolute; z-index: 30; display: grid; gap: 8px; width: 300px; max-height: 360px; overflow: auto; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 12px; color: var(--text); background: var(--panel-strong); box-shadow: var(--shadow); font-size: 13px; }
 .wm-assist section { display: grid; gap: 6px; }
@@ -314,13 +310,12 @@
 .wm-version span { flex: 1; }
 
 /* Snapshot compare */
-.wm-compare { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 8px; width: min(1100px, calc(100vw - 32px)); height: min(820px, calc(100vh - 48px)); padding: 14px 16px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--panel-strong); box-shadow: var(--shadow); }
-.wm-compare header { display: flex; align-items: center; gap: 10px; }
-.wm-compare header > div { display: grid; flex: 1; }
-.wm-compare header small { color: var(--text-muted); font-size: 12px; }
+.wm-compare .dialog-frame__body { overflow: hidden; }
+.wm-compare-sub { margin: -6px 0 0; color: var(--text-muted); font-size: 12px; }
+.wm-compare-note { flex: 1; margin-right: auto; align-self: center; color: var(--text-muted); font-size: 12px; text-align: left; }
 .wm-compare-head, .wm-compare-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .wm-compare-head { color: var(--text-muted); font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
-.wm-compare-body { overflow: auto; padding-right: 4px; font: 14px/1.55 'Literata', Georgia, serif; }
+.wm-compare-body { min-height: 0; flex: 1; overflow: auto; padding-right: 4px; font: 14px/1.55 'Literata', Georgia, serif; }
 .wm-compare-row { padding: 4px 0; border-bottom: 1px solid var(--border); }
 .wm-compare-row p { margin: 0; white-space: pre-wrap; }
 .wm-compare-row.is-same p { color: var(--text-muted); }

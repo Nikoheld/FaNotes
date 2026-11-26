@@ -6,6 +6,10 @@
 // For every dialog: it fits the window, has no horizontal overflow, uses the one dialog radius and the header of the
 // confirm dialog (icon tile, eyebrow, title, close button), focus moves in, Tab stays inside, Escape closes.
 // Menus: focus moves to the first item, Arrow keys/Home/End walk the items, Tab and Escape close, focus returns.
+//   Round 2 adds: the toolbar popovers, note tags popover and paper picker (focus in, arrows, Escape returns focus), the
+//   folder context menu (fits the window, grouped, rarer choices open in place), Geschichte importieren and the
+//   writing-mode export and footnote dialogs, the first-run diagnostics notice (never above a modal), and in the
+//   harness the OneNote import, share-with-user dialog and the share presence popover.
 // FANOTES_DIALOG_SHOTS=<dir> saves a screenshot of every dialog. Needs `vite build` (dist/), xvfb-run, playwright-core.
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -60,9 +64,9 @@ const probe = (page, selector = DIALOG) => page.evaluate((sel) => {
   }
 }, selector)
 
-const shot = async (page, name) => {
+const shot = async (page, name, selector = DIALOG) => {
   if (!shots) return
-  const box = await page.evaluate((sel) => { const el = [...document.querySelectorAll(sel)].filter((node) => node.getClientRects().length).pop(); const r = el?.getBoundingClientRect(); return r ? { x: Math.max(0, r.left - 12), y: Math.max(0, r.top - 12), width: r.width + 24, height: r.height + 24 } : null }, DIALOG)
+  const box = await page.evaluate((sel) => { const el = [...document.querySelectorAll(sel)].filter((node) => node.getClientRects().length).pop(); const r = el?.getBoundingClientRect(); return r ? { x: Math.max(0, r.left - 12), y: Math.max(0, r.top - 12), width: Math.min(innerWidth, r.width + 24), height: Math.min(innerHeight, r.height + 24) } : null }, selector)
   if (box) await page.screenshot({ path: path.join(shots, `${name}.png`), clip: box }).catch(() => {})
 }
 
@@ -95,49 +99,78 @@ const contrastOk = (page, label) => page.evaluate(() => {
   return { bg, text }
 }).then(({ bg, text }) => { if (bg === text) fail(`${label}: text and background are the same colour`) })
 
-const menuContract = async (page, label, openMenu, menuSelector) => {
+const MENU_ITEMS = '[role="menuitem"]:not(:disabled), button:not(:disabled)'
+/**
+ * Keyboard contract of a menu or popover. `items` is what the menu treats as an item, `returnTo` the element that
+ * must hold focus after Escape, `tab: 'edge'` for popovers where Tab walks the controls and only leaving closes it.
+ */
+const menuContract = async (page, label, openMenu, menuSelector, { items = MENU_ITEMS, returnTo = null, tab = 'close', firstInput = false, initialAny = false, arrows = true } = {}) => {
   await openMenu()
   await sleep(500)
-  const state = () => page.evaluate((sel) => {
+  const state = () => page.evaluate(({ sel, itemSel }) => {
     const menu = document.querySelector(sel)
     if (!menu) return null
-    const items = [...menu.querySelectorAll('[role="menuitem"]:not(:disabled), button:not(:disabled)')].filter((n) => n.getClientRects().length)
-    return { count: items.length, index: items.indexOf(document.activeElement), inside: menu.contains(document.activeElement) }
-  }, menuSelector)
+    const nodes = [...menu.querySelectorAll(itemSel)].filter((n) => n.getClientRects().length)
+    return { count: nodes.length, index: nodes.indexOf(document.activeElement), inside: menu.contains(document.activeElement), tag: document.activeElement?.tagName }
+  }, { sel: menuSelector, itemSel: items })
   let s = await state()
   if (!s) { fail(`${label}: menu did not open`); return }
   checked.push(label)
-  if (!s.inside || s.index !== 0) fail(`${label}: focus did not move to the first item (index ${s.index})`)
-  await page.keyboard.press('ArrowDown')
-  s = await state()
-  if (s?.index !== 1) fail(`${label}: ArrowDown did not move to the second item (index ${s?.index})`)
-  await page.keyboard.press('End')
-  s = await state()
-  if (s?.index !== s?.count - 1) fail(`${label}: End did not move to the last item`)
-  await page.keyboard.press('ArrowDown')
-  s = await state()
-  if (s?.index !== 0) fail(`${label}: ArrowDown does not wrap to the first item`)
-  await page.keyboard.press('ArrowUp')
-  s = await state()
-  if (s?.index !== s?.count - 1) fail(`${label}: ArrowUp does not wrap to the last item`)
-  await page.keyboard.press('Home')
-  s = await state()
-  if (s?.index !== 0) fail(`${label}: Home did not move to the first item`)
+  const start = s.index
+  if (!s.inside || (firstInput ? s.tag !== 'INPUT' : initialAny ? s.index < 0 : s.index !== 0)) fail(`${label}: focus did not move to the first item (index ${s.index}, ${s.tag})`)
+  if (s.count > 1 && !firstInput && arrows) {
+    await page.keyboard.press('ArrowDown')
+    s = await state()
+    if (s?.index !== (start + 1) % s.count) fail(`${label}: ArrowDown did not move to the next item (index ${s?.index})`)
+    await page.keyboard.press('End')
+    s = await state()
+    if (s?.index !== s?.count - 1) fail(`${label}: End did not move to the last item`)
+    await page.keyboard.press('ArrowDown')
+    s = await state()
+    if (s?.index !== 0) fail(`${label}: ArrowDown does not wrap to the first item`)
+    await page.keyboard.press('ArrowUp')
+    s = await state()
+    if (s?.index !== s?.count - 1) fail(`${label}: ArrowUp does not wrap to the last item`)
+    await page.keyboard.press('Home')
+    s = await state()
+    if (s?.index !== 0) fail(`${label}: Home did not move to the first item`)
+  }
   await page.keyboard.press('Escape')
   await sleep(300)
   if (await state()) fail(`${label}: Escape does not close the menu`)
-  // Tab closes it as well.
+  if (returnTo) {
+    const back = await page.evaluate((sel) => Boolean(document.activeElement?.matches(sel)), returnTo)
+    if (!back) fail(`${label}: focus did not return to the opener after Escape`)
+  }
+  // Tab closes it as well (for a popover with several controls: Tab out of the last one).
   await openMenu()
   await sleep(500)
+  if (tab === 'edge' && !firstInput) await page.keyboard.press('End')
   await page.keyboard.press('Tab')
   await sleep(300)
   if (await state()) fail(`${label}: Tab does not close the menu`)
+}
+
+/** The menu (or popover) stays inside the window and has no horizontal overflow. */
+const menuFits = async (page, label, selector) => {
+  const m = await page.evaluate((sel) => {
+    const el = [...document.querySelectorAll(sel)].filter((n) => n.getClientRects().length).pop()
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { top: r.top, left: r.left, right: r.right, bottom: r.bottom, vw: innerWidth, vh: innerHeight, overflowX: el.scrollWidth > el.clientWidth + 1, height: r.height }
+  }, selector)
+  if (!m) { fail(`${label}: not visible`); return null }
+  checked.push(`${label} fits`)
+  if (m.top < -1 || m.left < -1 || m.right > m.vw + 1 || m.bottom > m.vh + 1) fail(`${label}: leaves the ${m.vw}x${m.vh} window (${Math.round(m.top)}..${Math.round(m.bottom)})`)
+  if (m.overflowX) fail(`${label}: horizontal overflow`)
+  return m
 }
 
 const runApp = async (theme) => {
   console.log(`app ${theme}`)
   const profile = createProfile('dialog-shell-', { theme })
   fs.mkdirSync(path.join(profile.vault, 'Biologie'), { recursive: true })
+  fs.mkdirSync(path.join(profile.vault, 'Leer'), { recursive: true })
   fs.writeFileSync(path.join(profile.vault, 'Biologie', 'Notiz.md'), '# Zelle\n\nText with #tag.\n\n- one\n- two\n')
   fs.writeFileSync(path.join(profile.vault, 'Biologie', 'Blatt.pdf'), makePdf())
   const app = launch(profile)
@@ -174,6 +207,119 @@ const runApp = async (theme) => {
     await menuContract(page, `file-tree menu ${theme}`, async () => { await page.locator('.file-tree__row', { hasText: 'Notiz' }).first().click({ button: 'right' }) }, '.file-tree__context-menu:not(.tab-context-menu)')
     await menuContract(page, `tab menu ${theme}`, async () => { await page.locator('.tabs-bar [title$="Notiz.md"]').first().click({ button: 'right' }) }, '.tab-context-menu')
     await menuContract(page, `editor menu ${theme}`, async () => { await page.locator('button[aria-label="Weitere Notizaktionen"]').click() }, '.editor-more-menu')
+    // Toolbar popovers, note tags and paper picker: focus enters, arrows walk, Escape closes and focus returns to the button.
+    const popItems = '[role="menuitem"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), input:not(:disabled), select:not(:disabled)'
+    const triggers = page.locator('.ftb-menu > button')
+    for (let index = 0; index < await triggers.count(); index += 1) {
+      const trigger = triggers.nth(index)
+      if (!(await trigger.isVisible()) || await trigger.isDisabled()) continue
+      const name = await trigger.getAttribute('aria-label')
+      await menuContract(page, `toolbar popover "${name}" ${theme}`, async () => { await trigger.click() }, '.ftb-popover', { items: popItems, returnTo: '.ftb-menu > button', tab: 'edge', arrows: name !== 'Mehr' })
+      await trigger.click()
+      await sleep(400)
+      await menuFits(page, `toolbar popover "${name}" ${theme}`, '.ftb-popover')
+      await shot(page, `ftb-${index}-${theme}`, '.ftb-popover')
+      await page.keyboard.press('Escape')
+      await sleep(250)
+    }
+    await menuContract(page, `note tags popover ${theme}`, async () => { await page.locator('.note-tags-menu > button').click() }, '.note-tags-popover', { items: 'button:not(:disabled), input:not(:disabled)', returnTo: '.note-tags-menu > button', tab: 'edge', firstInput: true })
+    await menuContract(page, `paper picker ${theme}`, async () => { await page.locator('.paper-picker__trigger').first().click() }, '.paper-picker__menu', { items: '[role="option"]:not(:disabled)', returnTo: '.paper-picker__trigger', initialAny: true })
+    // Folder menu: fits the window (also a small one), grouped; the rarer choices open in place and still fit.
+    const folderMenu = '.file-tree__context-menu:not(.tab-context-menu)'
+    const openFolderMenu = async () => { await page.locator('.file-tree__row[data-kind="folder"]', { hasText: 'Leer' }).first().click({ button: 'right' }); await sleep(450) }
+    for (const [size, viewport] of [['normal', { width: 1440, height: 940 }], ['small', { width: 940, height: 620 }]]) {
+      await page.setViewportSize(viewport)
+      await sleep(300)
+      await openFolderMenu()
+      const closed = await menuFits(page, `folder menu ${theme} ${size}`, folderMenu)
+      if (closed && size === 'normal' && closed.height > 700) fail(`folder menu ${theme}: ${Math.round(closed.height)}px tall, the groups should keep it under 700px`)
+      if (size === 'normal') await shot(page, `folder-menu-${theme}`, folderMenu)
+      const share = page.locator(`${folderMenu} button[aria-expanded]`, { hasText: 'Teilen' })
+      if (!(await share.count())) fail(`folder menu ${theme} ${size}: no Teilen disclosure`)
+      else {
+        await share.click()
+        await sleep(350)
+        await menuFits(page, `folder menu expanded ${theme} ${size}`, folderMenu)
+        if (size === 'normal') await shot(page, `folder-menu-open-${theme}`, folderMenu)
+        const opened = await page.evaluate(() => [...document.querySelectorAll('.file-tree__submenu button')].filter((n) => n.getClientRects().length).length)
+        if (opened < 3) fail(`folder menu ${theme} ${size}: Teilen did not reveal its choices`)
+      }
+      await page.keyboard.press('Escape')
+      await sleep(300)
+    }
+    await page.setViewportSize({ width: 1440, height: 940 })
+    await sleep(300)
+    await menuContract(page, `folder menu ${theme}`, openFolderMenu, folderMenu)
+    // Geschichte importieren: it used to render unstyled at the bottom of the window (writing.css was not loaded).
+    await viaPalette('Geschichte importieren')
+    await sleep(500)
+    await shot(page, `story-import-${theme}`)
+    await verifyDialog(page, `story import ${theme}`)
+  } finally {
+    await stop(app, browser)
+    profile.dispose()
+  }
+}
+
+/** Writing mode (export, footnote dialogs) and the first-run diagnostics notice, each in its own app start. */
+const runExtra = async (theme) => {
+  console.log(`app extras ${theme}`)
+  const profile = createProfile('dialog-shell-extra-', { theme, diagnosticsEnabled: true, diagnosticsNoticeSeen: false })
+  fs.mkdirSync(path.join(profile.vault, 'Leer'), { recursive: true })
+  fs.writeFileSync(path.join(profile.vault, 'Notiz.md'), '# Notiz\n')
+  const app = launch(profile)
+  let browser
+  try {
+    const connected = await connect(app)
+    browser = connected.browser
+    const page = connected.page
+    await sleep(1500)
+    // The notice is up (nothing dismissed it). Open the Fehler-melden dialog: the dialog must cover the notice.
+    const notice = await page.locator('.send-data-notice').count()
+    if (!notice) fail(`diagnostics ${theme}: the first-run notice is not shown, the check cannot test the stacking`)
+    else {
+      await page.keyboard.press('Control+p')
+      await page.locator('.command-palette input').first().fill('Fehler melden')
+      await sleep(300)
+      await page.keyboard.press('Enter')
+      await sleep(900)
+      const top = await page.evaluate(() => {
+        const box = document.querySelector('.send-data-notice')?.getBoundingClientRect()
+        const backdrop = document.querySelector('.modal-backdrop')
+        if (!box || !backdrop) return 'missing'
+        const point = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+        return document.querySelector('.send-data-notice')?.contains(point) ? 'notice' : 'modal'
+      })
+      checked.push(`diagnostics notice under modal ${theme}`)
+      if (top !== 'modal') fail(`diagnostics ${theme}: the first-run notice is drawn over an open dialog (${top})`)
+      await shot(page, `diagnostics-over-modal-${theme}`, '.send-data-notice, .modal-backdrop')
+      await page.keyboard.press('Escape')
+      await sleep(400)
+    }
+    await dismissNotices(page)
+    await sleep(300)
+    // Writing mode: a new story from the folder menu.
+    const folder = page.locator('.file-tree__row[data-kind="folder"]', { hasText: 'Leer' }).first()
+    await folder.hover()
+    await folder.locator('button[aria-haspopup="menu"]').click({ force: true })
+    await page.locator('.file-tree__context-menu button', { hasText: 'Neue Geschichte' }).click()
+    await page.locator('.wm-page').first().waitFor({ timeout: 60_000 })
+    await sleep(900)
+    for (const [size, viewport] of [['normal', { width: 1440, height: 940 }], ['small', { width: 940, height: 620 }]]) {
+      await page.setViewportSize(viewport)
+      await sleep(400)
+      await page.locator('.wm-page').first().click({ position: { x: 160, y: 200 }, force: true })
+      await page.keyboard.type('Ein Satz.')
+      await page.locator('.wm-toolbar button[title^="Exportieren"]').click()
+      await sleep(500)
+      if (size === 'normal') await shot(page, `wm-export-${theme}`)
+      await verifyDialog(page, `writing export ${theme} ${size}`)
+      await page.locator('.wm-page').first().click({ position: { x: 160, y: 200 }, force: true })
+      await page.keyboard.press('Control+Shift+O')
+      await sleep(500)
+      if (size === 'normal') await shot(page, `wm-footnote-${theme}`)
+      await verifyDialog(page, `writing footnote ${theme} ${size}`)
+    }
   } finally {
     await stop(app, browser)
     profile.dispose()
@@ -181,7 +327,7 @@ const runApp = async (theme) => {
 }
 
 const runHarness = async () => {
-  console.log('harness (work requests, add-on prompt)')
+  console.log('harness (work requests, add-on prompt, OneNote import, share dialogs, presence popover, pen menu)')
   const temporary = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'dialog-shell-harness-'))
   const output = path.join(temporary, 'dist')
   try {
@@ -197,7 +343,7 @@ const runHarness = async () => {
     const css = fs.readdirSync(output).find((name) => name.endsWith('.css'))
     fs.writeFileSync(path.join(output, 'index.html'), `<!doctype html><html><head>${css ? `<link rel="stylesheet" href="./${css}">` : ''}</head><body><div id="root"></div><script type="module" src="./harness.js"></script></body></html>`)
     for (const theme of ['light', 'dark']) {
-      for (const [name, hash, query] of [['workrequests', 'work-requests', ''], ['workrequests-list', 'work-requests', '&tab=mine'], ['addon-prompt', 'addon-prompt', '']]) {
+      for (const [name, hash, query] of [['workrequests', 'work-requests', ''], ['workrequests-list', 'work-requests', '&tab=mine'], ['addon-prompt', 'addon-prompt', ''], ['onenote', 'onenote', ''], ['share-user', 'share-user', ''], ['share-presence', 'share-presence', ''], ['pen-quick', 'pen-quick', '']]) {
         const port = 19_900 + Math.floor(Math.random() * 90)
         const url = `file://${path.join(output, 'index.html')}?theme=${theme}${query}#${hash}`
         const child = spawn('xvfb-run', ['-a', '-s', '-screen 0 1440x1000x24', electronBinary, path.join(appRoot, 'scripts/fixtures/harness-main.cjs'), `--remote-debugging-port=${port}`, '--no-sandbox', '--harness', url], { stdio: ['ignore', 'pipe', 'pipe'], detached: true })
@@ -208,6 +354,30 @@ const runHarness = async () => {
           let page
           for (let tries = 0; tries < 80 && !page; tries += 1) { page = browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url().includes('index.html')); if (!page) await sleep(200) }
           page.on('pageerror', (error) => console.log(`  pageerror ${name} ${theme}: ${String(error).slice(0, 200)}`))
+          // Popovers: the share presence popover and the pen radial menu are no dialogs (the presence one is a popover dialog).
+          if (name === 'pen-quick') {
+            await page.waitForSelector('.lw-pqm-disc', { timeout: 20_000 })
+            const fits = await page.evaluate(() => { const r = document.querySelector('.lw-pqm-disc').getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight })
+            checked.push(`pen quick menu ${theme}`)
+            if (!fits) fail(`pen quick menu ${theme}: leaves the window`)
+            await shot(page, `pen-quick-${theme}`, '.lw-pqm-disc')
+            continue
+          }
+          if (name === 'share-presence') {
+            await page.waitForSelector('.share-presence-popover', { timeout: 20_000 })
+            await sleep(400)
+            const state = () => page.evaluate(() => { const pop = document.querySelector('.share-presence-popover'); return pop ? { inside: pop.contains(document.activeElement), right: pop.getBoundingClientRect().right, vw: innerWidth } : null })
+            let st = await state()
+            checked.push(`share presence popover ${theme}`)
+            if (!st?.inside) fail(`share presence popover ${theme}: focus did not move into the popover`)
+            if (st && st.right > st.vw + 1) fail(`share presence popover ${theme}: leaves the window`)
+            await shot(page, `share-presence-${theme}`, '.share-presence-popover')
+            await page.keyboard.press('Escape')
+            await sleep(300)
+            if (await state()) fail(`share presence popover ${theme}: Escape does not close it`)
+            else if (!(await page.evaluate(() => document.activeElement?.matches('.share-presence-button')))) fail(`share presence popover ${theme}: focus did not return to the avatar button`)
+            continue
+          }
           await page.waitForSelector('[role="dialog"]', { timeout: 20_000 }).catch((error) => { throw new Error(`${name} ${theme}: no dialog (${page.url().slice(-60)}) ${String(error).split('\n')[0]}`) })
           await sleep(500)
           for (const [size, viewport] of [['normal', { width: 1280, height: 860 }], ['small', { width: 940, height: 620 }]]) {
@@ -230,6 +400,11 @@ const runHarness = async () => {
               if (!inside) { fail(`${label}: Tab leaves the dialog`); break }
             }
           }
+          if (name === 'onenote' || name === 'share-user') {
+            await page.keyboard.press('Escape')
+            await sleep(400)
+            if (!(await page.evaluate(() => document.body.hasAttribute('data-harness-closed')))) fail(`${name} ${theme}: Escape does not close the dialog`)
+          }
         } finally {
           await browser?.close().catch(() => {})
           try { process.kill(-child.pid, 'SIGTERM') } catch { /* gone */ }
@@ -242,9 +417,12 @@ const runHarness = async () => {
   }
 }
 
-const watchdog = setTimeout(() => { console.error('dialog-shell: watchdog (9 min)'); process.exit(1) }, 9 * 60_000)
+const watchdog = setTimeout(() => { console.error('dialog-shell: watchdog (15 min)'); process.exit(1) }, 15 * 60_000)
 try {
-  for (const theme of (process.env.FANOTES_DIALOG_SKIP_APP ? [] : ['light', 'dark'])) await runApp(theme).catch((error) => fail(`app ${theme} aborted: ${String(error).split('\n')[0]}`))
+  for (const theme of (process.env.FANOTES_DIALOG_SKIP_APP ? [] : ['light', 'dark'])) {
+    await runApp(theme).catch((error) => fail(`app ${theme} aborted: ${String(error).split('\n')[0]}`))
+    await runExtra(theme).catch((error) => fail(`app extras ${theme} aborted: ${String(error).split('\n')[0]}`))
+  }
   await runHarness().catch((error) => fail(`harness aborted: ${String(error).split('\n')[0]}`))
 } finally {
   clearTimeout(watchdog)

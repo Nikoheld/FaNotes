@@ -1,6 +1,8 @@
 // Export dialog: format, scope (whole book / current chapter), options, progress.
 // The caller decides where the file goes (`onSave`); by default it is downloaded.
+import { Download } from 'lucide-react'
 import { useRef, useState } from 'react'
+import { DialogFrame } from '../../components/DialogFrame'
 import type { Hyphenator, TextMeasurer } from '../layout/measure'
 import type { ManuscriptLayout } from '../layout/paginate'
 import { L } from '../ui/i18n'
@@ -84,9 +86,23 @@ export function ExportDialog(props: ExportDialogProps) {
   }
   const current = FORMATS.find((entry) => entry.id === format)!
   return (
-    <div className="wm-dialog-backdrop" onMouseDown={close}>
-      <form className="wm-dialog wm-export" role="dialog" aria-label={L('Exportieren', 'Export')} onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); if (!busy) void run() }} onKeyDown={(event) => { if (event.key === 'Escape') close() }}>
-        <h2>{L('Geschichte exportieren', 'Export story')}</h2>
+    <DialogFrame
+      icon={<Download size={18} />}
+      eyebrow={L('Exportieren', 'Export')}
+      title={L('Geschichte exportieren', 'Export story')}
+      titleId="wm-export-title"
+      closeLabel={L('Schliessen', 'Close')}
+      size="md"
+      className="wm-export"
+      onClose={close}
+      footer={(
+        <>
+          <button type="button" className="secondary-button" onClick={close}>{busy ? L('Abbrechen', 'Cancel') : L('Schliessen', 'Close')}</button>
+          <button type="submit" form="wm-export-form" className="primary-button" disabled={busy}>{busy ? L('Exportiere …', 'Exporting…') : L('Exportieren', 'Export')}</button>
+        </>
+      )}
+    >
+      <form id="wm-export-form" className="wm-export-form" onSubmit={(event) => { event.preventDefault(); if (!busy) void run() }}>
         <div className="wm-export-formats" role="radiogroup" aria-label={L('Format', 'Format')}>
           {FORMATS.map((entry) => (
             <button key={entry.id} type="button" role="radio" aria-checked={format === entry.id} className={format === entry.id ? 'is-on' : ''} disabled={busy} onClick={() => setFormat(entry.id)}>
@@ -96,14 +112,14 @@ export function ExportDialog(props: ExportDialogProps) {
         </div>
         <p className="wm-export-hint">{current.hint()}</p>
         <div className="wm-export-options">
-          <label className="wm-field">{L('Umfang', 'Scope')}
+          <label className="wm-export-field">{L('Umfang', 'Scope')}
             <select value={scope} disabled={busy} onChange={(event) => setScope(event.target.value as 'book' | 'chapter')}>
               <option value="book">{L('Ganzes Buch', 'Whole book')}</option>
               <option value="chapter" disabled={!props.currentChapter}>{props.currentChapter ? `${L('Aktuelles Kapitel', 'Current chapter')}: ${props.currentChapter.title}` : L('Aktuelles Kapitel', 'Current chapter')}</option>
             </select>
           </label>
           {format !== 'txt' && (
-            <label className="wm-field">{L('Anmerkungen', 'Notes')}
+            <label className="wm-export-field">{L('Anmerkungen', 'Notes')}
               <select value={notes} disabled={busy} onChange={(event) => setNotes(event.target.value as NotesPlacement)}>
                 <option value="footnotes">{L('Fussnoten unten auf der Seite', 'Footnotes at the bottom of the page')}</option>
                 <option value="endnotes-chapter">{L('Endnoten nach jedem Kapitel', 'Endnotes after each chapter')}</option>
@@ -119,12 +135,8 @@ export function ExportDialog(props: ExportDialogProps) {
           <p className="wm-export-hint">{L('Ausgeschlossene Szenen und der Papierkorb werden nicht exportiert.', 'Excluded scenes and the trash are left out.')}</p>
         </div>
         {busy && <div className="wm-export-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((progress ?? 0) * 100)}><span style={{ width: `${Math.round((progress ?? 0) * 100)}%` }} /></div>}
-        {error && <p className="wm-export-error" role="alert">{error}</p>}
-        <div>
-          <button type="button" className="secondary-button" onClick={close}>{busy ? L('Abbrechen', 'Cancel') : L('Schliessen', 'Close')}</button>
-          <button type="submit" className="primary-button" disabled={busy}>{busy ? L('Exportiere …', 'Exporting…') : L('Exportieren', 'Export')}</button>
-        </div>
+        {error && <p className="dialog-frame__error" role="alert">{error}</p>}
       </form>
-    </div>
+    </DialogFrame>
   )
 }

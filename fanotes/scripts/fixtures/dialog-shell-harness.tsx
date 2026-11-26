@@ -1,10 +1,15 @@
 // Renders the dialogs that cannot be opened in a fresh profile (Fehler & Wünsche needs a sync account and a server
 // capability, the add-on prompt needs a running add-on) with the app's real stylesheet. Loaded by
 // scripts/check-dialog-shell-desktop.mjs inside Electron: `#work-requests` or `#addon-prompt`, `?theme=light|dark`.
+import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../../src/styles.css'
 import { AddonPromptDialog } from '../../src/components/addons/AddonPromptDialog'
 import { WorkRequestsPanel } from '../../src/components/WorkRequestsPanel'
+import { OneNoteImportDialog } from '../../src/components/OneNoteImportDialog'
+import { ShareWithUserDialog } from '../../src/components/ShareWithUserDialog'
+import { SharePresence } from '../../src/components/SharePresence'
+import { PenQuickMenu } from '../../src/components/PenQuickMenu'
 import type { WorkRequestsClient } from '../../src/lib/workRequests'
 
 const theme = new URLSearchParams(location.search).get('theme') === 'dark' ? 'dark' : 'light'
@@ -23,13 +28,49 @@ const client = {
   capabilities: async () => true,
 } as unknown as WorkRequestsClient
 
+// What the OneNote dialog reads from the main process: a small notebook, no file dialog.
+const scan = {
+  sessionId: 'harness', notebookName: 'Biologie 10a', sourceName: 'Biologie.onepkg', pageCount: 5, inkPageCount: 2, warnings: [],
+  sections: [
+    { path: ['Zelle'], name: 'Zelle', pages: [
+      { id: 'p1', title: 'Zellaufbau', depth: 0, hasInk: true, imageCount: 2, alreadyImported: false },
+      { id: 'p2', title: 'Mitose und Meiose im Vergleich, mit einer sehr langen Überschrift die umbrechen muss', depth: 1, hasInk: false, imageCount: 0, alreadyImported: false },
+      { id: 'p3', title: 'Organellen', depth: 0, hasInk: true, imageCount: 0, alreadyImported: true },
+    ] },
+    { path: ['Genetik'], name: 'Genetik', pages: [
+      { id: 'p4', title: 'Mendel', depth: 0, hasInk: false, imageCount: 1, alreadyImported: false },
+      { id: 'p5', title: 'DNA', depth: 0, hasInk: false, imageCount: 0, alreadyImported: false },
+    ] },
+  ],
+}
+;(window as unknown as { fanotes: unknown }).fanotes = {
+  platform: 'linux',
+  importOneNote: async () => { await new Promise((resolve) => setTimeout(resolve, 150)); return scan },
+  closeOneNote: async () => ({ closed: true }),
+  cancelOneNoteImport: async () => ({ cancelled: true }),
+  onOneNoteProgress: () => () => {},
+}
+
 const view = location.hash.replace('#', '')
 const tab = new URLSearchParams(location.search).get('tab')
+const toast = () => {}
+// Every view closes itself through its own close handler, so Escape and the close button can be asserted.
+function Host() {
+  const [open, setOpen] = useState(true)
+  const close = () => { setOpen(false); document.body.setAttribute('data-harness-closed', '1') }
+  if (!open) return <button type="button" id="harness-opener">opener</button>
+  if (view === 'addon-prompt') return <AddonPromptDialog request={{ title: 'Name der Vorlage', message: 'Wie soll die neue Vorlage heissen?\nSie erscheint danach im Menü.', placeholder: 'Vorlage', value: '', resolve: () => {} }} />
+  if (view === 'onenote') return <OneNoteImportDialog folders={['Biologie', 'Chemie/Labor']} onClose={close} onImported={() => {}} />
+  if (view === 'share-user') return <ShareWithUserDialog target={{ path: 'Biologie/Zelle.md', kind: 'note', name: 'Zelle' }} signedIn={false} onClose={close} onOpenAccountSettings={() => {}} toast={toast} />
+  if (view === 'share-presence') return <div style={{ position: 'fixed', top: 12, right: 24 }}><SharePresence people={{ self: 'Ich', present: ['Ich', 'Anna', 'Ben'], editors: ['Ich', 'Anna', 'Ben', 'Clara'] }} /></div>
+  if (view === 'pen-quick') {
+    const icons = ['Stift', 'Marker', 'Radierer', 'Lasso', 'Form']
+    return <PenQuickMenu x={420} y={320} pointerId={-1} tools={icons.map((label, index) => ({ id: label, label, icon: <b>{label[0]}</b>, active: index === 0 }))} colors={['#111111', '#b3402f', '#1d6fa5', '#1c7a4f', '#9a5b00', '#7b4bb7']} activeColor="#111111" onTool={close} onColor={close} onClose={close} />
+  }
+  return <WorkRequestsPanel client={client} version="0.0.0" platform="linux" onClose={close} />
+}
 const root = createRoot(document.getElementById('root')!)
-root.render(
-  view === 'addon-prompt'
-    ? <AddonPromptDialog request={{ title: 'Name der Vorlage', message: 'Wie soll die neue Vorlage heissen?\nSie erscheint danach im Menü.', placeholder: 'Vorlage', value: '', resolve: () => {} }} />
-    : <WorkRequestsPanel client={client} version="0.0.0" platform="linux" onClose={() => {}} />,
-)
+root.render(<Host />)
 if (view === 'work-requests' && tab === 'mine') setTimeout(() => document.querySelectorAll<HTMLButtonElement>('.wr-tabs button')[1]?.click(), 50)
+if (view === 'share-presence') setTimeout(() => document.querySelector<HTMLButtonElement>('.share-presence-button')?.click(), 80)
 document.body.setAttribute('data-harness-ready', '1')

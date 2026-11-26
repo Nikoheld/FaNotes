@@ -11,13 +11,16 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react'
 import { colorSwatchName } from '../lib/colorNames'
 import { useMenuKeyboard } from '../lib/useMenuKeyboard'
 import {
   BookOpen,
   Check,
+  ChevronDown,
   ChevronRight,
+  Ellipsis,
   ChevronsDownUp,
   ChevronsUpDown,
   Columns2,
@@ -270,6 +273,7 @@ export const FileTree = memo(function FileTree({
   const contextMenuRef = useRef<HTMLDivElement>(null)
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
   const onContextMenuKeyDown = useMenuKeyboard(contextMenuRef, contextMenu !== null, closeContextMenu)
+  const [menuSection, setMenuSection] = useState<{ menu: ContextMenuState | null; id: string } | null>(null)
   const [menuPlacement, setMenuPlacement] = useState<{ menu: ContextMenuState; left: number; top: number; maxHeight: number } | null>(null)
   const [renaming, setRenaming] = useState<RenameState | null>(null)
   const [renameBusy, setRenameBusy] = useState(false)
@@ -398,7 +402,7 @@ export const FileTree = memo(function FileTree({
     place()
     window.addEventListener('resize', place)
     return () => window.removeEventListener('resize', place)
-  }, [contextMenu])
+  }, [contextMenu, menuSection])
 
   useEffect(() => {
     if (!renaming) return
@@ -670,10 +674,10 @@ export const FileTree = memo(function FileTree({
   const renderColorPicker = (
     entry: VaultEntry,
     onSetColor: (relativePath: string, color: string | null) => MaybePromise,
-    labels: { group: string; clear: string },
+    labels: { group: string; clear: string; bare?: boolean },
   ) => (
-    <div className="folder-color-menu">
-      <span><Palette aria-hidden="true" size={14} /> Darstellung</span>
+    <div className={`folder-color-menu${labels.bare ? ' is-bare' : ''}`}>
+      {!labels.bare && <span><Palette aria-hidden="true" size={14} /> Darstellung</span>}
       <div className="folder-color-swatches" role="group" aria-label={labels.group}>
         {FOLDER_COLORS.map((color) => (
           <button
@@ -710,6 +714,27 @@ export const FileTree = memo(function FileTree({
       </div>
     </div>
   )
+
+  // A menu row that opens a group of rarer choices in place, so the folder menu stays short.
+  const renderDisclosure = (id: string, icon: ReactNode, label: string, content: ReactNode) => {
+    const isOpen = menuSection?.menu === contextMenu && menuSection.id === id
+    return (
+      <>
+        <button
+          aria-expanded={isOpen}
+          className="file-tree__disclosure"
+          onClick={() => setMenuSection(isOpen ? null : { menu: contextMenu, id })}
+          role="menuitem"
+          type="button"
+        >
+          {icon ?? <Ellipsis aria-hidden="true" size={15} />}
+          <span>{label}</span>
+          <ChevronDown aria-hidden="true" className="file-tree__disclosure-chevron" size={14} />
+        </button>
+        {isOpen && <div className="file-tree__submenu" role="group" aria-label={label}>{content}</div>}
+      </>
+    )
+  }
 
   const renderEntry = (entry: VaultEntry, depth: number) => {
     const isFolder = entry.kind === 'folder'
@@ -1020,55 +1045,68 @@ export const FileTree = memo(function FileTree({
           {contextMenu.entry.kind === 'folder' && (
             <>
               <span className="file-tree__menu-label">Erstellen</span>
-              <button
-                onClick={() => createInFolder(contextMenu.entry, 'note')}
-                role="menuitem"
-                type="button"
-              >
+              <button onClick={() => createInFolder(contextMenu.entry, 'note')} role="menuitem" type="button">
                 <Plus aria-hidden="true" size={15} />
                 Neue Notiz
               </button>
+              <button onClick={() => createInFolder(contextMenu.entry, 'folder')} role="menuitem" type="button">
+                <FolderPlus aria-hidden="true" size={15} />
+                Neuer Unterordner
+              </button>
               {onImportPdf && (
-              <button
-                onClick={() => createInFolder(contextMenu.entry, 'pdf')}
-                role="menuitem"
-                type="button"
-              >
+              <button onClick={() => createInFolder(contextMenu.entry, 'pdf')} role="menuitem" type="button">
                 <File aria-hidden="true" size={15} />
                 PDF importieren
               </button>
               )}
               {onCreateStory && (
-              <button
-                onClick={() => createInFolder(contextMenu.entry, 'story')}
-                role="menuitem"
-                type="button"
-              >
+              <button onClick={() => createInFolder(contextMenu.entry, 'story')} role="menuitem" type="button">
                 <BookOpen aria-hidden="true" size={15} />
                 Neue Geschichte
               </button>
               )}
-              {onImportStory && (
-              <button
-                onClick={() => { setContextMenu(null); void Promise.resolve(onImportStory(contextMenu.entry.relativePath)) }}
-                role="menuitem"
-                type="button"
-              >
-                <BookOpen aria-hidden="true" size={15} />
-                Geschichte importieren …
-              </button>
+              {(onImportStory || onAttachBook) && renderDisclosure('more', null, 'Mehr', (
+                <>
+                  {onImportStory && (
+                  <button
+                    onClick={() => { setContextMenu(null); void Promise.resolve(onImportStory(contextMenu.entry.relativePath)) }}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <BookOpen aria-hidden="true" size={15} />
+                    Geschichte importieren …
+                  </button>
+                  )}
+                  {onAttachBook && (
+                  <button onClick={() => createInFolder(contextMenu.entry, 'book')} role="menuitem" type="button">
+                    <FileText aria-hidden="true" size={15} />
+                    Buch hinzufügen
+                  </button>
+                  )}
+                </>
+              ))}
+              <span className="file-tree__menu-separator" role="separator" />
+              <span className="file-tree__menu-label">Ordnereinstellungen</span>
+              {onSetFolderColor && renderDisclosure('color', <span className="file-tree__color-dot" style={{ background: contextMenu.entry.color ?? 'var(--border-strong)' }} aria-hidden="true" />, 'Ordnerfarbe', renderColorPicker(contextMenu.entry, onSetFolderColor, {
+                group: 'Ordnerfarbe wählen',
+                clear: 'Ordnerfarbe entfernen',
+                bare: true,
+              }))}
+              {onEditFolderPath && (
+                <button
+                  onClick={() => {
+                    const path = contextMenu.entry.relativePath
+                    setContextMenu(null)
+                    void Promise.resolve(onEditFolderPath(path))
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <FolderInput aria-hidden="true" size={15} />
+                  Ordnerpfad …
+                </button>
               )}
-              {onAttachBook && (
-              <button
-                onClick={() => createInFolder(contextMenu.entry, 'book')}
-                role="menuitem"
-                type="button"
-              >
-                <FileText aria-hidden="true" size={15} />
-                Buch hinzufügen
-              </button>
-              )}
-              {onToggleLocalOnly && contextMenu.entry.kind === 'folder' && (
+              {onToggleLocalOnly && (
               <button
                 onClick={() => {
                   const path = contextMenu.entry.relativePath
@@ -1096,33 +1134,6 @@ export const FileTree = memo(function FileTree({
                 Buch entfernen
               </button>
               )}
-              <button
-                onClick={() => createInFolder(contextMenu.entry, 'folder')}
-                role="menuitem"
-                type="button"
-              >
-                <FolderPlus aria-hidden="true" size={15} />
-                Neuer Unterordner
-              </button>
-              <span className="file-tree__menu-separator" role="separator" />
-              {onEditFolderPath && (
-                <button
-                  onClick={() => {
-                    const path = contextMenu.entry.relativePath
-                    setContextMenu(null)
-                    void Promise.resolve(onEditFolderPath(path))
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <FolderInput aria-hidden="true" size={15} />
-                  Ordnerpfad …
-                </button>
-              )}
-              {onSetFolderColor && renderColorPicker(contextMenu.entry, onSetFolderColor, {
-                group: 'Ordnerfarbe wählen',
-                clear: 'Ordnerfarbe entfernen',
-              })}
               <span className="file-tree__menu-separator" role="separator" />
             </>
           )}
@@ -1217,7 +1228,8 @@ export const FileTree = memo(function FileTree({
           )}
           {onShare && (contextMenu.entry.kind === 'folder' || (!isPdfEntry(contextMenu.entry) && !isStoryEntry(contextMenu.entry))) && (
             <>
-              <span className="file-tree__menu-label">Teilen</span>
+              {renderDisclosure('share', <Share2 aria-hidden="true" size={15} />, 'Teilen', (
+                <>
               {onShareWithUser && !contextMenu.entry.relativePath.startsWith('Mit mir geteilt') && (
                 <button
                   className="file-tree__share-choice"
@@ -1284,6 +1296,8 @@ export const FileTree = memo(function FileTree({
                   <small>Andere können diese Freigabe gleichzeitig bearbeiten.</small>
                 </span>
               </button>
+                </>
+              ))}
               <span className="file-tree__menu-separator" role="separator" />
             </>
           )}

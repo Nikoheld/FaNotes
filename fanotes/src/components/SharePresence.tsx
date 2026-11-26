@@ -75,6 +75,9 @@ export const SharePresence = memo(function SharePresence({ people }: { people: S
     }
   }, [open])
 
+  // Focus moves into the popover when it opens (it is a read-only list, so the dialog itself takes it); Escape returns it.
+  useEffect(() => { if (open && position) popoverRef.current?.focus({ preventScroll: true }) }, [open, position !== null]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => { if (!others.length) { setOpen(false); setTip(null) } }, [others.length])
 
   const showTip = useCallback((text: string) => {
@@ -118,7 +121,7 @@ export const SharePresence = memo(function SharePresence({ people }: { people: S
         </>
       )}
       {open && position && people && (
-        <div ref={popoverRef} className="ftb-popover share-presence-popover" role="dialog" aria-label={uiText('Wer bearbeitet gerade', 'Who is editing')} style={{ top: position.top, right: position.right, left: 'auto' }}>
+        <div ref={popoverRef} tabIndex={-1} className="ftb-popover share-presence-popover" role="dialog" aria-label={uiText('Wer bearbeitet gerade', 'Who is editing')} style={{ top: position.top, right: position.right, left: 'auto' }}>
           <section>
             <h3>Gerade am Bearbeiten</h3>
             <ul>

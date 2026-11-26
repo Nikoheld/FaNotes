@@ -1,5 +1,5 @@
 import {
-  ArrowLeft, ChevronDown, ChevronRight, FilePlus2, LoaderCircle, MoreHorizontal, Plus, Replace, Search, Trash2, X,
+  ArrowLeft, ChevronDown, ChevronRight, FilePlus2, LoaderCircle, MessageSquare, MoreHorizontal, Plus, Replace, Search, StickyNote, Trash2, X,
 } from 'lucide-react'
 import { colorSwatchName } from '../../lib/colorNames'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
@@ -31,6 +31,7 @@ import { GoalsView } from './GoalsView'
 import { ReferencePane, type Reference } from './ReferencePane'
 import { ScenePanel, SnapshotCompare } from './ScenePanel'
 import { ExportDialog } from '../export/ExportDialog'
+import { DialogFrame } from '../../components/DialogFrame'
 import { androidBridge } from '../androidHost'
 import { installStoryWrittenEntry, reportEditorBusy } from '../androidLive'
 import { registerStoryGate, type StoryGate } from '../liveSync'
@@ -1280,18 +1281,31 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
       )}
       {compare && <SnapshotCompare snapshot={compare.snapshot} rows={compare.rows} onRestore={() => { void restoreCompare() }} onClose={() => { setCompare(null); refocus() }} />}
 
-      {noteDialog && (
-        <div className="wm-dialog-backdrop" onMouseDown={() => { setNoteDialog(null); refocus() }}>
-          <form className="wm-dialog" role="dialog" aria-label={noteDialog.kind === 'footnote' ? L('Fussnote einfügen', 'Insert footnote') : L('Kommentar hinzufügen', 'Add comment')} onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); confirmNote() }}>
-            <strong>{noteDialog.kind === 'footnote' ? L('Fussnote', 'Footnote') : L('Kommentar', 'Comment')}</strong>
-            <textarea autoFocus rows={4} value={noteDialog.text} data-i18n-ignore placeholder={noteDialog.kind === 'footnote' ? L('Text der Fussnote', 'Footnote text') : L('Was ist dir hier aufgefallen?', 'What did you notice here?')} onChange={(event) => setNoteDialog((value) => (value ? { ...value, text: event.target.value } : value))} onKeyDown={(event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); confirmNote() } if (event.key === 'Escape') { setNoteDialog(null); refocus() } }} />
-            <div>
-              <button type="button" className="secondary-button" onClick={() => { setNoteDialog(null); refocus() }}>{L('Abbrechen', 'Cancel')}</button>
-              <button type="submit" className="primary-button" disabled={noteDialog.kind === 'comment' && !noteDialog.text.trim()}>{noteDialog.kind === 'footnote' ? L('Einfügen', 'Insert') : L('Hinzufügen', 'Add')}</button>
-            </div>
-          </form>
-        </div>
-      )}
+      {noteDialog && (() => {
+        const footnote = noteDialog.kind === 'footnote'
+        const closeNote = () => { setNoteDialog(null); refocus() }
+        return (
+          <DialogFrame
+            icon={footnote ? <StickyNote size={18} /> : <MessageSquare size={18} />}
+            eyebrow={L('Schreiben', 'Writing')}
+            title={footnote ? L('Fussnote einfügen', 'Insert footnote') : L('Kommentar hinzufügen', 'Add comment')}
+            titleId="wm-note-title"
+            closeLabel={L('Schliessen', 'Close')}
+            size="sm"
+            onClose={closeNote}
+            footer={(
+              <>
+                <button type="button" className="secondary-button" onClick={closeNote}>{L('Abbrechen', 'Cancel')}</button>
+                <button type="submit" form="wm-note-form" className="primary-button" disabled={noteDialog.kind === 'comment' && !noteDialog.text.trim()}>{footnote ? L('Einfügen', 'Insert') : L('Hinzufügen', 'Add')}</button>
+              </>
+            )}
+          >
+            <form id="wm-note-form" onSubmit={(event) => { event.preventDefault(); confirmNote() }}>
+              <textarea data-autofocus rows={4} value={noteDialog.text} data-i18n-ignore aria-label={footnote ? L('Text der Fussnote', 'Footnote text') : L('Kommentar', 'Comment')} placeholder={footnote ? L('Text der Fussnote', 'Footnote text') : L('Was ist dir hier aufgefallen?', 'What did you notice here?')} onChange={(event) => setNoteDialog((value) => (value ? { ...value, text: event.target.value } : value))} onKeyDown={(event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); confirmNote() } }} />
+            </form>
+          </DialogFrame>
+        )
+      })()}
 
       <StatusBar
         pageNumber={pageNumber}

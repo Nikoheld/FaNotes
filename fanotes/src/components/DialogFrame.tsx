@@ -16,7 +16,7 @@ export type DialogFrameProps = {
   closeLabel?: string
   /** Blocks the close button, Escape and the backdrop (while a job runs that must not be interrupted). */
   locked?: boolean
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'sm' | 'md' | 'lg' | 'xl'
   className?: string
   /** Row between header and body that stays put while the body scrolls (tabs). */
   subheader?: ReactNode

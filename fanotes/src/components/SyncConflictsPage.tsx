@@ -202,6 +202,17 @@ export function SyncConflictsPage({ engine, syncState }: { engine: SyncEngine; s
   const [loadingVersions, setLoadingVersions] = useState(false)
   const [highlight, setHighlight] = useState(true)
   const [confirm, setConfirm] = useState<ConflictKeep | null>(null)
+  const confirmRef = useRef<HTMLDivElement>(null)
+  // The confirmation opens below the two columns, often out of sight: bring it into view, put focus on the safe
+  // choice (Cancel), and give focus back to the button that asked when it closes.
+  useEffect(() => {
+    if (!confirm) return undefined
+    const asker = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const box = confirmRef.current
+    box?.scrollIntoView({ block: 'nearest' })
+    box?.querySelector<HTMLElement>('.secondary-button')?.focus({ preventScroll: true })
+    return () => { if (asker?.isConnected) asker.focus({ preventScroll: true }) }
+  }, [confirm])
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice>(null)
   const signedIn = Boolean(syncState.account)
@@ -430,7 +441,7 @@ export function SyncConflictsPage({ engine, syncState }: { engine: SyncEngine; s
         <small>{L('Wenn beide Fassungen etwas Wichtiges enthalten.', 'When both versions contain something important.')}</small>
       </div>
       {confirm && (
-        <div className="conflict-confirm" role="alertdialog" aria-label={L('Entscheidung bestätigen', 'Confirm your choice')}>
+        <div ref={confirmRef} className="conflict-confirm" role="alertdialog" aria-label={L('Entscheidung bestätigen', 'Confirm your choice')} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) { event.stopPropagation(); setConfirm(null) } }}>
           <p>{confirmText}</p>
           <div>
             <button type="button" className="secondary-button" onClick={() => setConfirm(null)} disabled={busy}>{L('Abbrechen', 'Cancel')}</button>
