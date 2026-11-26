@@ -103,7 +103,7 @@ assert.match(pdfView, /const derived = pdfZoomModeForZoom\(cameraZoom, fit\)/u, 
 assert.match(pdfView, /if \(mode === 'fit-width'\) applyCameraZoom\(fit\.width, 'fit-width'\)/u, 'fit modes follow a viewport resize')
 assert.match(pdfView, /\{loading && !pdf && <div className="pdf-note-status">/u, 'loading placeholder leaves the flow once the document exists')
 const app = readFileSync(join(here, '../src/App.tsx'), 'utf8')
-assert.match(app, /<PdfNoteView\s+path=\{splitTab\.path\}\s+title=\{splitTab\.title\}\s+inputDisabled=\{[^}]*\}\s+autoFit=\{false\}/u, 'split pane never drives the main camera')
+assert.match(app, /<PdfNoteView\s+path=\{splitTab\.path\}[^>]*?\sautoFit=\{false\}/u, 'split pane never drives the main camera')
 const paperView = readFileSync(join(here, '../src/components/PaperView.tsx'), 'utf8')
 assert.match(paperView, /zoomTo: \(zoom: number, originClient\?: \{ x: number; y: number \}\) => void/u, 'camera exposes absolute zoom')
 assert.match(paperView, /setRecalled\(remembered !== null\)/u, 'camera reports whether a memory came back')
