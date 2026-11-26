@@ -2462,6 +2462,36 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Moves or resizes a placed picture by a step in paper widths, with the desktop clamp. Only the
+     * `placement` and `aspect` fields change; every other field of the record stays as stored.
+     */
+    fun nudgeWorksheetImage(id: String, dx: Double, dy: Double, dWidth: Double) {
+        val note = open.value ?: return
+        if (id !in note.worksheets) return
+        val natural = backdrop.value.firstOrNull { it.worksheetId == id }?.bitmap
+            ?.takeIf { !it.isRecycled && it.width > 0 }?.let { it.height.toDouble() / it.width }
+        viewModelScope.launch {
+            val changed = withContext(Dispatchers.IO) {
+                val path = ".fanotes/worksheets/$id.json"
+                val raw = graph.vault.read(path)?.decodeToString() ?: return@withContext false
+                val root = parseJson(raw) as? JsonValue.Obj ?: return@withContext false
+                val current = ch.fasrv.fanotes.desk.readSheetPlacement(root) ?: return@withContext false
+                val next = ch.fasrv.fanotes.desk.clampSheetPlacement(
+                    ch.fasrv.fanotes.desk.SheetImagePlacement(current.x + dx, current.y + dy, current.width + dWidth),
+                )
+                ch.fasrv.fanotes.desk.writeSheetPlacement(root, next, ch.fasrv.fanotes.desk.readSheetAspect(root) ?: natural)
+                root.put("updatedAt", ch.fasrv.fanotes.json.jsonString(isoNow()))
+                graph.vault.write(path, root.stringify().encodeToByteArray())
+                true
+            }
+            if (!changed) return@launch
+            loadBackdrop(note)
+            noteChanged()
+            graph.engine.notifyLocalChange()
+        }
+    }
+
     fun removeWorksheet(id: String) {
         val note = open.value ?: return
         if (id !in note.worksheets) return
@@ -3233,6 +3263,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     worksheetId = id,
                     label = title,
                     page = 1,
+                    placement = ch.fasrv.fanotes.desk.readSheetPlacement(json),
+                    storedAspect = ch.fasrv.fanotes.desk.readSheetAspect(json),
                 )
             }
         }

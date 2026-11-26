@@ -29,6 +29,8 @@ Image worksheets follow the desktop layout:
 - record at `.fanotes/worksheets/<id>.json` (`schemaVersion` 1, `kind` `image`, `sourceRelativePath`, `dataRelativePath`, `textBoxes`, `highlights`)
 - Markdown marker `<!-- fanotes-worksheet:ID -->`
 
+An image record may also carry `placement` (`x`, `y`, `width`: fractions of the paper width, `y` up to 2000) and `aspect` (height / width, 0.02 to 50), the desktop's floating picture (#1465, `sheetImage.ts`). The tablet draws such a picture at that place and size without pushing the next sheet down, clamps like the desktop's `validateWorksheetDocument`, and rewrites only those two fields when it moves or resizes one; every other field, known or not, is written back as read.
+
 Empty folders are not a sync concept. A folder exists because a note inside it exists. `.keep` is a dotfile and is not uploaded.
 
 ## `fanotes-famd-v1`

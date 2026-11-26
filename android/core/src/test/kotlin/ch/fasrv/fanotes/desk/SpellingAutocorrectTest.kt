@@ -20,7 +20,7 @@ class SpellingAutocorrectTest {
             enabled = true,
             mark = null,
             declined = { false },
-            languageAt = { "en" },
+            passageAt = { sure("en") },
         )
         assertEquals("This is an the ", applied?.text)
         assertEquals(applied?.text?.length, applied?.cursor)
@@ -37,7 +37,7 @@ class SpellingAutocorrectTest {
             enabled = true,
             mark = mark,
             declined = { false },
-            languageAt = { "en" },
+            passageAt = { sure("en") },
         )
         assertEquals(before, undone?.text)
         assertEquals("teh", undone?.declined)
@@ -51,7 +51,7 @@ class SpellingAutocorrectTest {
             enabled = true,
             mark = null,
             declined = { normalizeForDictionary(it) == "teh" },
-            languageAt = { "en" },
+            passageAt = { sure("en") },
         )
         assertNull(again)
     }
@@ -67,7 +67,7 @@ class SpellingAutocorrectTest {
             enabled = true,
             mark = null,
             declined = { false },
-            languageAt = { "de" },
+            passageAt = { sure("de") },
         )
         assertEquals("Haus ", hasu?.text)
         assertNull(
@@ -80,7 +80,7 @@ class SpellingAutocorrectTest {
                 enabled = true,
                 mark = null,
                 declined = { false },
-                languageAt = { "en" },
+                passageAt = { sure("en") },
             ),
         )
         assertTrue(isCanonicalProperName("fabio"))
@@ -91,6 +91,12 @@ class SpellingAutocorrectTest {
     }
 
     private companion object {
+        fun sure(language: String) = PassageAt(
+            PassageLanguage(language, confident = true, unsupported = false, foreign = false, source = PassageSource.LOCAL),
+            listOf(language),
+            listOf("de", "en"),
+        )
+
         val lexicon by lazy { SpellingLexicon(loadBundledSpelling(includeCandidates = true)) }
     }
 }
