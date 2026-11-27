@@ -182,6 +182,8 @@
     "check:i18n-mixed": "node scripts/check-i18n-mixed.mjs",
     "i18n:sort": "node scripts/sort-i18n.cjs",
     "check:fast": "node scripts/run-fast-checks.mjs",
+    "check:office-to-pdf": "node scripts/check-office-to-pdf.mjs",
+    "check:office-to-pdf-desktop": "cross-env FANOTES_OFFICE_DESKTOP=1 node scripts/check-office-to-pdf.mjs",
     "check:i18n-sorted": "node scripts/sort-i18n.cjs --check",
     "build:glyphenwerk": "node scripts/stage-glyphenwerk.cjs",
     "build:spelling": "node scripts/build-spelling-filters.cjs",

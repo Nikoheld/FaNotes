@@ -6,6 +6,7 @@ const crypto = require('node:crypto')
 const v2codec = require('./famdV2.mjs')
 const famdPack = require('./famdPack.mjs')
 const noteAnnotation = require('./noteAnnotation.mjs')
+const { parseOfficeSource } = require('./officeSource.mjs')
 
 const FAMD_SCHEMA = 'fanotes-famd-v1'
 const FAMD_HEADER = /(?:^|\n)<!--\s*fanotes-famd:v1\s+chars=(\d+)\s*-->\n/u
@@ -294,6 +295,7 @@ function payloadFromParsed(parsed) {
   const textFields = parseNoteTextFields(parsed.textFields)
   const textFieldTombstones = parseNoteTextFieldTombstones(parsed.textFieldTombstones)
   const annotations = noteAnnotation.parseAnnotations(parsed.annotations)
+  const officeSource = parseOfficeSource(parsed.officeSource)
   return {
     schema: FAMD_SCHEMA,
     updatedAt,
@@ -306,6 +308,7 @@ function payloadFromParsed(parsed) {
     ...(textFields.length ? { textFields } : {}),
     ...(textFieldTombstones.length ? { textFieldTombstones } : {}),
     ...(annotations.length ? { annotations } : {}),
+    ...(officeSource ? { officeSource } : {}),
   }
 }
 
@@ -480,6 +483,8 @@ function serializeFamd(markdown, payload, encoding) {
   if (textFieldTombstones.length) next.textFieldTombstones = textFieldTombstones
   const annotations = noteAnnotation.parseAnnotations(payload?.annotations)
   if (annotations.length) next.annotations = annotations
+  const officeSource = parseOfficeSource(payload?.officeSource)
+  if (officeSource) next.officeSource = officeSource
   if (encoding === 'v2') return v2codec.encodeV2Document(body, next)
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
@@ -568,6 +573,7 @@ function sameFamdPayload(left, right) {
   if (JSON.stringify(left.pageStats || null) !== JSON.stringify(right.pageStats || null)) return false
   if (JSON.stringify(left.textFields || []) !== JSON.stringify(right.textFields || [])) return false
   if (JSON.stringify(left.annotations || []) !== JSON.stringify(right.annotations || [])) return false
+  if (JSON.stringify(left.officeSource || null) !== JSON.stringify(right.officeSource || null)) return false
   return sameInk(left.ink, right.ink)
 }
 

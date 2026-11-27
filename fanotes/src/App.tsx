@@ -84,6 +84,8 @@ import { hasConnectedAiProvider } from './lib/aiProviderConnection'
 import { clipboardImageFile } from './lib/clipboardImage'
 import { retitleGeneratedHeading } from './lib/autoHeading'
 import { errorLocation, friendlyFileError, sanitizeToastMessage } from './lib/fileErrors'
+import { officeKindOfPath } from './lib/officeFiles'
+import { OfficeSourceNotice } from './components/OfficeSourceNotice'
 import { companionNotePath, emptyFamdPayload, famdEncodingForSave, inkHasMarks, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { inkJsonForRewrite } from './lib/packedInk'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
@@ -822,6 +824,8 @@ const useSystemDark = () => {
 export default function App({ startupBootstrap }: AppProps) {
   const isWeb = window.fanotes?.platform === 'web'
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null)
+  const [officeBusy, setOfficeBusy] = useState<{ path: string; reconvert: boolean } | null>(null)
+  const officeBusyRef = useRef<string | null>(null)
   const [tree, setTree] = useState<VaultEntry[]>([])
   const [tabs, setTabs] = useState<NoteTab[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
@@ -2135,6 +2139,39 @@ export default function App({ startupBootstrap }: AppProps) {
       setWritingPath(path)
       return true
     }
+    if (officeKindOfPath(path)) {
+      // Word/PowerPoint: converted to a PDF note next to it (or the earlier conversion), which opens instead.
+      const convert = window.fanotes.importOfficeDocument
+      if (!convert) {
+        toast('Word- und PowerPoint-Dateien lassen sich nur in der Desktop-App öffnen.', 'info')
+        return false
+      }
+      if (officeBusyRef.current) {
+        if (officeBusyRef.current !== path) toast('Es wird gerade ein anderes Dokument umgewandelt.', 'info')
+        return false
+      }
+      const officeSession = vaultSessionGenerationRef.current
+      officeBusyRef.current = path
+      setOfficeBusy({ path, reconvert: false })
+      try {
+        const result = await convert(path)
+        if (officeSession !== vaultSessionGenerationRef.current) return false
+        if (result.created) {
+          vaultStructureRevisionRef.current += 1
+          try { await refreshTree() } catch (error) { console.warn('FaNotes-Dateibaum konnte nach der Umwandlung nicht aktualisiert werden:', error) }
+        }
+        if (result.created) toast('Als PDF-Notiz geöffnet. Das Original bleibt unverändert.', 'success')
+        return await openNoteRef.current(result.pdfPath)
+      } catch (error) {
+        if (officeSession === vaultSessionGenerationRef.current) {
+          toast(error instanceof Error && error.message ? error.message : 'Das Dokument konnte nicht umgewandelt werden.', 'error')
+        }
+        return false
+      } finally {
+        officeBusyRef.current = null
+        setOfficeBusy(null)
+      }
+    }
     const session = vaultSessionGenerationRef.current
     const structureRevision = vaultStructureRevisionRef.current
     setOverviewOpen(false)
@@ -2191,8 +2228,30 @@ export default function App({ startupBootstrap }: AppProps) {
     } finally {
       openingNotesRef.current.delete(requestKey)
     }
-  }, [flushDocumentLayers, prepareDocumentOpen, readNoteTab, revealOpenedNote, toast])
+  }, [flushDocumentLayers, prepareDocumentOpen, readNoteTab, refreshTree, revealOpenedNote, toast])
   const openNote = useCallback((path: string) => trackActivity('open', openNoteUntracked(path)), [openNoteUntracked])
+
+  /** "Original geändert": converts again into a new PDF note. The earlier one keeps its ink and is never overwritten. */
+  const reconvertOffice = useCallback(async (sourcePath: string) => {
+    const convert = window.fanotes.importOfficeDocument
+    if (!convert || officeBusyRef.current) return
+    const session = vaultSessionGenerationRef.current
+    officeBusyRef.current = sourcePath
+    setOfficeBusy({ path: sourcePath, reconvert: true })
+    try {
+      const result = await convert(sourcePath, { reconvert: true })
+      if (session !== vaultSessionGenerationRef.current) return
+      vaultStructureRevisionRef.current += 1
+      try { await refreshTree() } catch (error) { console.warn('FaNotes-Dateibaum konnte nach der Umwandlung nicht aktualisiert werden:', error) }
+      await openNote(result.pdfPath)
+      toast('Neue PDF-Notiz aus dem geänderten Original erstellt. Die frühere Notiz bleibt mit deiner Handschrift erhalten.', 'success')
+    } catch (error) {
+      if (session === vaultSessionGenerationRef.current) toast(error instanceof Error && error.message ? error.message : 'Das Dokument konnte nicht umgewandelt werden.', 'error')
+    } finally {
+      officeBusyRef.current = null
+      setOfficeBusy(null)
+    }
+  }, [openNote, refreshTree, toast])
 
   /**
    * Bring back the tabs, pins and split the vault was left with. The active
@@ -7946,6 +8005,13 @@ export default function App({ startupBootstrap }: AppProps) {
           onOpenSettings={() => { applySettings({ ...settingsRef.current, diagnosticsNoticeSeen: true }); openSettings('senddata') }}
         />
       )}
+      {officeBusy && (
+        <div className="office-busy" role="status" aria-live="polite">
+          <LoaderCircle className="spin" size={16} aria-hidden="true" />
+          <span>{officeBusy.reconvert ? 'Original wird neu umgewandelt …' : 'Dokument wird in ein PDF umgewandelt …'}</span>
+        </div>
+      )}
+      {!isWeb && isPdfActive && activeTab && window.fanotes.readOfficeSource && <OfficeSourceNotice path={activeTab.path} onReconvert={(source) => void reconvertOffice(source)} />}
       <div className="toast-stack" aria-live="polite" aria-relevant="additions">{toasts.map((item) => <div className={`toast ${item.kind}`} role={item.kind === 'error' ? 'alert' : 'status'} key={item.id}>{item.kind === 'success' ? <CheckCircle2 size={16} /> : item.kind === 'error' ? <CircleAlert size={16} /> : <Info size={16} />}<span>{item.message}</span>{item.action && <button type="button" className="toast-action" onClick={() => { const run = item.action?.run; dismissToast(item.id); run?.() }}>{item.action.label}</button>}<button type="button" aria-label="Meldung schließen" onClick={() => dismissToast(item.id)}><X size={13} /></button></div>)}</div>
     </div>
   )

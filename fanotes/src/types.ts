@@ -6,6 +6,9 @@ import type { NoteTextFieldOps } from '../electron/noteTextFieldMerge.mjs'
 import type { NoteAnnotation } from '../electron/noteAnnotation.mjs'
 import type { SubjectBookRecord } from './lib/subjectBook'
 
+export type OfficeImportResult = { pdfPath: string; created: boolean; changed: boolean; engine: 'word' | 'powerpoint' | 'libreoffice' | 'builtin'; fallback: boolean }
+export type OfficeSourceStatus = { sourcePath: string; engine: OfficeImportResult['engine']; fallback: boolean; missing: boolean; changed: boolean }
+
 export type VaultEntry = {
   name: string
   relativePath: string
@@ -806,6 +809,9 @@ export type FaNotesApi = {
   importWorksheet: () => Promise<WorksheetDocument | null>
   importWorksheetFromData?: (payload: { name: string; mimeType: string; bytes: Uint8Array }) => Promise<WorksheetDocument>
   importPdfNote: (parentPath?: string) => Promise<CreateResult | null>
+  /** Desktop only: Word/PowerPoint file in the vault -> PDF note next to it (reuses an earlier conversion). */
+  importOfficeDocument?: (relativePath: string, options?: { reconvert?: boolean }) => Promise<OfficeImportResult>
+  readOfficeSource?: (pdfRelativePath: string) => Promise<OfficeSourceStatus | null>
   /** Saves edited PDF bytes (page subset / new order) as a new PDF note. Desktop only. */
   createPdfNoteFromBytes?: (payload: { bytes: Uint8Array; name: string; parentPath?: string }) => Promise<CreateResult>
   /** Asks for a OneNote file, converts it and returns the page tree to choose from (null when cancelled). */

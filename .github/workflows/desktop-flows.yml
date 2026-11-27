@@ -17,6 +17,7 @@ on:
       - 'fanotes/scripts/check-ink-*export.mjs'
       - 'fanotes/scripts/check-sheet-images.mjs'
       - 'fanotes/scripts/check-tth-flow.mjs'
+      - 'fanotes/scripts/check-office-to-pdf.mjs'
       - 'fanotes/scripts/electron-test-stub.cjs'
       - 'fanotes/scripts/lib/desktop-flow.mjs'
       - '.github/workflows/desktop-flows.yml'
@@ -70,3 +71,5 @@ jobs:
         run: npm run check:worksheet-followups || { echo "::warning::worksheet follow-ups check failed once; retrying"; npm run check:worksheet-followups; }
       - name: Text in deine Handschrift (dialog, empty state, insert, undo)
         run: npm run check:tth-flow || { echo "::warning::tth flow check failed once; retrying"; npm run check:tth-flow; }
+      - name: Word and PowerPoint files (convert to PDF note, reuse, changed original, zip bombs)
+        run: npm run check:office-to-pdf-desktop || { echo "::warning::office to pdf check failed once; retrying"; npm run check:office-to-pdf-desktop; }

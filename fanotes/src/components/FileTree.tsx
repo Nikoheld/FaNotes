@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from 'react'
 import { colorSwatchName } from '../lib/colorNames'
+import { officeKindOfPath } from '../lib/officeFiles'
 import { useMenuKeyboard } from '../lib/useMenuKeyboard'
 import {
   BookOpen,
@@ -28,6 +29,7 @@ import {
   File,
   Files,
   FileText,
+  FileType2,
   Folder,
   FolderInput,
   FolderOpen,
@@ -37,6 +39,7 @@ import {
   Palette,
   Pencil,
   Plus,
+  Presentation,
   Share2,
   Trash2,
   X,
@@ -157,6 +160,11 @@ function displayName(entry: VaultEntry) {
 /** A writing-mode project (`Name.story`), shown as one document. */
 function isStoryEntry(entry: VaultEntry) {
   return entry.kind === 'file' && /\.story$/i.test(entry.name)
+}
+
+/** Word/PowerPoint file (desktop): opening it converts it to a PDF note. */
+function officeKindOf(entry: VaultEntry) {
+  return entry.kind === 'file' ? officeKindOfPath(entry.name) : null
 }
 
 function isPdfEntry(entry: VaultEntry) {
@@ -858,6 +866,10 @@ export const FileTree = memo(function FileTree({
                     ) : (
                       <Folder size={16} />
                     )
+                  ) : officeKindOf(entry) === 'word' ? (
+                    <FileType2 className="file-tree__office is-word" size={16} />
+                  ) : officeKindOf(entry) === 'powerpoint' ? (
+                    <Presentation className="file-tree__office is-powerpoint" size={16} />
                   ) : isPdfEntry(entry) ? (
                     <File size={16} />
                   ) : isStoryEntry(entry) ? (
@@ -1039,8 +1051,8 @@ export const FileTree = memo(function FileTree({
             : { left: contextMenu.x, top: contextMenu.y, visibility: 'hidden' }}
         >
           <div className="file-tree__menu-head">
-            <span style={contextMenu.entry.color ? { '--folder-color': contextMenu.entry.color } as CSSProperties : undefined}>{contextMenu.entry.kind === 'folder' ? <FolderOpen size={16} /> : isPdfEntry(contextMenu.entry) ? <File size={16} /> : isStoryEntry(contextMenu.entry) ? <BookOpen size={16} /> : <FileText size={16} />}</span>
-            <div><small>{contextMenu.entry.kind === 'folder' ? 'Ordner' : isPdfEntry(contextMenu.entry) ? 'PDF-Notiz' : isStoryEntry(contextMenu.entry) ? 'Geschichte' : 'Notiz'}</small><strong>{displayName(contextMenu.entry)}</strong></div>
+            <span style={contextMenu.entry.color ? { '--folder-color': contextMenu.entry.color } as CSSProperties : undefined}>{contextMenu.entry.kind === 'folder' ? <FolderOpen size={16} /> : officeKindOf(contextMenu.entry) === 'word' ? <FileType2 size={16} /> : officeKindOf(contextMenu.entry) === 'powerpoint' ? <Presentation size={16} /> : isPdfEntry(contextMenu.entry) ? <File size={16} /> : isStoryEntry(contextMenu.entry) ? <BookOpen size={16} /> : <FileText size={16} />}</span>
+            <div><small>{contextMenu.entry.kind === 'folder' ? 'Ordner' : officeKindOf(contextMenu.entry) === 'word' ? 'Word-Dokument' : officeKindOf(contextMenu.entry) === 'powerpoint' ? 'PowerPoint-Präsentation' : isPdfEntry(contextMenu.entry) ? 'PDF-Notiz' : isStoryEntry(contextMenu.entry) ? 'Geschichte' : 'Notiz'}</small><strong>{displayName(contextMenu.entry)}</strong></div>
           </div>
           {contextMenu.entry.kind === 'folder' && (
             <>
@@ -1167,7 +1179,7 @@ export const FileTree = memo(function FileTree({
           {(onDuplicate || onDuplicateFolder || onCopyWikiLink || onCopyPath) && (
             <>
               <span className="file-tree__menu-label">Kopieren</span>
-              {contextMenu.entry.kind === 'file' && onDuplicate && !isPdfEntry(contextMenu.entry) && !isStoryEntry(contextMenu.entry) && (
+              {contextMenu.entry.kind === 'file' && onDuplicate && !isPdfEntry(contextMenu.entry) && !officeKindOf(contextMenu.entry) && !isStoryEntry(contextMenu.entry) && (
                 <button
                   onClick={() => {
                     const path = contextMenu.entry.relativePath
@@ -1195,7 +1207,7 @@ export const FileTree = memo(function FileTree({
                   Ordner duplizieren
                 </button>
               )}
-              {contextMenu.entry.kind === 'file' && onCopyWikiLink && (
+              {contextMenu.entry.kind === 'file' && onCopyWikiLink && !officeKindOf(contextMenu.entry) && (
                 <button
                   onClick={() => {
                     const path = contextMenu.entry.relativePath
@@ -1226,7 +1238,7 @@ export const FileTree = memo(function FileTree({
               <span className="file-tree__menu-separator" role="separator" />
             </>
           )}
-          {onShare && (contextMenu.entry.kind === 'folder' || (!isPdfEntry(contextMenu.entry) && !isStoryEntry(contextMenu.entry))) && (
+          {onShare && (contextMenu.entry.kind === 'folder' || (!isPdfEntry(contextMenu.entry) && !officeKindOf(contextMenu.entry) && !isStoryEntry(contextMenu.entry))) && (
             <>
               {renderDisclosure('share', <Share2 aria-hidden="true" size={15} />, 'Teilen', (
                 <>
