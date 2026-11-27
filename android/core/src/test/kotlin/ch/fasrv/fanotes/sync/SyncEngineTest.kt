@@ -977,6 +977,140 @@ class SyncEngineTest {
         settleInitialCycle()
     }
 
+    private fun diagEngine(server: MemorySyncServer, lines: MutableList<String>, signedOut: MutableList<String> = mutableListOf()): SyncEngine {
+        val engine = SyncEngine(
+            SyncApi(server),
+            SyncEngineOptions(
+                platform = "android", deviceName = { "Phone" }, automatic = { true },
+                retryBackoffMs = listOf(20L, 20L, 20L),
+                onDiagnostic = { synchronized(lines) { lines += it } },
+                onSignedOut = { signedOut += it },
+            ),
+        )
+        engine.attach(MemoryHost("vault"))
+        return engine
+    }
+
+    private suspend fun SyncEngine.waitFor(what: String, check: () -> Boolean) {
+        withTimeout(10_000) { while (!check()) delay(5) }
+    }
+
+    @Test
+    fun aTransient503OnAnAutomaticCycleRetriesWithoutShowingAnError() = runBlocking {
+        val server = MemorySyncServer()
+        val lines = mutableListOf<String>()
+        val engine = diagEngine(server, lines)
+        try {
+            engine.registerAndSettle("ada@example.com", "correct horse")
+            server.failWith(503, 1)
+            engine.syncNow("timer")
+            assertTrue(engine.state.value.status != SyncStatus.ERROR)
+            assertEquals(null, engine.state.value.error)
+            val before = engine.state.value.lastSyncAt
+            val mark = server.callCount()
+            engine.waitFor("retry") { server.callCount() > mark && engine.state.value.status == SyncStatus.IDLE }
+            assertTrue(synchronized(lines) { lines.any { it.contains("failures=1") && it.contains("shown=0") } })
+            assertTrue(engine.state.value.status != SyncStatus.ERROR)
+            assertEquals(null, engine.state.value.error)
+            assertTrue(engine.state.value.log.none { it.level == "error" })
+            assertTrue(before != null)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun threeTransientFailuresInARowShowAnError() = runBlocking {
+        val server = MemorySyncServer()
+        val lines = mutableListOf<String>()
+        val engine = diagEngine(server, lines)
+        try {
+            engine.registerAndSettle("ada@example.com", "correct horse")
+            server.failWith(522)
+            engine.syncNow("timer")
+            assertTrue(engine.state.value.status != SyncStatus.ERROR)
+            engine.waitFor("error") { engine.state.value.status == SyncStatus.ERROR }
+            assertTrue(synchronized(lines) { lines.any { it.contains("failures=3") && it.contains("status=522") && it.contains("shown=1") } })
+            // A success resets the streak: the next failure is hidden again.
+            server.failWith(0, 0)
+            engine.syncNow("manual")
+            assertEquals(SyncStatus.IDLE, engine.state.value.status)
+            server.failWith(503, 1)
+            engine.syncNow("timer")
+            assertTrue(engine.state.value.status != SyncStatus.ERROR)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun aManualSyncReportsATransientFailureAtOnce() = runBlocking {
+        val server = MemorySyncServer()
+        val lines = mutableListOf<String>()
+        val engine = diagEngine(server, lines)
+        try {
+            engine.registerAndSettle("ada@example.com", "correct horse")
+            server.failWith(503)
+            engine.syncNow("phone")
+            assertEquals(SyncStatus.ERROR, engine.state.value.status)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun aNonTransientFailureStillShowsAnErrorAtOnce() = runBlocking {
+        val server = MemorySyncServer()
+        val engine = diagEngine(server, mutableListOf())
+        try {
+            engine.registerAndSettle("ada@example.com", "correct horse")
+            server.failWith(400)
+            engine.syncNow("timer")
+            assertEquals(SyncStatus.ERROR, engine.state.value.status)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun a401StillSignsOutWithoutRetrying() = runBlocking {
+        val server = MemorySyncServer()
+        val signedOut = mutableListOf<String>()
+        val engine = diagEngine(server, mutableListOf(), signedOut)
+        try {
+            engine.registerAndSettle("ada@example.com", "correct horse")
+            server.failWith(401)
+            engine.syncNow("timer")
+            assertEquals(SyncStatus.SIGNED_OUT, engine.state.value.status)
+            assertEquals(1, signedOut.size)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun theFailureDiagnosticNamesTheReasonClassButNoPaths() = runBlocking {
+        val server = MemorySyncServer()
+        val host = MemoryHost("vault")
+        val lines = mutableListOf<String>()
+        val engine = SyncEngine(
+            SyncApi(server),
+            SyncEngineOptions(platform = "android", deviceName = { "Phone" }, retryBackoffMs = listOf(20L), onDiagnostic = { synchronized(lines) { lines += it } }),
+        )
+        engine.attach(host)
+        try {
+            engine.registerAndSettle("ada@example.com", "correct horse")
+            host.put("Secret/Diary.md", "dear diary\n".encodeToByteArray(), 1_000)
+            server.failWith(503)
+            engine.syncNow("phone")
+            val line = synchronized(lines) { lines.first { it.startsWith("sync cycle failed") } }
+            assertTrue(line.contains("trigger=phone") && line.contains("class=syncapierror") && line.contains("status=503") && line.contains("phase="))
+            assertTrue(!line.contains("Secret", ignoreCase = true) && !line.contains("Diary", ignoreCase = true) && !line.contains("/"))
+        } finally {
+            engine.close()
+        }
+    }
+
     private fun engine(api: SyncApi, host: MemoryHost, name: String): SyncEngine {
         val engine = SyncEngine(api, SyncEngineOptions(platform = "android", deviceName = { name }, automatic = { true }))
         engine.attach(host)
@@ -1046,12 +1180,24 @@ private class MemorySyncServer : SyncTransport {
     /** Runs before each request; a test suspends in here to hold a cycle mid-flight. */
     @Volatile var beforeRequest: (suspend () -> Unit)? = null
 
+    /** The next [times] requests (all when negative) answer [status], as an edge or origin failure. */
+    fun failWith(status: Int, times: Int = -1) = synchronized(this) { failStatus = status; failTimes = times }
+
+    private var failStatus = 0
+    private var failTimes = 0
+
     /** Every request fails like a lost connection. */
     @Volatile var failTransport = false
 
     override suspend fun execute(request: SyncHttpRequest): SyncHttpResponse {
         beforeRequest?.invoke()
         if (failTransport) throw java.io.IOException("synthetic transport failure")
+        synchronized(this) {
+            if (failStatus != 0 && failTimes != 0) {
+                if (failTimes > 0) failTimes -= 1
+                return json(failStatus, """{"error":"synthetic"}""")
+            }
+        }
         return handle(request)
     }
 
