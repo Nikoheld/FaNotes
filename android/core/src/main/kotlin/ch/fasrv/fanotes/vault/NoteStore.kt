@@ -66,6 +66,16 @@ private fun readStoredFamd(bytes: ByteArray): FamdDocument {
 interface VaultIo {
     fun read(path: String): ByteArray?
     fun write(path: String, bytes: ByteArray)
+
+    /**
+     * Writes a file from a stream, refusing more than [maxBytes] with [FileTooLargeException] and leaving
+     * nothing behind. Returns the size written. The default holds the file in memory; a directory vault streams.
+     */
+    fun writeStream(path: String, input: java.io.InputStream, maxBytes: Long): Long {
+        val bytes = readBounded(input, maxBytes)
+        write(path, bytes)
+        return bytes.size.toLong()
+    }
     fun delete(path: String)
     fun move(from: String, to: String)
     fun exists(path: String): Boolean
@@ -107,10 +117,13 @@ data class VaultEntry(val path: String, val directory: Boolean, val size: Long, 
 
 /**
  * STORY: a writing-mode project folder (`Name.story/`), shown and opened as one document.
- * IMAGE, AUDIO and VIDEO are plain media files; they only appear in a tree built with `includeFiles`.
+ * IMAGE, AUDIO, VIDEO and FILE are plain files; they only appear in a tree built with `includeFiles`.
  */
 enum class NoteKind {
-    MARKDOWN, PDF, FOLDER, STORY, IMAGE, AUDIO, VIDEO;
+    MARKDOWN, PDF, FOLDER, STORY, IMAGE, AUDIO, VIDEO,
+
+    /** Any other plain file a user put in the vault (a Word file, an archive, ...). Opened in another app. */
+    FILE;
 
     /** A note has text and handwriting ([NoteStore.readNote] works on it). A story, a media file and a folder are not notes. */
     val isNote: Boolean get() = this == MARKDOWN || this == PDF
@@ -172,7 +185,7 @@ fun censusNotes(nodes: List<VaultNode>, skip: Set<String> = emptySet()): NoteCen
                     here += 1
                 }
                 // Plain media files are listed on request only and are not notes.
-                NoteKind.IMAGE, NoteKind.AUDIO, NoteKind.VIDEO -> Unit
+                NoteKind.IMAGE, NoteKind.AUDIO, NoteKind.VIDEO, NoteKind.FILE -> Unit
             }
         }
         perFolder[folder.ifBlank { "/" }] = here
@@ -495,6 +508,30 @@ class NoteStore(
         var index = 2
         while (taken("$stem $index")) index += 1
         return "$stem $index"
+    }
+
+    /**
+     * Stores one uploaded file as a plain file in [directory] under its own name made safe; a taken name
+     * (compared case-insensitively, as on the desktop) becomes "name 2.ext". The bytes are streamed to disk
+     * and at most [maxBytes] are accepted ([FileTooLargeException] otherwise, nothing is left behind).
+     */
+    fun importFile(directory: String, fileName: String, input: java.io.InputStream, maxBytes: Long): String {
+        val (stem, extension) = uploadNameParts(fileName)
+        if (extension.equals(".tmp", ignoreCase = true)) throw IllegalArgumentException("A .tmp file cannot be uploaded")
+        val folder = directory.trim('/')
+        val taken = io.list(folder).map { it.path.substringAfterLast('/').lowercase() }.toHashSet()
+        fun path(leaf: String) = if (folder.isEmpty()) leaf else "$folder/$leaf"
+        fun clash(leaf: String) = leaf.lowercase() in taken ||
+            (extension.lowercase() in NOTE_FAMILY_EXTENSIONS && noteFamilyTaken(path(leaf)))
+        var leaf = stem + extension
+        var index = 2
+        while (clash(leaf)) {
+            leaf = uploadLeaf(stem, " $index", extension)
+            index += 1
+            if (index > 10_000) throw IllegalArgumentException("Es konnte kein eindeutiger Name erzeugt werden.")
+        }
+        io.writeStream(path(leaf), input, maxBytes)
+        return path(leaf)
     }
 
     fun createFolder(directory: String, title: String) {
@@ -878,7 +915,7 @@ class NoteStore(
                         // A `.famd` next to prose or a PDF is that note's companion, not a second note (desktop `famdSiblingPaths`).
                         FAMD_EXTENSION -> if (FAMD_SIBLING_EXTENSIONS.any { io.exists(companionPath(entry.path, it)) }) null
                             else VaultNode(titleOf(name), entry.path, NoteKind.MARKDOWN, entry.mtimeMs)
-                        else -> if (includeFiles) fileKindOf(name)?.let { VaultNode(name, entry.path, it, entry.mtimeMs) } else null
+                        else -> if (includeFiles) listedFileKind(name)?.let { VaultNode(name, entry.path, it, entry.mtimeMs) } else null
                     }
                 }
             }
@@ -893,6 +930,9 @@ class NoteStore(
     }
 
 }
+
+/** Extensions that take part in a note family (prose, PDF, `.famd` sidecar). */
+private val NOTE_FAMILY_EXTENSIONS = setOf(".md", ".markdown", ".pdf", FAMD_EXTENSION)
 
 /** Notes whose handwriting lives in a `.famd` of the same name. */
 private val FAMD_SIBLING_EXTENSIONS = listOf(".md", ".markdown", ".pdf")
@@ -1032,6 +1072,24 @@ class DirectoryVault(val root: Path) : VaultIo {
         // Not "<name>.<uuid>.tmp": a long name plus the suffix passes the 255-byte name limit.
         val temp = target.resolveSibling(".${UUID.randomUUID()}.tmp")
         Files.write(temp, bytes)
+        replaceWithTemp(temp, target)
+    }
+
+    override fun writeStream(path: String, input: java.io.InputStream, maxBytes: Long): Long {
+        val target = resolve(path)
+        Files.createDirectories(target.parent)
+        val temp = target.resolveSibling(".${UUID.randomUUID()}.tmp")
+        try {
+            val written = Files.newOutputStream(temp).use { copyBounded(input, it, maxBytes) }
+            replaceWithTemp(temp, target)
+            return written
+        } catch (error: Throwable) {
+            runCatching { Files.deleteIfExists(temp) }
+            throw error
+        }
+    }
+
+    private fun replaceWithTemp(temp: Path, target: Path) {
         try {
             Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         } catch (_: AtomicMoveNotSupportedException) {

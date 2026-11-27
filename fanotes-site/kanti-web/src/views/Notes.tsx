@@ -15,6 +15,7 @@ import {
   type LibNote, type NoteSort, type TrashItem,
 } from '../vault/notes'
 import { useVault } from '../vault/store'
+import { uploadFiles, uploadMessage } from '../vault/upload'
 import { VaultHint } from '../vault/ui'
 
 const PdfViewer = lazy(() => import('../components/PdfViewer').then((module) => ({ default: module.PdfViewer })))
@@ -187,7 +188,24 @@ const BinaryNote = ({ backend, note, paths, fallback }: { backend: VaultBackend;
   if (note.kind === 'pdf') return <Suspense fallback={<span className="spinner" aria-hidden="true" />}><PdfViewer bytes={file.bytes} ink={ink} /></Suspense>
   if (note.kind === 'image') return <img className="md-image note-image" src={image} alt={note.name} />
   if (note.kind === 'audio' || note.kind === 'video') return <MediaPlayer bytes={file.bytes} path={note.path} kind={note.kind} />
-  return <p className="muted">{t.kindFile}: {note.name}</p>
+  return (
+    <div className="note-tools">
+      <span className="muted">{t.kindFile}: {note.name}</span>
+      <Button tone="outline" icon="download" onClick={() => downloadBytes(file.bytes as Uint8Array, note.name, mimeOf(note.path))}>{t.downloadFile}</Button>
+    </div>
+  )
+}
+
+/** Hands bytes to the browser as a download (a blob: link, which the CSP allows). */
+const downloadBytes = (bytes: Uint8Array, name: string, type: string) => {
+  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 const kindIcon = (kind: LibNote['kind']) => (kind === 'story' || kind === 'markdown' || kind === 'famd' ? 'note' : 'open')
@@ -204,6 +222,9 @@ export const Notes = () => {
   const [query, setQuery] = useState('')
   const [trash, setTrash] = useState<TrashItem[] | null>(null)
   const [indexing, setIndexing] = useState(false)
+  const [upload, setUpload] = useState<{ busy: string; message: string }>({ busy: '', message: '' })
+  const [dragging, setDragging] = useState(false)
+  const picker = useRef<HTMLInputElement>(null)
   const texts = useRef(new Map<string, string>())
   const [textVersion, setTextVersion] = useState(0)
   const folder = route.params.get('ordner') || ''
@@ -214,6 +235,18 @@ export const Notes = () => {
     try { setEntries(await backend.list()); setFailed(false) } catch { setFailed(true) }
   }, [backend])
   useEffect(() => { void load() }, [load])
+
+  const upIn = useCallback(async (picked: File[], target: string) => {
+    if (!backend || !picked.length) return
+    setUpload({ busy: t.uploadBusy(0, picked.length), message: '' })
+    try {
+      // A fresh list, so a name another device just created is not overwritten or doubled.
+      const existing = (await backend.list()).map((entry) => entry.path)
+      const summary = await uploadFiles(backend, picked, target, existing, (done, total) => setUpload({ busy: t.uploadBusy(done, total), message: '' }))
+      setUpload({ busy: '', message: uploadMessage(summary, t) })
+    } catch { setUpload({ busy: '', message: t.vaultUnavailable }) }
+    await load()
+  }, [backend, load, t])
 
   const notes = useMemo(() => libraryNotes(entries || []), [entries])
   const paths = useMemo(() => new Set((entries || []).map((entry) => entry.path)), [entries])
@@ -244,6 +277,8 @@ export const Notes = () => {
     </button>
   )
   const searching = query.trim().length >= 2
+  const canUpload = vault.actions.writable && !upload.busy
+  const hasFiles = (event: React.DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files')
   return (
     <div className="view view-notes">
       <div className="columns columns-notes">
@@ -257,6 +292,14 @@ export const Notes = () => {
               </div>
             ) : null}
           </div>
+          {vault.actions.writable ? (
+            <div className="note-tools">
+              <Button tone="outline" icon="upload" disabled={!canUpload} onClick={() => picker.current?.click()}>{t.uploadFiles}</Button>
+              <input ref={picker} type="file" multiple hidden onChange={(event) => { const picked = Array.from(event.target.files ?? []); event.target.value = ''; void upIn(picked, folder) }} />
+              {upload.busy ? <span className="muted small" role="status">{upload.busy}</span> : null}
+            </div>
+          ) : null}
+          {upload.message ? <Banner>{upload.message}</Banner> : null}
           {failed ? <Banner tone="warning" icon="warning" action={<Button tone="outline" onClick={() => void load()}>{t.vaultRetry}</Button>}>{t.vaultUnavailable}</Banner> : null}
           {entries === null && !failed ? <span className="spinner" aria-hidden="true" /> : null}
           {searching ? (
@@ -265,7 +308,12 @@ export const Notes = () => {
               {hits.length ? hits.map((hit) => <div key={hit.note.path}>{row(hit.note)}{hit.excerpt ? <p className="note-excerpt">{hit.excerpt}</p> : null}</div>) : <Empty icon="search">{t.noMatchingNotes}</Empty>}
             </div>
           ) : (
-            <div className="note-list">
+            <div
+              className={`note-list${dragging ? ' drop-target' : ''}`}
+              onDragOver={(event) => { if (canUpload && hasFiles(event)) { event.preventDefault(); setDragging(true) } }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(event) => { setDragging(false); if (canUpload && hasFiles(event)) { event.preventDefault(); void upIn(Array.from(event.dataTransfer.files), folder) } }}
+            >
               <nav className="crumbs" aria-label={t.library}>
                 <button type="button" onClick={() => go({ ordner: '' })}>{t.myNotes}</button>
                 {crumbs.map((part, index) => <button type="button" key={index} onClick={() => go({ ordner: crumbs.slice(0, index + 1).join('/') })}>/ {part}</button>)}

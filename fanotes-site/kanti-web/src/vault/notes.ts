@@ -2,6 +2,7 @@
 import type { VaultBackend } from './backend'
 import type { VaultEntry } from './client'
 import { CALENDAR_NOTE_PATH, HOMEWORK_NOTE_PATH, textOf } from './files'
+import { isListedUserFile } from './upload'
 import { plainText } from '../lib/markdown'
 import { readFamd } from '../lib/famd'
 
@@ -40,7 +41,7 @@ export const libraryNotes = (entries: VaultEntry[]): LibNote[] => {
   const out: LibNote[] = []
   for (const entry of entries) {
     const path = entry.path
-    if (path.split('/').some((part) => part.startsWith('.')) || path === HOMEWORK_NOTE_PATH || path === CALENDAR_NOTE_PATH) continue
+    if (path.split('/').some((part) => part.startsWith('.')) || !isListedUserFile(path) || path === HOMEWORK_NOTE_PATH || path === CALENDAR_NOTE_PATH) continue
     const story = STORY_SEGMENT.exec(path)
     if (story) {
       const root = story[1]

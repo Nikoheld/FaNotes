@@ -14,6 +14,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.automirrored.outlined.Article
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
@@ -78,6 +79,8 @@ fun NoteRow(model: CompanionModel, node: VaultNode, onMore: (() -> Unit)? = null
     }
 }
 
+private val PLAIN_FILE_KINDS = setOf(NoteKind.IMAGE, NoteKind.AUDIO, NoteKind.VIDEO, NoteKind.FILE)
+
 /** The icon of a library entry: its own for every kind of file. */
 fun kindIcon(kind: NoteKind) = when (kind) {
     NoteKind.PDF -> Icons.Outlined.PictureAsPdf
@@ -86,6 +89,7 @@ fun kindIcon(kind: NoteKind) = when (kind) {
     NoteKind.VIDEO -> Icons.Outlined.VideoFile
     NoteKind.STORY -> Icons.AutoMirrored.Outlined.MenuBook
     NoteKind.FOLDER -> Icons.Outlined.Folder
+    NoteKind.FILE -> Icons.AutoMirrored.Outlined.InsertDriveFile
     NoteKind.MARKDOWN -> Icons.AutoMirrored.Outlined.Article
 }
 
@@ -95,6 +99,7 @@ fun kindLabel(kind: NoteKind): String = when (kind) {
     NoteKind.AUDIO -> t(R.string.kind_audio)
     NoteKind.VIDEO -> t(R.string.kind_video)
     NoteKind.STORY -> t(R.string.kind_story)
+    NoteKind.FILE -> t(R.string.kind_file)
     else -> ""
 }
 
@@ -132,9 +137,13 @@ fun NotesScreen(model: CompanionModel) {
     var results by remember { mutableStateOf<List<NoteResult>>(emptyList()) }
     var docs by remember { mutableStateOf<List<DocHit>>(emptyList()) }
     val context = androidx.compose.ui.platform.LocalContext.current
-    val importer = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) model.importDocument(context, uri)
+    // The folder the next pick goes to: the open folder, or the one chosen in a folder's action sheet.
+    var uploadTo by rememberSaveable { mutableStateOf<String?>(null) }
+    val uploader = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        model.uploadFiles(context, uris, uploadTo ?: model.noteFolder)
+        uploadTo = null
     }
+    val startUpload = { folder: String? -> uploadTo = folder; uploader.launch(arrayOf("*/*")) }
     var searching by remember { mutableStateOf(false) }
     var searchError by remember { mutableStateOf<String?>(null) }
     var folderDialog by remember { mutableStateOf(false) }
@@ -153,10 +162,11 @@ fun NotesScreen(model: CompanionModel) {
     Column {
         Row(Modifier.fillMaxWidth().padding(start = Space.page, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             SearchField(query, { query = it }, t(R.string.search_all_notes), Modifier.weight(1f))
+            ActionIcon(Icons.Outlined.FileUpload, t(R.string.upload_files)) { startUpload(null) }
             Box {
                 ActionIcon(Icons.Outlined.MoreVert, t(R.string.library_options)) { menu = true }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text(t(R.string.import_document)) }, leadingIcon = { Icon(Icons.Outlined.UploadFile, null) }, onClick = { menu = false; importer.launch(arrayOf("application/pdf", "image/*")) })
+                    DropdownMenuItem(text = { Text(t(R.string.upload_files)) }, leadingIcon = { Icon(Icons.Outlined.UploadFile, null) }, onClick = { menu = false; startUpload(null) })
                     DropdownMenuItem(text = { Text(t(R.string.new_folder)) }, leadingIcon = { Icon(Icons.Outlined.CreateNewFolder, null) }, onClick = { menu = false; folderDialog = true })
                     DropdownMenuItem(text = { Text(t(R.string.recently_deleted)) }, leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null) }, onClick = { menu = false; model.navigate(Page.Trash) })
                 }
@@ -200,22 +210,24 @@ fun NotesScreen(model: CompanionModel) {
                                 }
                                 ActionIcon(Icons.Outlined.MoreVert, t(R.string.actions_for, node.name)) { selected = node }
                             }
-                        } else NoteRow(model, node, { selected = node }) { model.openNote(node.path) }
+                        } else NoteRow(model, node, { selected = node }) {
+                            if (node.kind == NoteKind.FILE) openFileInAnotherApp(context, model.graph.root, model.graph.root.resolve(node.path)) else model.openNote(node.path)
+                        }
                     }
                 }
             }
         }
     }
     if (folderDialog) NameDialog(t(R.string.new_folder), t(R.string.folder_name), t(R.string.create), onDismiss = { folderDialog = false }) { model.createFolder(it); folderDialog = false }
-    selected?.let { NoteActions(model, it) { selected = null } }
+    selected?.let { NoteActions(model, it, onUpload = { folder -> startUpload(folder) }) { selected = null } }
 }
 
 @Composable
-private fun NoteActions(model: CompanionModel, node: VaultNode, onDismiss: () -> Unit) {
+private fun NoteActions(model: CompanionModel, node: VaultNode, onUpload: (String) -> Unit, onDismiss: () -> Unit) {
     var action by remember { mutableStateOf("") }
     if (action == "rename") {
         // A media file keeps its extension; only the name before it is edited.
-        val initial = if (node.kind in setOf(NoteKind.IMAGE, NoteKind.AUDIO, NoteKind.VIDEO)) node.name.substringBeforeLast('.') else node.name
+        val initial = if (node.kind in PLAIN_FILE_KINDS) node.name.substringBeforeLast('.') else node.name
         NameDialog(t(R.string.rename), t(R.string.name), t(R.string.save), initial, onDismiss) { model.renameNote(node, it); onDismiss() }; return
     }
     if (action == "trash") {
@@ -234,7 +246,11 @@ private fun NoteActions(model: CompanionModel, node: VaultNode, onDismiss: () ->
         } else {
             val context = androidx.compose.ui.platform.LocalContext.current
             Group(color = LocalCompanionSemantics.current.sunken.copy(alpha = 0.55f)) {
-                if (node.kind in setOf(NoteKind.IMAGE, NoteKind.AUDIO, NoteKind.VIDEO)) {
+                if (node.kind == NoteKind.FOLDER) {
+                    SettingRow(Icons.Outlined.FileUpload, t(R.string.upload_here), chevron = false) { onUpload(node.path); onDismiss() }
+                    FineDivider()
+                }
+                if (node.kind in PLAIN_FILE_KINDS) {
                     SettingRow(Icons.AutoMirrored.Outlined.OpenInNew, t(R.string.open_in_another_app), chevron = false) {
                         openFileInAnotherApp(context, model.graph.root, model.graph.root.resolve(node.path))
                         onDismiss()

@@ -30,13 +30,16 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.AudioFile
 import androidx.compose.material.icons.outlined.BrokenImage
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.VideoFile
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -75,7 +78,7 @@ const val SVG_MAX_BYTES = 8 * 1024 * 1024
 fun FileViewerScreen(model: CompanionModel) {
     val path = model.filePath
     val context = LocalContext.current
-    val kind = path?.let { if (StoryFiles.isStoryFolder(it)) NoteKind.STORY else fileKindOf(it) }
+    val kind = path?.let { if (StoryFiles.isStoryFolder(it)) NoteKind.STORY else fileKindOf(it) ?: NoteKind.FILE }
     val name = path?.substringAfterLast('/')?.let { if (kind == NoteKind.STORY) it.replace(Regex("\\.story$", RegexOption.IGNORE_CASE), "") else it }.orEmpty()
     val file = path?.let { model.graph.root.resolve(it) }
     Column(Modifier.fillMaxSize()) {
@@ -92,6 +95,11 @@ fun FileViewerScreen(model: CompanionModel) {
                 kind == NoteKind.IMAGE -> ImageFileView(file)
                 kind == NoteKind.VIDEO -> VideoFileView(file)
                 kind == NoteKind.AUDIO -> AudioFileView(file, name)
+                kind == NoteKind.FILE -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Icon(Icons.AutoMirrored.Outlined.InsertDriveFile, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
+                    Button(onClick = { openFileInAnotherApp(context, model.graph.root, file) }) { Text(t(R.string.open_in_another_app)) }
+                }
                 else -> EmptyState(Icons.Outlined.BrokenImage, t(R.string.file_unavailable), t(R.string.file_unavailable_body))
             }
         }
