@@ -806,6 +806,8 @@ export type FaNotesApi = {
   importWorksheet: () => Promise<WorksheetDocument | null>
   importWorksheetFromData?: (payload: { name: string; mimeType: string; bytes: Uint8Array }) => Promise<WorksheetDocument>
   importPdfNote: (parentPath?: string) => Promise<CreateResult | null>
+  /** Saves edited PDF bytes (page subset / new order) as a new PDF note. Desktop only. */
+  createPdfNoteFromBytes?: (payload: { bytes: Uint8Array; name: string; parentPath?: string }) => Promise<CreateResult>
   /** Asks for a OneNote file, converts it and returns the page tree to choose from (null when cancelled). */
   importOneNote: () => Promise<OneNoteScan | null>
   importOneNotePages: (request: { sessionId: string; pageIds: string[]; destination: string; sectionFolders: boolean }) => Promise<OneNoteImportResult>

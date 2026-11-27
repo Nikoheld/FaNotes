@@ -7547,6 +7547,7 @@ export default function App({ startupBootstrap }: AppProps) {
                             if (result) updateContentFor(activeTab.path, result.content)
                           }}
                           sidePages={pdfSide.shown}
+                          onPagesOrganized={isWeb ? undefined : (created) => { void (async () => { try { await refreshTree() } catch { /* tree refresh is best effort */ } await openNote(created); toast('Neue PDF-Notiz mit den gewählten Seiten angelegt.', 'success') })() }}
                           onToggleSidePages={pdfSide.available ? () => { void pdfSide.toggle() } : undefined}
                           onSideLayout={pdfSide.onSideLayout}
                           beforeSideRelayout={pdfSide.beforeSideRelayout}

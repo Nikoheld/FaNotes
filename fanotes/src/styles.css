@@ -5710,3 +5710,16 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .math-popover__suggestion span { display: flex; min-width: 0; flex-direction: column; }
 .math-popover__suggestion code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 640px) { .math-popover { left: 8px !important; } }
+
+.pdf-organizer { width: min(860px, 94vw); max-height: 88vh; display: flex; flex-direction: column; gap: 10px; }
+.pdf-organizer__hint { margin: 0; color: var(--text-muted); font-size: 13px; }
+.pdf-organizer__grid { display: flex; flex-wrap: wrap; gap: 10px; overflow: auto; padding: 4px; min-height: 120px; }
+.pdf-organizer__tile { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); cursor: grab; }
+.pdf-organizer__tile.is-dragging { opacity: .4; }
+.pdf-organizer__tile canvas { height: auto; border: 1px solid var(--border-strong); background: #fff; }
+.pdf-organizer__tile small { color: var(--text-muted); font-size: 12px; }
+.pdf-organizer__actions { display: flex; gap: 4px; }
+.pdf-organizer__actions button { display: inline-flex; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-strong); color: var(--text); cursor: pointer; }
+.pdf-organizer__actions button:disabled { opacity: .35; cursor: default; }
+.pdf-organizer__error { margin: 0; color: #c0392b; font-size: 13px; }
+.pdf-organizer__footer { display: flex; justify-content: flex-end; gap: 8px; }
