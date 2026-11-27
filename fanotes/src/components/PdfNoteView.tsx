@@ -16,6 +16,7 @@ import {
   ChevronRight,
   ChevronUp,
   FileText,
+  LayoutGrid,
   ListTree,
   LoaderCircle,
   Highlighter,
@@ -76,6 +77,7 @@ import { loadPaperViewMemory, recallPaperView } from '../lib/paperViewMemory'
 import { loadPdfReadingSpot, pdfScrollDeltaForSpot, pdfSpotFromBoxes, savePdfReadingSpot } from '../lib/pdfReadingSpot'
 import { bindHandGestures, pinchFactorFromWheel, shouldTakeSheetZoom } from '../../../src/lib/handGestures'
 import { usePaperView } from './PaperView'
+import { PdfPageOrganizer } from './PdfPageOrganizer'
 import { pdfSidePageRatio, type PaperBox, type PdfSideLayout, type PdfSidePageSize } from '../lib/pdfSidePages'
 import type { PdfSideLayoutHandle } from './usePdfSidePages'
 import type { PaperStyle } from '../types'
@@ -101,6 +103,8 @@ type PdfNoteViewProps = {
   onToggleSidePages?: () => void
   /** The laid-out pairs, for the ink board's frame; null while they are not on screen. */
   onSideLayout?: (handle: PdfSideLayoutHandle | null) => void
+  /** Desktop only: shows "Seiten verwalten"; called with the path of the new PDF note once saved. */
+  onPagesOrganized?: (relativePath: string) => void
   /** Called before a re-layout of the pairs (rotation), so the ink can be saved first. */
   beforeSideRelayout?: () => Promise<void>
   /** Paper style of the side pages (the note's own, else the settings'). */
@@ -668,6 +672,7 @@ export function PdfNoteView({
   onUnmarkSpans,
   sidePages = false,
   onToggleSidePages,
+  onPagesOrganized,
   onSideLayout,
   beforeSideRelayout,
   sidePaper = 'blank',
@@ -1447,6 +1452,7 @@ export function PdfNoteView({
     return () => onSideLayout(null)
   }, [onSideLayout, pageSizes, path, pdf, rotation, sideActive])
 
+  const [organizerOpen, setOrganizerOpen] = useState(false)
   const rotatePages = async () => {
     if (sideActive && beforeSideRelayout) {
       onSideLayout?.(null)
@@ -1517,11 +1523,18 @@ export function PdfNoteView({
           <button type="button" className={sidebar === 'thumbs' ? 'is-active' : ''} title="Miniaturen" aria-label="Miniaturen" onClick={() => setSidebar((value) => value === 'thumbs' ? 'none' : 'thumbs')}><PanelLeft size={14} /></button>
           <button type="button" className={sidebar === 'outline' ? 'is-active' : ''} title="Gliederung" aria-label="PDF-Gliederung" disabled={!outline.length} onClick={() => setSidebar((value) => value === 'outline' ? 'none' : 'outline')}><ListTree size={14} /></button>
           <button type="button" title="Drehen" aria-label="Seite drehen" onClick={() => { void rotatePages() }}><RotateCw size={14} /></button>
+          {onPagesOrganized && window.fanotes.createPdfNoteFromBytes ? (
+            <button type="button" title="Seiten verwalten (löschen, anordnen)" aria-label="Seiten verwalten" disabled={!pdf} onClick={() => setOrganizerOpen(true)}><LayoutGrid size={14} /></button>
+          ) : null}
           {onToggleSidePages ? (
             <button type="button" className={sidePages ? 'is-active' : ''} aria-pressed={sidePages} title="Leere Seiten daneben" aria-label="Leere Seiten daneben" disabled={!pdf} onClick={onToggleSidePages}><SquareSplitHorizontal size={14} /></button>
           ) : null}
         </span>
       </header>
+
+      {organizerOpen && pdf && onPagesOrganized ? (
+        <PdfPageOrganizer pdf={pdf} path={path} title={title} onClose={() => setOrganizerOpen(false)} onCreated={(created) => { setOrganizerOpen(false); onPagesOrganized(created) }} />
+      ) : null}
 
       {searchOpen && (
         <div className="pdf-note-search">

@@ -363,6 +363,7 @@ const IPC = Object.freeze({
   importWorksheet: 'fanotes:import-worksheet',
   importWorksheetFromData: 'fanotes:import-worksheet-from-data',
   importPdfNote: 'fanotes:import-pdf-note',
+  createPdfNoteFromBytes: 'fanotes:create-pdf-note-from-bytes',
   importOneNote: 'fanotes:import-onenote',
   importOneNotePages: 'fanotes:import-onenote-pages',
   cancelOneNoteImport: 'fanotes:cancel-onenote-import',
@@ -5680,7 +5681,7 @@ function registerIpcHandlers() {
     if (!source.length) throw new Error('Die ausgewählte PDF-Datei ist leer.')
     validateWorksheetBytes(source, '.pdf')
     const { root, target: parentTarget } = await resolveVaultPath(subjectPath, { expected: 'directory', asContent: true })
-    const title = safeEntryName(splitName(path.basename(selectedPath)).stem, localizeText('Buch', currentUiLanguage()))
+    const title = safeEntryName(splitName(fileNameHint).stem, localizeText('Buch', currentUiLanguage()))
     const desiredName = `${title}.pdf`
     const occupied = await siblingNames(parentTarget)
     let candidate = desiredName
@@ -5873,7 +5874,21 @@ function registerIpcHandlers() {
     const source = await readRegularFileNoFollow(selectedPath, format.maxBytes)
     if (!source.length) throw new Error('Die ausgewählte PDF-Datei ist leer.')
     validateWorksheetBytes(source, '.pdf')
+    return createPdfNoteFromSource(source, rawParentPath, path.basename(selectedPath))
+  })
 
+  handle(IPC.createPdfNoteFromBytes, async (_event, payload) => {
+    await ensureBootstrap()
+    const format = WORKSHEET_FORMATS.get('.pdf')
+    if (!format) throw new Error('PDF-Notizen sind in dieser Version nicht verfügbar.')
+    const source = coerceWorksheetBytes(payload?.bytes, format.maxBytes)
+    if (!source.length) throw new Error('Das PDF ist leer.')
+    validateWorksheetBytes(source, '.pdf')
+    const name = typeof payload?.name === 'string' && payload.name.trim() ? payload.name : 'PDF-Notiz.pdf'
+    return createPdfNoteFromSource(source, payload?.parentPath, name)
+  })
+
+  async function createPdfNoteFromSource(source, rawParentPath, fileNameHint) {
     const parentPath = typeof rawParentPath === 'string' ? rawParentPath : ''
     const normalizedParent = parentPath ? normalizeRelativePath(parentPath, { allowRoot: true }).split(path.sep).join('/') : ''
     const { root, target: parentTarget } = await resolveVaultPath(normalizedParent, {
@@ -5881,7 +5896,7 @@ function registerIpcHandlers() {
       expected: 'directory',
       asContent: true,
     })
-    const title = safeEntryName(splitName(path.basename(selectedPath)).stem, localizeText('PDF-Notiz', currentUiLanguage()))
+    const title = safeEntryName(splitName(fileNameHint).stem, localizeText('PDF-Notiz', currentUiLanguage()))
     const desiredName = `${title}.pdf`
     const occupied = await siblingNames(parentTarget)
     let candidate = desiredName
@@ -5909,7 +5924,7 @@ function registerIpcHandlers() {
       }
     }
     throw new Error('Es konnte kein eindeutiger PDF-Name erzeugt werden.')
-  })
+  }
 
   handle(IPC.importWorksheetFromData, async (_event, payload) => {
     await ensureBootstrap()
