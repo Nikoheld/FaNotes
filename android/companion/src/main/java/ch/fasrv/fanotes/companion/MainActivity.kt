@@ -130,6 +130,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        model.graph.inForeground = true
         model.graph.engine.resumeAutomaticSync()
         if (model.notesAccount) model.graph.docSearch.request()
         // Cold start and every return to the foreground: the cached data is already shown; sync behind it.
@@ -137,6 +138,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        model.graph.inForeground = false
         model.graph.engine.pauseAutomaticSync()
         // Long OCR continues in WorkManager, within Android's background limits.
         model.graph.docSearch.handOff()

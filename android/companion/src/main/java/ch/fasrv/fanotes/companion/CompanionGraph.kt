@@ -845,6 +845,10 @@ class CompanionGraph(private val context: Context, val client: SchulnetzClient =
 
     fun lastPushAt(): Long = prefs.getLong(LAST_PUSH_PREF, 0L)
 
+    /** True between the activity's onStart and onStop. Read by [boot] so it does not pause sync on screen. */
+    @Volatile
+    var inForeground: Boolean = false
+
     /** Start the saved FaNotes session before any push registration or fetch. */
     suspend fun boot() {
         try {
@@ -853,7 +857,9 @@ class CompanionGraph(private val context: Context, val client: SchulnetzClient =
             if (error is kotlinx.coroutines.CancellationException) throw error
             schulnetzLog.error(error)
         } finally {
-            engine.pauseAutomaticSync()
+            // Only a backgrounded app keeps automatic sync paused. On a cold start the activity's
+            // onStart can run before boot finishes; pausing then would leave sync off while the app is open.
+            if (!inForeground) engine.pauseAutomaticSync()
             if (!booted.isCompleted) booted.complete(Unit)
         }
         configurePushDelivery(context)

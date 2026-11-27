@@ -79,10 +79,24 @@ class SyncApiError(
     message: String,
     val entry: SyncRemoteEntry? = null,
     val reason: String? = null,
+    /** The server's `Retry-After` in milliseconds, capped at [RETRY_AFTER_CAP_MS]. Null when absent. */
+    val retryAfterMs: Long? = null,
 ) : Exception(message) {
     val unauthorized get() = status == 401
     val conflict get() = status == 409
     val offline get() = status == 0
+
+    /** A failure that a later attempt can fix: no connection, timeout, rate limit, or a server or edge 5xx. */
+    val transient get() = status == 0 || status == 408 || status == 425 || status == 429 || status in 500..599
+}
+
+const val RETRY_AFTER_CAP_MS = 5 * 60_000L
+
+/** `Retry-After` as delta seconds. An HTTP date or junk gives null. Never longer than [RETRY_AFTER_CAP_MS]. */
+internal fun parseRetryAfterMs(value: String?): Long? {
+    val seconds = value?.trim()?.toLongOrNull() ?: return null
+    if (seconds < 0) return null
+    return minOf(seconds, RETRY_AFTER_CAP_MS / 1000) * 1000
 }
 
 data class SyncHttpRequest(val method: String, val url: String, val headers: Map<String, String>, val body: ByteArray?)
@@ -300,7 +314,8 @@ private fun parseError(response: SyncHttpResponse): SyncApiError {
     } catch (_: Exception) {
         // Not JSON.
     }
-    return SyncApiError(response.status, message, entry, reason)
+    val retryAfter = if (response.status == 429 || response.status == 503) parseRetryAfterMs(header(response.headers, "retry-after")) else null
+    return SyncApiError(response.status, message, entry, reason, retryAfter)
 }
 
 private fun JsonValue.Obj.toEntry(): SyncRemoteEntry = SyncRemoteEntry(

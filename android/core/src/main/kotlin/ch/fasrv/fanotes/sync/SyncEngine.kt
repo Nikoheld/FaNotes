@@ -13,6 +13,7 @@ import ch.fasrv.fanotes.famd.isFamdSyncPath
 import ch.fasrv.fanotes.famd.noteSyncKind
 import ch.fasrv.fanotes.famd.withLocalPageStats
 import ch.fasrv.fanotes.json.JsonValue
+import ch.fasrv.fanotes.schulnetz.safeLogToken
 import ch.fasrv.fanotes.json.jsonNumber
 import ch.fasrv.fanotes.json.jsonString
 import ch.fasrv.fanotes.json.parseJson
@@ -34,6 +35,10 @@ import kotlin.math.roundToInt
 const val AUTO_INTERVAL_MS = 60_000L
 const val LOCAL_DEBOUNCE_MS = 2_500L
 const val OFFLINE_RETRY_MS = 30_000L
+/** Automatic cycles hide transient failures until this many in a row, or until [TRANSIENT_VISIBLE_AFTER_MS] of failing. */
+const val TRANSIENT_VISIBLE_FAILURES = 3
+const val TRANSIENT_VISIBLE_AFTER_MS = 120_000L
+val TRANSIENT_RETRY_BACKOFF_MS = listOf(5_000L, 15_000L, 45_000L)
 const val MAX_FILE_BYTES = 100L * 1024L * 1024L
 private const val MAX_LOG = 120
 
@@ -137,6 +142,8 @@ class SyncEngineOptions(
     /** Fixed numeric/enum diagnostics only: never paths, metadata, or document contents. */
     val onDiagnostic: (String) -> Unit = {},
     val now: () -> Long = { System.currentTimeMillis() },
+    /** Delays before the quick retries of an automatic cycle that hit a transient failure. */
+    val retryBackoffMs: List<Long> = TRANSIENT_RETRY_BACKOFF_MS,
 )
 
 private data class LocalBase(
@@ -213,6 +220,10 @@ class SyncEngine(
     private var autoPaused = false
     private var debounce: Job? = null
     private val cleared = mutableSetOf<String>()
+    private var failureStreak = 0
+    private var failingSince = 0L
+    private var userRequested = false
+    @Volatile private var phase = "auth"
 
     fun attach(host: SyncHost) {
         this.host = host
@@ -430,19 +441,23 @@ class SyncEngine(
         // sees [queued] and continues; a request that arrives as the lock is
         // released still runs, instead of being acknowledged and dropped.
         queued = true
+        if (isUserReason(reason)) userRequested = true
         publish(state.value.copy(status = SyncStatus.SYNCING, error = null))
         cycleLock.withLock {
             var why = reason
             while (queued && !disposed) {
                 queued = false
-                runCycle(why)
+                val manual = userRequested || isUserReason(why)
+                userRequested = false
+                runCycle(why, manual)
                 why = "queued"
             }
         }
     }
 
-    private suspend fun runCycle(reason: String) {
+    private suspend fun runCycle(reason: String, manual: Boolean = isUserReason(reason)) {
         if (session == null || host == null || engineState == null || keys == null) return
+        phase = "auth"
         publish(state.value.copy(status = SyncStatus.SYNCING, error = null, progress = null))
         try {
             var conflicts = pull()
@@ -450,6 +465,8 @@ class SyncEngine(
             if (pushed.conflicts > 0) conflicts += pull()
             memoryStrikes = 0
             memoryCooling = false
+            failureStreak = 0
+            failingSince = 0L
             engineState?.lastSyncAt = isoNow(options.now())
             persistState()
             publish(state.value.copy(status = SyncStatus.IDLE, progress = null, pendingLocal = 0, error = null, lastSyncAt = engineState?.lastSyncAt))
@@ -481,12 +498,62 @@ class SyncEngine(
                 handleUnauthorized()
                 return
             }
-            val offline = error is SyncApiError && error.offline
-            val message = error.message ?: "Sync failed."
+            handleCycleFailure(error, reason, manual)
+        }
+    }
+
+    /**
+     * A transient failure of an automatic cycle retries quickly and stays out of the UI until
+     * [TRANSIENT_VISIBLE_FAILURES] in a row or [TRANSIENT_VISIBLE_AFTER_MS] of failing. A manual
+     * sync reports at once. Anything that is not transient keeps the old behaviour.
+     */
+    private fun handleCycleFailure(error: Exception, reason: String, manual: Boolean) {
+        val api = error as? SyncApiError
+        val offline = api?.offline == true
+        val transient = api?.transient == true || isNetworkCause(error)
+        val now = options.now()
+        if (transient) {
+            if (failureStreak == 0) failingSince = now
+            failureStreak += 1
+        } else {
+            failureStreak = 0
+            failingSince = 0L
+        }
+        val shown = !transient || manual || failureStreak >= TRANSIENT_VISIBLE_FAILURES || now - failingSince >= TRANSIENT_VISIBLE_AFTER_MS
+        diagnostic(
+            "sync cycle failed trigger=${safeLogToken(reason)} manual=${if (manual) 1 else 0} phase=${safeLogToken(phase)} " +
+                "class=${safeLogToken(error.javaClass.simpleName)} status=${api?.status ?: -1} " +
+                "rejected=${api?.reason?.let(::safeLogToken) ?: "none"} failures=$failureStreak transient=${if (transient) 1 else 0} shown=${if (shown) 1 else 0}",
+        )
+        val message = error.message ?: "Sync failed."
+        if (shown || offline) {
             publish(state.value.copy(status = if (offline) SyncStatus.OFFLINE else SyncStatus.ERROR, error = message, progress = null))
             log(if (offline) "warn" else "error", message)
-            schedule(if (offline) OFFLINE_RETRY_MS else AUTO_INTERVAL_MS)
+        } else {
+            publish(state.value.copy(status = SyncStatus.IDLE, error = null, progress = null))
         }
+        schedule(
+            if (transient) {
+                val backoff = options.retryBackoffMs.getOrNull(failureStreak - 1)
+                    ?: if (offline) OFFLINE_RETRY_MS else AUTO_INTERVAL_MS
+                maxOf(backoff, api?.retryAfterMs ?: 0L)
+            } else {
+                AUTO_INTERVAL_MS
+            },
+        )
+    }
+
+    private fun isUserReason(reason: String) = reason == "manual" || reason == "phone"
+
+    private fun isNetworkCause(error: Throwable): Boolean {
+        var cause: Throwable? = error
+        var depth = 0
+        while (cause != null && depth < 6) {
+            if (cause is java.io.IOException) return true
+            cause = cause.cause
+            depth += 1
+        }
+        return false
     }
 
     private fun clearMemoryHold() {
@@ -527,6 +594,7 @@ class SyncEngine(
     }
 
     private suspend fun pull(): Int {
+        phase = "pull"
         val active = session ?: return 0
         val currentHost = host ?: return 0
         val table = engineState ?: return 0
@@ -693,6 +761,7 @@ class SyncEngine(
             )
         }
         var result = "written"
+        phase = "download"
         val response = try {
             api.download(active, entry.id)
         } catch (error: SyncDocumentLimitException) {
@@ -701,7 +770,7 @@ class SyncEngine(
         } catch (error: SyncApiError) {
             // Sign-in, network, rate-limit, and server errors concern the whole cycle. Anything
             // else (a blob the server no longer has) concerns this file only.
-            if (error.unauthorized || error.offline || error.status == 429 || error.status >= 500) throw error
+            if (error.unauthorized || error.transient) throw error
             throw RemoteEntryUnusable("download", path)
         }
         when (val download = response) {
@@ -819,6 +888,7 @@ class SyncEngine(
     }
 
     private suspend fun push(): PushResult {
+        phase = "push"
         val currentHost = host ?: return PushResult(0, 0, 0)
         val table = engineState ?: return PushResult(0, 0, 0)
         val syncKeys = keys ?: return PushResult(0, 0, 0)
@@ -1003,6 +1073,7 @@ class SyncEngine(
         var recreating = false
         while (true) {
             try {
+                phase = "upload"
                 val revision = api.upload(active, id, sentBase, meta, sha256Hex(blob), blob, blank, (clearing && blank) || storyClear)
                 cleared.remove(entry.path)
                 rememberStoryBase(entry.path, revision, bytes)
@@ -1332,6 +1403,8 @@ class SyncEngine(
     }
 
     private suspend fun forgetSession() {
+        failureStreak = 0
+        failingSince = 0L
         session = null
         keys = null
         vaultSecretBase64 = null
