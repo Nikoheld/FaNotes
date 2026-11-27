@@ -5723,3 +5723,27 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .pdf-organizer__actions button:disabled { opacity: .35; cursor: default; }
 .pdf-organizer__error { margin: 0; color: #c0392b; font-size: 13px; }
 .pdf-organizer__footer { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Word / PowerPoint files in the tree and the notice above a PDF note converted from one. */
+.file-tree__office.is-word { color: #2b6cb8; }
+.file-tree__office.is-powerpoint { color: #c4562a; }
+.office-busy {
+  position: fixed; z-index: 410; left: 50%; bottom: 40px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; max-width: min(520px, calc(100vw - 32px));
+  padding: 9px 14px; border: 1px solid var(--border-strong); border-radius: 10px;
+  background: var(--panel-strong); color: var(--text); box-shadow: var(--shadow); font-size: 12.5px;
+}
+.office-notice {
+  position: fixed; z-index: 120; left: 50%; top: 100px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; max-width: min(560px, calc(100vw - 32px));
+  padding: 6px 8px 6px 11px; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--panel-strong); color: var(--text); box-shadow: var(--shadow); font-size: 12px;
+}
+.office-notice.is-hint { color: var(--text-muted); background: var(--panel); box-shadow: none; }
+.office-notice.is-changed { border-color: var(--accent); }
+.office-notice button {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid var(--border-strong);
+  border-radius: 7px; background: transparent; color: var(--text); font: inherit; cursor: pointer;
+}
+.office-notice button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.office-notice .office-notice__close { padding: 3px; border-color: transparent; color: var(--text-muted); }

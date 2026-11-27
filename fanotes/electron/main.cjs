@@ -58,6 +58,10 @@ const { publishNewFile } = require('./exclusive-publish.cjs')
 const { openWithRetry, renameWithRetry } = require('./fs-retry.cjs')
 const { isWindowsUnsafePath, safeEntryName, samePhysicalPath } = require('./entry-names.cjs')
 const { defaultPenOnlyForPlatform } = require('./ink-defaults.cjs')
+const officeConvert = require('./office-convert.cjs')
+const officeEngines = require('./office-engines.cjs')
+const { printOfficeHtmlToPdf } = require('./office-print.cjs')
+const { parseOfficeSource } = require('./officeSource.mjs')
 const { DEFAULT_TABLET_BUTTON_ACTIONS } = require('./tablet-buttons.cjs')
 const { sanitizeSettings: sanitizeStoredSettings } = require('./settings-sanitize.cjs')
 const diagnostics = require('./diagnostics.cjs')
@@ -363,6 +367,8 @@ const IPC = Object.freeze({
   importWorksheet: 'fanotes:import-worksheet',
   importWorksheetFromData: 'fanotes:import-worksheet-from-data',
   importPdfNote: 'fanotes:import-pdf-note',
+  importOfficeDocument: 'fanotes:import-office-document',
+  readOfficeSource: 'fanotes:read-office-source',
   createPdfNoteFromBytes: 'fanotes:create-pdf-note-from-bytes',
   importOneNote: 'fanotes:import-onenote',
   importOneNotePages: 'fanotes:import-onenote-pages',
@@ -586,6 +592,9 @@ const WORKSHEET_FORMATS = new Map([
 const TREE_ASSET_EXTENSIONS = new Set([
   ...IMAGE_MIME_TYPES.keys(),
   '.pdf',
+  // Word and PowerPoint files are listed; opening one converts it to a PDF note (see importOfficeDocument).
+  '.docx',
+  '.pptx',
   '.mp3',
   '.wav',
   '.ogg',
@@ -594,6 +603,8 @@ const TREE_ASSET_EXTENSIONS = new Set([
   '.webm',
 ])
 const TREE_EXTENSIONS = new Set([...MARKDOWN_EXTENSIONS, ...TREE_ASSET_EXTENSIONS])
+/** Tree files: a known extension, and no Office owner/lock file (`~$Name.docx`, `.~lock.*`). */
+const isListedTreeFile = (name, extension) => TREE_EXTENSIONS.has(extension) && !(officeEngines.OFFICE_KINDS[extension] && officeEngines.isOfficeTempName(name))
 // Writing-mode projects: `Name.story/` folders with JSON files inside.
 const STORY_FOLDER = /\.story$/iu
 const STORY_FILE = /^(.+\.story)\/((?:[A-Za-z0-9_-]{1,64}\/){0,3}[A-Za-z0-9_.-]{1,96}\.(?:json|md))$/iu
@@ -2663,7 +2674,7 @@ async function readTreeDirectory(root, directory, depth = 0, folderColors = new 
     for (const directoryEntry of directoryEntries) {
       if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink()) continue
       if (seen.has(directoryEntry.name) && !directoryEntry.isDirectory()) continue
-      if (directoryEntry.isFile() && !TREE_EXTENSIONS.has(path.extname(directoryEntry.name).toLocaleLowerCase('en-US'))) continue
+      if (directoryEntry.isFile() && !isListedTreeFile(directoryEntry.name, path.extname(directoryEntry.name).toLocaleLowerCase('en-US'))) continue
       const entryPath = path.join(scan, directoryEntry.name)
       statJobs.set(directoryEntry.name, withTreeIoSlot(() => fsp.lstat(entryPath)).catch(() => null))
     }
@@ -2705,7 +2716,7 @@ async function readTreeDirectory(root, directory, depth = 0, folderColors = new 
         result.push(entry)
         continue
       }
-      if (info.isFile() && TREE_EXTENSIONS.has(path.extname(directoryEntry.name).toLocaleLowerCase('en-US'))) {
+      if (info.isFile() && isListedTreeFile(directoryEntry.name, path.extname(directoryEntry.name).toLocaleLowerCase('en-US'))) {
         const entry = entryFromStat(root, absolutePath, info)
         entry.name = directoryEntry.name
         entry.relativePath = logicalChild
@@ -2770,7 +2781,7 @@ async function readFastTreeDirectory(root, directory, depth = 0, folderColors = 
         })
         continue
       }
-      if (directoryEntry.isFile() && TREE_EXTENSIONS.has(extensionWithDot)) {
+      if (directoryEntry.isFile() && isListedTreeFile(directoryEntry.name, extensionWithDot)) {
         seen.add(directoryEntry.name)
         result.push({
           name: directoryEntry.name,
@@ -2797,7 +2808,7 @@ async function readFastTreeDirectory(root, directory, depth = 0, folderColors = 
           if (linked) entry.locations = linked
           seen.add(directoryEntry.name)
           result.push(entry)
-        } else if (info.isFile() && TREE_EXTENSIONS.has(extensionWithDot)) {
+        } else if (info.isFile() && isListedTreeFile(directoryEntry.name, extensionWithDot)) {
           const entry = entryFromStat(root, absolutePath, info)
           entry.name = directoryEntry.name
           entry.relativePath = logicalChild
@@ -5925,6 +5936,133 @@ function registerIpcHandlers() {
     }
     throw new Error('Es konnte kein eindeutiger PDF-Name erzeugt werden.')
   }
+
+  // ---- Word / PowerPoint files shown in the tree: converted to an ordinary PDF note on first open ----
+  const officeJobs = new Map()
+
+  /** `Name.pdf`, `Name (Word).pdf`, `Name (Word 2).pdf` ... in the order they are taken. */
+  const officePdfName = (stem, format, index) => (
+    index === 0 ? `${stem}.pdf` : index === 1 ? `${stem} (${format.nameSuffix}).pdf` : `${stem} (${format.nameSuffix} ${index}).pdf`
+  )
+  const OFFICE_NAME_SLOTS = 40
+  // FAT and some network shares round mtimes to two seconds.
+  const officeSourceChanged = (source, info) => source.size !== info.size || Math.abs(source.mtimeMs - info.mtimeMs) > 2000
+
+  async function readOfficeSourceOf(pdfRelativePath) {
+    try {
+      const text = await readOptionalNoteFile(companionNotePath(pdfRelativePath, '.famd'))
+      return text ? parseOfficeSource(parseFamd(text).payload?.officeSource) : null
+    } catch {
+      return null
+    }
+  }
+
+  /** The PDF note already made from this Office file (newest conversion wins), or null. */
+  async function findLinkedOfficePdf(relativePath, format) {
+    const folder = relativePath.includes('/') ? relativePath.slice(0, relativePath.lastIndexOf('/')) : ''
+    const stem = splitName(path.basename(relativePath)).stem
+    let best = null
+    for (let index = 0; index < OFFICE_NAME_SLOTS; index += 1) {
+      const candidate = folder ? `${folder}/${officePdfName(stem, format, index)}` : officePdfName(stem, format, index)
+      let exists = false
+      try {
+        const { target } = await resolveVaultPath(candidate, { allowMissing: true, expected: 'file' })
+        exists = (await fsp.lstat(target)).isFile()
+      } catch { exists = false }
+      if (!exists) continue
+      const source = await readOfficeSourceOf(candidate)
+      if (!source || source.path !== relativePath) continue
+      if (!best || (source.convertedAt ?? '') >= (best.source.convertedAt ?? '')) best = { pdfPath: candidate, source }
+    }
+    return best
+  }
+
+  async function writeOfficePdf(relativePath, format, pdf) {
+    const folder = relativePath.includes('/') ? relativePath.slice(0, relativePath.lastIndexOf('/')) : ''
+    const stem = splitName(path.basename(relativePath)).stem
+    const { root, target: parentTarget } = await resolveVaultPath(folder, { allowRoot: true, expected: 'directory', asContent: true })
+    const occupied = await siblingNames(parentTarget)
+    const keyOf = (name) => name.normalize('NFC').toLocaleLowerCase('de-DE')
+    for (let index = 0; index < OFFICE_NAME_SLOTS; index += 1) {
+      const candidate = officePdfName(stem, format, index)
+      const famdName = `${splitName(candidate).stem}.famd`
+      if (occupied.has(keyOf(candidate)) || occupied.has(keyOf(famdName))) continue
+      const absolutePath = path.join(parentTarget, candidate)
+      try {
+        await queueFileWrite(absolutePath, async () => atomicWrite(absolutePath, pdf, { mode: 0o600, exclusive: true }))
+        const info = await fsp.lstat(absolutePath)
+        const entry = folderLocations.assignLogical(entryFromStat(root, absolutePath, info), folder, candidate)
+        await writeFamdCompanion(entry.relativePath, '')
+        return entry
+      } catch (error) {
+        if (error?.code !== 'EEXIST') throw error
+      }
+    }
+    throw new Error('Es konnte kein freier PDF-Name erzeugt werden.')
+  }
+
+  async function importOfficeDocument(rawPath, options = {}) {
+    await ensureBootstrap()
+    if (typeof rawPath !== 'string') throw new Error('Ungültiger Pfad.')
+    const relativePath = normalizeRelativePath(rawPath).split(path.sep).join('/')
+    const format = officeEngines.officeKindOf(relativePath)
+    if (!format) throw new Error('Nur Word-Dokumente (.docx) und PowerPoint-Präsentationen (.pptx) können umgewandelt werden.')
+    if (officeEngines.isOfficeTempName(relativePath)) throw new Error('Das ist eine temporäre Office-Datei und kein Dokument.')
+    const { target } = await resolveVaultPath(relativePath, { expected: 'file' })
+    const info = await fsp.lstat(target)
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error('Die Datei ist keine reguläre Datei.')
+    const linked = await findLinkedOfficePdf(relativePath, format)
+    if (linked && options.reconvert !== true) {
+      return { pdfPath: linked.pdfPath, created: false, changed: officeSourceChanged(linked.source, info), engine: linked.source.engine, fallback: linked.source.engine === 'builtin' }
+    }
+    // The owner's file is only ever read: the conversion works on a private copy in a temp folder.
+    const bytes = await readRegularFileNoFollow(target, officeConvert.MAX_OFFICE_BYTES)
+    const converted = await officeConvert.convertOfficeToPdf({
+      bytes,
+      kind: format.kind,
+      title: splitName(path.basename(relativePath)).stem,
+      scratchDir: app.getPath('temp'),
+      printHtmlToPdf: (html) => printOfficeHtmlToPdf(html),
+      onEngineFailure: (engine, error) => console.warn(`FaNotes: Office-Umwandlung (${engine}) fehlgeschlagen:`, error?.message ?? error),
+    })
+    validateWorksheetBytes(converted.pdf, '.pdf')
+    const entry = await writeOfficePdf(relativePath, format, converted.pdf)
+    const source = { path: relativePath, size: info.size, mtimeMs: Math.round(info.mtimeMs), engine: converted.engine, convertedAt: new Date().toISOString() }
+    await mutateFamdCompanion(entry.relativePath, () => ({ payload: { officeSource: source } }))
+    if (linked) {
+      // The earlier conversion keeps its ink; it just stops being what the Office file opens.
+      await mutateFamdCompanion(linked.pdfPath, () => ({ payload: { officeSource: undefined } })).catch(() => {})
+    }
+    return { pdfPath: entry.relativePath, created: true, changed: false, engine: converted.engine, fallback: converted.fallback === true }
+  }
+
+  handle(IPC.importOfficeDocument, async (_event, rawPath, options) => {
+    const key = typeof rawPath === 'string' ? rawPath : ''
+    const reconvert = options?.reconvert === true
+    const running = !reconvert && officeJobs.get(key)
+    if (running) return running
+    const job = importOfficeDocument(rawPath, { reconvert })
+    officeJobs.set(key, job)
+    try {
+      return await job
+    } finally {
+      if (officeJobs.get(key) === job) officeJobs.delete(key)
+    }
+  })
+
+  handle(IPC.readOfficeSource, async (_event, rawPath) => {
+    await ensureBootstrap()
+    if (typeof rawPath !== 'string' || !isPdfNoteExtension(path.extname(rawPath).toLocaleLowerCase('en-US'))) return null
+    const pdfPath = normalizeRelativePath(rawPath).split(path.sep).join('/')
+    const source = await readOfficeSourceOf(pdfPath)
+    if (!source) return null
+    let info = null
+    try {
+      const { target } = await resolveVaultPath(source.path, { allowMissing: true, expected: 'file' })
+      info = await fsp.lstat(target)
+    } catch { info = null }
+    return { sourcePath: source.path, engine: source.engine, fallback: source.engine === 'builtin', missing: !info?.isFile(), changed: info?.isFile() ? officeSourceChanged(source, info) : false }
+  })
 
   handle(IPC.importWorksheetFromData, async (_event, payload) => {
     await ensureBootstrap()

@@ -169,3 +169,4 @@ check-famd.cjs
 check-famd-v2.cjs
 check-famd-open.cjs
 check-onenote-images.cjs
+check-office-to-pdf.mjs

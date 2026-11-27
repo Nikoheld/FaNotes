@@ -2,6 +2,7 @@ import { parseNoteBackups, serializeNoteBackups, type NoteBackupSnapshot } from 
 import { parseNoteLinks, serializeNoteLinks, type NoteLinkRecord } from './noteLink'
 import { parseNoteTextFields, parseNoteTextFieldTombstones, type NoteTextField, type NoteTextFieldTombstone } from './noteTextField'
 import { annotationsHaveContent, parseAnnotations, type NoteAnnotation } from '../../electron/noteAnnotation.mjs'
+import { parseOfficeSource, type OfficeSource } from '../../electron/officeSource.mjs'
 import { parsePageStats, type PageStats } from './pageStats'
 import { isPaperStyle } from './paperStyles'
 import type { PaperStyle } from '../types'
@@ -39,6 +40,8 @@ export type FamdPayload = {
   textFieldTombstones?: NoteTextFieldTombstone[]
   /** Study annotations (callouts, stamps, reference images ...). Versions before them drop this key on save. */
   annotations?: NoteAnnotation[]
+  /** Office file this PDF note was converted from (desktop). Older versions drop it on save. */
+  officeSource?: OfficeSource
 }
 
 export const isNoteFileName = (name: string) => (
@@ -113,6 +116,7 @@ const payloadFromParsed = (parsed: Partial<FamdPayload> & { schema?: string } | 
   const textFields = parseNoteTextFields(parsed.textFields)
   const textFieldTombstones = parseNoteTextFieldTombstones(parsed.textFieldTombstones)
   const annotations = parseAnnotations(parsed.annotations)
+  const officeSource = parseOfficeSource(parsed.officeSource)
   return {
     schema: FAMD_SCHEMA,
     updatedAt,
@@ -125,6 +129,7 @@ const payloadFromParsed = (parsed: Partial<FamdPayload> & { schema?: string } | 
     ...(textFields.length ? { textFields } : {}),
     ...(textFieldTombstones.length ? { textFieldTombstones } : {}),
     ...(annotations.length ? { annotations } : {}),
+    ...(officeSource ? { officeSource } : {}),
   }
 }
 
@@ -302,6 +307,8 @@ export const serializeFamd = (markdown: string, payload: FamdPayload, encoding?:
   if (textFieldTombstones.length) next.textFieldTombstones = textFieldTombstones
   const annotations = parseAnnotations(payload.annotations)
   if (annotations.length) next.annotations = annotations
+  const officeSource = parseOfficeSource(payload.officeSource)
+  if (officeSource) next.officeSource = officeSource
   if (encoding === 'v2') return encodeV2Document(body, next)
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`

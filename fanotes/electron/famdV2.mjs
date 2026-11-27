@@ -394,6 +394,7 @@ const encodeV2Document = (body, payload) => {
   if (Array.isArray(payload.textFields) && payload.textFields.length) stored.textFields = payload.textFields
   if (Array.isArray(payload.textFieldTombstones) && payload.textFieldTombstones.length) stored.textFieldTombstones = payload.textFieldTombstones
   if (Array.isArray(payload.annotations) && payload.annotations.length) stored.annotations = payload.annotations
+  if (payload.officeSource) stored.officeSource = payload.officeSource
   const json = JSON.stringify(stored)
   const header = `<!-- fanotes-famd:v2 chars=${json.length} crc=${crcHex(json)} -->\n`
   const text = typeof body === 'string' ? body : ''
