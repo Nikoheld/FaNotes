@@ -138,3 +138,17 @@ test('home page images declare dimensions and below-the-fold ones are lazy', () 
   for (const img of imgs) assert.match(img, /\bwidth="\d+"/u), assert.match(img, /\bheight="\d+"/u)
   for (const img of imgs.filter((i) => i.includes('/assets/screens/') && !i.includes('fetchpriority="high"'))) assert.match(img, /loading="lazy"/u)
 })
+
+test('every Kanti+ web view path is served as the page and kept out of the index', () => {
+  const conf = readFileSync(join(root, 'deploy/schulnetz-fasrv.conf'), 'utf8')
+  const routes = readFileSync(join(root, 'kanti-web/src/lib/route.ts'), 'utf8')
+  const paths = [...routes.matchAll(/^\s+\w+: '\/([a-z/-]+)',$/gmu)].map((match) => match[1])
+  assert.ok(paths.length >= 10, 'route.ts lists the view paths')
+  const page = /location ~ \^\/\(([^)]+)\)\/\?\$ \{\n        expires -1;\n        try_files \/index\.html =404;/u.exec(conf)
+  const noindex = /"~\^\/\(([^)]+)\)\/\?\(\\\?\|\$\)" "noindex, nofollow";/u.exec(conf)
+  assert.ok(page && noindex, 'the view location and the noindex map exist')
+  for (const path of [...paths, 'admin/stundenplan']) {
+    assert.ok(page[1].split('|').includes(path), `/${path} is served as the page`)
+    assert.ok(noindex[1].split('|').includes(path), `/${path} is noindex`)
+  }
+})
