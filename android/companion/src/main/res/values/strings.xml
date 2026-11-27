@@ -916,6 +916,22 @@
         <item quantity="one">%d new grade – tap to reveal</item>
         <item quantity="other">%d new grades – tap to reveal</item>
     </plurals>
+    <plurals name="upload_done">
+        <item quantity="one">%d file uploaded</item>
+        <item quantity="other">%d files uploaded</item>
+    </plurals>
+    <plurals name="upload_part_done">
+        <item quantity="one">%d uploaded</item>
+        <item quantity="other">%d uploaded</item>
+    </plurals>
+    <plurals name="upload_part_large">
+        <item quantity="one">%d too large (over 96 MB)</item>
+        <item quantity="other">%d too large (over 96 MB)</item>
+    </plurals>
+    <plurals name="upload_part_failed">
+        <item quantity="one">%d could not be uploaded</item>
+        <item quantity="other">%d could not be uploaded</item>
+    </plurals>
     <plurals name="note_count">
         <item quantity="one">%d note</item>
         <item quantity="other">%d notes</item>
@@ -1036,11 +1052,10 @@
     <string name="problem_image">Image could not be read</string>
     <string name="problem_pending">Waiting to be read</string>
     <string name="doc_problem_pages">Pages %1$s</string>
-    <string name="import_document">Import PDF or image</string>
-    <string name="imported_for_search">Imported. Kanti+ reads it for search.</string>
-    <string name="import_too_large">Files over 96 MB cannot be imported.</string>
+    <string name="upload_files">Upload files</string>
+    <string name="upload_here">Upload here</string>
+    <string name="upload_large_one">“%1$s” is larger than 96 MB and was not uploaded.</string>
     <string name="import_unreadable">The file could not be read.</string>
-    <string name="import_unsupported">Only PDFs and images can be imported.</string>
     <string name="doc_hit_banner">Match on page %1$d</string>
     <string name="doc_hit_banner_label">Match in %1$s</string>
     <string name="doc_highlight_unavailable">The exact spot cannot be marked on this page.</string>
@@ -1508,6 +1523,7 @@
     <string name="kind_image">Image</string>
     <string name="kind_audio">Audio</string>
     <string name="kind_video">Video</string>
+    <string name="kind_file">File</string>
     <string name="kind_story">Story</string>
     <string name="story_readonly_title">Read-only story</string>
     <string name="story_readonly_body">Stories are written in FaNotes on a computer. Kanti+ shows them read-only.</string>

@@ -24,6 +24,11 @@ import ch.fasrv.fanotes.desk.emptyCalendar
 import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.ink.newInkDocument
 import ch.fasrv.fanotes.vault.fileKindOf
+import ch.fasrv.fanotes.vault.FileTooLargeException
+import ch.fasrv.fanotes.vault.UPLOAD_MAX_BYTES
+import ch.fasrv.fanotes.vault.UploadSummary
+import ch.fasrv.fanotes.vault.isNotePath
+import ch.fasrv.fanotes.vault.readBounded
 import ch.fasrv.fanotes.schulnetz.DiagnosticTrace
 import ch.fasrv.fanotes.schulnetz.diagnosticSyncKey
 import ch.fasrv.fanotes.schulnetz.diagnosticAlertStatus
@@ -260,8 +265,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         navigate(Page.File)
     }
     fun openNote(path: String, target: DocTarget? = null) {
-        // Only a note has an editor. Media and story folders have their own viewer and are never read as text.
-        if (fileKindOf(path) != null || ch.fasrv.fanotes.vault.StoryFiles.isStoryFolder(path)) { openFile(path); return }
+        // Only a note has an editor. Media, other files and story folders have their own viewer and are never read as text.
+        if (!isNotePath(path)) { openFile(path); return }
         editorTarget = target
         editorPath = path
         editor = NoteEditorController(graph, viewModelScope, path, beforeParse = ::releaseListMemory)
@@ -1320,29 +1325,58 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
     suspend fun searchDocuments(query: String): List<DocHit> = graph.docSearch.search(query)
 
-    /** Copies a picked PDF or image into the current folder as a note; the original file is untouched. */
-    fun importDocument(context: Context, uri: android.net.Uri) = perform(t(R.string.imported_for_search)) {
-        val resolver = context.contentResolver
-        val mime = resolver.getType(uri).orEmpty()
-        val name = resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(0) else null
-        } ?: "Import"
-        val bytes = resolver.openInputStream(uri)?.use { input ->
-            val out = java.io.ByteArrayOutputStream()
-            val buffer = ByteArray(64 * 1024)
-            var total = 0L
-            while (true) {
-                val read = input.read(buffer); if (read < 0) break
-                total += read
-                if (total > 96L * 1024 * 1024) throw IllegalStateException(t(R.string.import_too_large))
-                out.write(buffer, 0, read)
+    /**
+     * Stores the picked files in [folder] (default: the open folder). A PDF becomes a PDF note; every other
+     * type is copied as a plain file under its own name, streamed to disk. One file failing never stops the rest;
+     * a single message sums it up, and sync is nudged once at the end.
+     */
+    fun uploadFiles(context: Context, uris: List<android.net.Uri>, folder: String = noteFolder) {
+        if (uris.isEmpty()) return
+        var summary: UploadSummary? = null
+        perform(onSuccess = { summary?.let { message = uploadMessage(it) } }) {
+            val resolver = context.contentResolver
+            var uploaded = 0
+            val tooLarge = mutableListOf<String>()
+            val failed = mutableListOf<String>()
+            for (uri in uris) {
+                var name = "File"
+                var size = -1L
+                try {
+                    resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE), null, null, null)?.use { c ->
+                        if (c.moveToFirst()) {
+                            c.getString(0)?.takeIf { it.isNotBlank() }?.let { name = it }
+                            if (!c.isNull(1)) size = c.getLong(1)
+                        }
+                    }
+                    if (size > UPLOAD_MAX_BYTES) { tooLarge += name; continue }
+                    val input = resolver.openInputStream(uri) ?: throw java.io.IOException("unreadable")
+                    input.use {
+                        val isPdf = resolver.getType(uri) == "application/pdf" || name.endsWith(".pdf", true)
+                        if (isPdf) graph.store.importUniquePdf(folder, name, readBounded(it, UPLOAD_MAX_BYTES))
+                        else graph.store.importFile(folder, name, it, UPLOAD_MAX_BYTES)
+                    }
+                    uploaded += 1
+                } catch (error: FileTooLargeException) {
+                    tooLarge += name
+                } catch (error: Exception) {
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    failed += name
+                }
             }
-            out.toByteArray()
-        } ?: throw IllegalStateException(t(R.string.import_unreadable))
-        if (mime == "application/pdf" || name.endsWith(".pdf", true)) graph.store.importUniquePdf(noteFolder, name, bytes)
-        else if (mime.startsWith("image/")) graph.store.importImageWorksheet(noteFolder, name, bytes, mime)
-        else throw IllegalStateException(t(R.string.import_unsupported))
-        graph.engine.notifyLocalChange()
+            if (uploaded > 0) graph.engine.notifyLocalChange()
+            summary = UploadSummary(uploaded, tooLarge, failed)
+        }
+    }
+
+    private fun uploadMessage(summary: UploadSummary): String {
+        val (uploaded, tooLarge, failed) = summary
+        if (tooLarge.isEmpty() && failed.isEmpty()) return tp(R.plurals.upload_done, uploaded, uploaded)
+        if (uploaded == 0 && failed.isEmpty() && tooLarge.size == 1) return t(R.string.upload_large_one, tooLarge.first())
+        val parts = mutableListOf<String>()
+        if (uploaded > 0) parts += tp(R.plurals.upload_part_done, uploaded, uploaded)
+        if (tooLarge.isNotEmpty()) parts += tp(R.plurals.upload_part_large, tooLarge.size, tooLarge.size) + " (" + tooLarge.take(3).joinToString(", ") + ")"
+        if (failed.isNotEmpty()) parts += tp(R.plurals.upload_part_failed, failed.size, failed.size)
+        return parts.joinToString(", ")
     }
 
     fun createFolder(title: String) = perform(t(R.string.folder_created)) { graph.store.createFolder(noteFolder, title); graph.engine.notifyLocalChange() }

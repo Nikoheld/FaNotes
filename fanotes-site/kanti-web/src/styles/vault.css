@@ -84,3 +84,4 @@ span.task-main { cursor: default; }
   .notes-library { position: static; max-height: none; }
   .note-reader { padding: var(--s4); }
 }
+.note-list.drop-target { outline: 2px dashed var(--accent); outline-offset: -2px; border-radius: var(--radius-m); }

@@ -916,6 +916,22 @@
         <item quantity="one">%d neue Note – tippen zum Aufdecken</item>
         <item quantity="other">%d neue Noten – tippen zum Aufdecken</item>
     </plurals>
+    <plurals name="upload_done">
+        <item quantity="one">%d Datei hochgeladen</item>
+        <item quantity="other">%d Dateien hochgeladen</item>
+    </plurals>
+    <plurals name="upload_part_done">
+        <item quantity="one">%d hochgeladen</item>
+        <item quantity="other">%d hochgeladen</item>
+    </plurals>
+    <plurals name="upload_part_large">
+        <item quantity="one">%d zu gross (über 96 MB)</item>
+        <item quantity="other">%d zu gross (über 96 MB)</item>
+    </plurals>
+    <plurals name="upload_part_failed">
+        <item quantity="one">%d liess sich nicht hochladen</item>
+        <item quantity="other">%d liessen sich nicht hochladen</item>
+    </plurals>
     <plurals name="note_count">
         <item quantity="one">%d Notiz</item>
         <item quantity="other">%d Notizen</item>
@@ -1036,11 +1052,10 @@
     <string name="problem_image">Bild liess sich nicht lesen</string>
     <string name="problem_pending">Wartet aufs Lesen</string>
     <string name="doc_problem_pages">Seiten %1$s</string>
-    <string name="import_document">PDF oder Bild importieren</string>
-    <string name="imported_for_search">Importiert. Kanti+ liest es für die Suche.</string>
-    <string name="import_too_large">Dateien über 96 MB lassen sich nicht importieren.</string>
+    <string name="upload_files">Dateien hochladen</string>
+    <string name="upload_here">Hier hochladen</string>
+    <string name="upload_large_one">«%1$s» ist grösser als 96 MB und wurde nicht hochgeladen.</string>
     <string name="import_unreadable">Die Datei liess sich nicht lesen.</string>
-    <string name="import_unsupported">Nur PDFs und Bilder lassen sich importieren.</string>
     <string name="doc_hit_banner">Treffer auf Seite %1$d</string>
     <string name="doc_hit_banner_label">Treffer in %1$s</string>
     <string name="doc_highlight_unavailable">Die genaue Stelle lässt sich auf dieser Seite nicht markieren.</string>
@@ -1508,6 +1523,7 @@
     <string name="kind_image">Bild</string>
     <string name="kind_audio">Audio</string>
     <string name="kind_video">Video</string>
+    <string name="kind_file">Datei</string>
     <string name="kind_story">Geschichte</string>
     <string name="story_readonly_title">Geschichte (nur lesen)</string>
     <string name="story_readonly_body">Geschichten schreibst du in FaNotes am Computer. Kanti+ zeigt sie nur zum Lesen.</string>

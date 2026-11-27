@@ -58,7 +58,7 @@ class NoteTreeFilesTest {
     }
 
     @Test
-    fun includeFilesListsMediaByCaseInsensitiveExtensionAndNothingElse() {
+    fun includeFilesListsMediaByCaseInsensitiveExtensionAndOtherUserFilesAsFile() {
         val nodes = flat(NoteStore(DirectoryVault(vault())).tree(includeFiles = true)).associateBy { it.name }
         assertEquals(NoteKind.IMAGE, nodes.getValue("Foto.JPG").kind)
         assertEquals(NoteKind.IMAGE, nodes.getValue("icon.svg").kind)
@@ -68,8 +68,8 @@ class NoteTreeFilesTest {
         assertEquals(NoteKind.VIDEO, nodes.getValue("clip.webm").kind)
         assertEquals(NoteKind.VIDEO, nodes.getValue("film.mp4").kind)
         assertEquals(NoteKind.STORY, nodes.getValue("Geschichte").kind)
-        assertFalse(nodes.containsKey("data.zip"))
-        assertFalse(nodes.containsKey("notes.txt"))
+        assertEquals(NoteKind.FILE, nodes.getValue("data.zip").kind)
+        assertEquals(NoteKind.FILE, nodes.getValue("notes.txt").kind)
     }
 
     @Test
